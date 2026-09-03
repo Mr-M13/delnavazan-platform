@@ -2,40 +2,64 @@
 
 ## 1. Purpose
 
-This document defines canonical concepts and invariants. It deliberately does
-not choose final WordPress table names, column types, ORM technology, or public
-API shapes. Those physical decisions belong to an approved implementation phase.
+This document defines canonical concepts and invariants. The approved Phase 1
+storage direction is dedicated WordPress-prefixed InnoDB custom tables using
+`$wpdb->get_charset_collate()`: `{prefix}dzn_teachers`,
+`{prefix}dzn_students`, `{prefix}dzn_instruments`, `{prefix}dzn_courses`,
+`{prefix}dzn_enrolments`, `{prefix}dzn_terms`, `{prefix}dzn_lessons`,
+`{prefix}dzn_lesson_schedule_versions`,
+`{prefix}dzn_operational_exceptions`, and
+`{prefix}dzn_teacher_profile_links`. It does not authorise creating them.
+
+Application and schema versions are separate. Defined business fields use
+defined columns; generic JSON metadata columns are not a substitute for Core
+business fields. Final column types, indexes, and implementation mechanics
+belong to the approved Phase 1 implementation brief.
 
 ## 2. Shared rules
 
-- Every Core entity has a stable Delnavazan identifier that is independent of
-  WordPress and external providers.
-- Internal identifiers may be implementation-specific, but public capabilities
-  use separate opaque, revocable values.
+- Every Core entity has an internal numeric primary key and an immutable opaque
+  ULID-style UID, both independent of WordPress and external providers.
+- Operational entities use human-readable reference codes: Teacher `DZN-TCH-`,
+  Student `DZN-STU-`, Instrument `DZN-INS-`, Course `DZN-CRS-`, Enrolment
+  `DZN-ENR-`, Term `DZN-TRM-`, and Lesson `DZN-LSN-`. Numeric padding is a
+  minimum display format, not a maximum; `DZN-LSN-001842` is one example.
+  Numeric IDs, UIDs, and reference codes never authorize access.
+- Public actions use independent opaque or signed, purpose-bound, revocable
+  capabilities.
 - External identifiers are represented by mappings and are never silently used
   as Core primary keys.
 - Mutable attributes such as email, phone, display name, and username are not
   identity keys.
-- Core timestamps are stored in UTC. A source timezone and provenance are kept
-  wherever wall-clock meaning matters.
+- Canonical Lesson timestamps are stored in UTC. Teacher, Student, and recurring
+  schedules use explicit IANA timezones, retaining wall-clock intent where it
+  matters.
+- Calendar/locale presentation is separate from timezone, supports at least
+  Gregorian and Persian/Jalali, and never changes a canonical instant.
 - Normal operational deletion uses soft archive. Permanent deletion follows an
   explicit retention and authorization policy.
-- Every imported record retains provenance and can be reconciled repeatedly.
-- Created/updated/imported/archived timestamps and actor/source metadata are
-  auditable.
+- Required provider provenance is retained only for an explicit operational,
+  audit, or support purpose.
+- Created, updated, archived, merged, linked, and corrected actions retain
+  auditable actor/source metadata.
 
 ## 3. Relationship overview
 
 ```text
-Teacher 1 ──────── * Term / Enrolment * ──────── 1 Student
-                             │
-                             │ 1
-                             │
-                             * Lesson
-                               ├── 0..1 Attendance aggregate
-                               ├── 0..* Attendance evidence items
-                               ├── 0..* Notifications
-                               └── 0..* Legacy / provider references
+Instrument 1 ─── * Course 1 ─── * Enrolment * ─── 1 Student
+                                  │
+Teacher 1 ────────────────────────┘
+                                  │
+                                  * Term
+                                  │
+                                  * standard/replacement Lesson
+                                    ├── 0..1 Attendance aggregate
+                                    ├── 0..* Schedule Versions
+                                    ├── 0..* Notifications
+                                    └── 0..* Legacy / provider references
+
+Student 1 ─── 0..* introductory Lesson (no Enrolment or Term required)
+Any Core entity 1 ─── 0..* OperationalException
 
 Teacher 1 ──────── 0..* GoogleConnection
 Teacher 1 ──────── 0..1 optional Hamnavaz Profile link
@@ -52,11 +76,12 @@ account, Amelia employee, WordPress user, or Hamnavaz profile.
 
 ### Conceptual attributes
 
-- `teacher_id` — stable Core identity;
+- internal numeric primary key, immutable opaque ULID-style `teacher_uid`, and
+  required `DZN-TCH-` human reference code;
 - preferred/display name and normalized administrative name components;
 - primary contact points needed for academy operations;
-- locale and timezone with provenance;
-- lifecycle state, such as active, inactive, or archived;
+- locale, calendar preference, and explicit IANA timezone with provenance;
+- lifecycle state: `active`, `inactive`, or `archived`;
 - created, updated, and archived audit metadata.
 
 Provider accounts and WordPress users are mappings. Sensitive contact data is
@@ -65,8 +90,11 @@ not automatically public.
 ### Invariants
 
 - A Teacher survives a changed email or replaced Amelia employee record.
-- Merging duplicate teachers is explicit, audited, and redirects mappings to one
-  survivor; it is never inferred from name alone.
+- Matching data may suggest a duplicate but never merges Teachers automatically.
+  A merge is an explicit, administrator-authorized, audited action that redirects
+  approved mappings to one survivor.
+- Academy teachers default to country Iran, `Asia/Tehran`, and Persian
+  locale/calendar; an authorized user may change each value.
 - Academy operational state stays separate from the Hamnavaz listing lifecycle.
 - A teacher may have multiple historical provider references and Google
   connections, but only approved active connections may be used.
@@ -80,11 +108,14 @@ WordPress authentication.
 
 ### Conceptual attributes
 
-- `student_id` — stable Core identity;
+- internal numeric primary key, immutable opaque ULID-style `student_uid`, and
+  required `DZN-STU-` human reference code;
 - preferred/display and administrative name fields;
 - private contact channels;
-- locale and explicit timezone with provenance;
-- lifecycle/consent state needed for academy operation;
+- human-readable country and city, stored separately from resolved timezone;
+- locale, calendar preference, and explicit IANA timezone with provenance;
+- lifecycle state: `active`, `inactive`, or `archived`; consent state remains
+  separate;
 - optional portal-account link;
 - created, updated, and archived audit metadata.
 
@@ -92,51 +123,117 @@ WordPress authentication.
 
 - A Student survives a changed email, phone, Stripe customer, Amelia customer,
   or WordPress user.
-- Duplicate detection may propose matches but does not silently merge records.
+- Duplicate detection may propose matches but never merges records
+  automatically. A merge requires an explicit, administrator-authorized,
+  audited action.
 - Stripe and Amelia mappings do not grant portal or record access.
 - Notification consent and channel deliverability are separate from identity.
+- Changing a Student timezone through Profile/Preferences changes display only;
+  it never reschedules an existing Lesson or changes a recurring schedule.
 
-## 6. Term / Enrolment
+## 6. Instrument
 
 ### Responsibility
 
-Represents the educational relationship between one Student and one Teacher for
-an approved course/instrument context and allocation period. “Enrolment” is the
-durable relationship; “Term” is the bounded allocation/lifecycle within that
-relationship. Phase 1 may implement them as one aggregate initially if it keeps
-those semantics explicit.
+Represents shared Delnavazan reference data for a musical instrument. Instrument
+identity is not owned by an Amelia service, an Academy Course, or a Hamnavaz
+taxonomy term, although explicit mappings may connect them.
+
+### Minimum conceptual attributes
+
+- internal numeric primary key, immutable opaque ULID-style UID, and required
+  `DZN-INS-` human reference code;
+- canonical display name and normalized administrative key;
+- lifecycle/archive and audit metadata.
+
+## 7. Course
+
+### Responsibility
+
+Represents the Academy teaching product. A Course references one Instrument and
+is the catalogue item selected by an Enrolment. Phase 1 keeps its fields minimal
+and does not mirror Amelia service configuration.
+
+### Minimum conceptual attributes
+
+- internal numeric primary key, immutable opaque ULID-style UID, and required
+  `DZN-CRS-` human reference code;
+- required `name_fa` and `name_en`;
+- required `instrument_id`;
+- required `course_type` (`standard` or `introductory`);
+- required `status` (`active`, `inactive`, or `archived`);
+- required `default_duration_minutes` and `default_buffer_minutes`;
+- audit/archive metadata.
+
+Pricing, location, Stripe information, curriculum, and teacher-specific
+commercial configuration are not Phase 1 Course fields.
+
+## 8. Enrolment
+
+### Responsibility
+
+Represents the continuing relationship between one Student, one Teacher, and one
+Course. It is independent of any single payment, renewal cycle, or lesson block.
 
 ### Conceptual attributes
 
-- `enrolment_id` and, if separated, `term_id`;
+- internal numeric primary key, immutable opaque ULID-style `enrolment_uid`,
+  and required `DZN-ENR-` human reference code;
 - `student_id` and `teacher_id`;
-- course, instrument, or service reference owned by Academy;
-- allocated lesson count and consumption policy;
-- start/end dates and source timezone where applicable;
-- lifecycle state;
-- commercial/payment state references without storing provider identity as
-  authority;
+- required `course_id`;
+- start date and optional end date;
+- lifecycle state: `draft`, `active`, `paused`, `ending`, `completed`,
+  `cancelled`, or `archived`;
 - created, updated, archived, and decision provenance.
 
 ### Invariants
 
-- A Term / Enrolment belongs to exactly one Student and one Teacher at a time.
+- An Enrolment belongs to exactly one Student, one Teacher, and one Course at a
+  time.
 - Reassignment creates an audited transition rather than rewriting history.
+- A new Term does not create a new Enrolment when the continuing relationship is
+  unchanged.
+
+## 9. Term
+
+### Responsibility
+
+Represents one bounded lesson-allocation, payment, and renewal cycle within an
+Enrolment. Enrolment and Term are separate first-class entities from Phase 1.
+
+### Conceptual attributes
+
+- internal numeric primary key, immutable opaque ULID-style `term_uid`, and
+  required `DZN-TRM-` human reference code;
+- required `enrolment_id`;
+- allocated lesson count and consumption policy;
+- start/end dates and lifecycle state: `draft`, `awaiting_payment`, `active`,
+  `completed`, `cancelled`, or `archived`;
+- created, updated, archived, and decision provenance.
+
+### Invariants
+
+- A Term belongs to exactly one Enrolment.
 - Lesson allocation and payment state are related but distinct; payment does not
   create a Lesson directly.
 - Remaining-session calculations come from explicit allocation and canonical
   Lessons, not an untraceable provider count.
 - Introductory/trial teaching is modelled explicitly rather than permanently
   depending on Amelia category ID `3`.
+- Standard allocation defaults to 12 Lessons and two eligible replacement
+  Lessons per Term. These are policy defaults, not immutable database constants.
+- An eligible replacement belongs to the same Term and must be scheduled and
+  used before that Term closes. Unused entitlement expires at closure and does
+  not carry into the next Term without an explicit, audited administrator
+  override.
 
-### Candidate lifecycle
+### Candidate lifecycles
 
-`draft → active → completed`
+Enrolment and Term each have their own approved lifecycle above. There is no
+combined Enrolment/Term status. Future migrations may deliberately extend the
+initial vocabulary.
 
-With explicit branches for `paused`, `cancelled`, and `archived`. Final names and
-transition rules require product-owner approval before implementation.
-
-## 7. Lesson
+## 10. Lesson
 
 ### Responsibility
 
@@ -145,13 +242,19 @@ attendance, notifications, Google evidence, finance, and reporting.
 
 ### Conceptual attributes
 
-- `lesson_id` — stable Core identity;
-- `enrolment_id` / `term_id`;
-- participating `teacher_id` and `student_id` derived from the approved
-  enrolment relationship;
+- internal numeric primary key, immutable opaque ULID-style `lesson_uid`, and
+  required `DZN-LSN-` human reference code;
+- required `lesson_type`, constrained to the initial types `introductory`,
+  `standard`, and `replacement`;
+- nullable `enrolment_id` and `term_id` for an `introductory` Lesson; required
+  for a `standard` Lesson and normally required for a `replacement` Lesson;
+- required direct `student_id`, `teacher_id`, and `course_id` on every Lesson;
+  these preserve the operational/historical identity of the occurrence;
 - canonical `starts_at_utc` and `ends_at_utc`;
 - source timezone and wall-clock provenance;
-- scheduling lifecycle and reschedule/version history;
+- scheduling lifecycle and append-only reschedule/version history;
+- required `replacement_for_lesson_id` for a `replacement` Lesson; absent for
+  other initial Lesson types;
 - sequence/allocation position where applicable;
 - delivery mode and provider-neutral join-resource reference;
 - created, updated, cancelled, completed, and archived audit metadata.
@@ -159,11 +262,25 @@ attendance, notifications, Google evidence, finance, and reporting.
 ### Invariants
 
 - A Lesson can exist before any provider appointment is created.
+- An `introductory` Lesson may exist for a Core Student before that Student has
+  an Enrolment or Term. Its direct `student_id`, `teacher_id`, and `course_id`
+  identify the occurrence.
+- A `standard` Lesson requires its Enrolment and Term. A `replacement` Lesson
+  normally uses that same Enrolment/Term and must explicitly link to the
+  original Lesson through `replacement_for_lesson_id`.
+- On creation of a standard or replacement Lesson, the service layer validates
+  that its direct `student_id`, `teacher_id`, and `course_id` match the selected
+  Enrolment. Those direct Lesson references are not subsequently derived from,
+  or rewritten by, Enrolment changes.
 - Scheduling state is separate from Attendance outcome, Notification delivery,
   and Finance payability.
-- Rescheduling records the prior schedule and invalidates or rotates affected
-  public capabilities; it does not rewrite evidence already tied to an earlier
-  occurrence without an audited correction.
+- Normal rescheduling preserves Lesson identity, appends the prior schedule to
+  audited history, and invalidates or rotates affected public capabilities. It
+  does not rewrite evidence tied to an earlier occurrence without an audited
+  correction.
+- A genuine replacement or make-up occurrence may be a new Lesson explicitly
+  linked to the original; it is not created implicitly by an ordinary time
+  change.
 - Cancellation preserves the Lesson and its source/provider history.
 - External appointments/customer bookings map to a Lesson through
   `LegacyReference`; their IDs are not accepted as authorization.
@@ -171,12 +288,34 @@ attendance, notifications, Google evidence, finance, and reporting.
 
 ### Candidate scheduling lifecycle
 
-At minimum the model must distinguish planned/scheduled, rescheduled, cancelled,
-and completed occurrences. Whether `rescheduled` is a state or an event with a
-new schedule version is a Phase 1 design decision. Attendance states do not
-appear in this lifecycle.
+Lesson states are `draft`, `scheduled`, `cancelled`, `completed`, and `archived`.
+`rescheduled` is an audited event/history fact, not a persistent Lesson state.
+Attendance states do not appear in this lifecycle.
 
-## 8. Attendance
+## 11. Lesson Schedule Version
+
+Normal rescheduling preserves the same Lesson identity. Schedule history is
+append-only in `{prefix}dzn_lesson_schedule_versions`.
+
+### Required conceptual attributes
+
+- `lesson_id` and monotonically increasing `version_number`;
+- `starts_at_utc`, `ends_at_utc`, and `schedule_timezone`;
+- `local_wall_date` and `local_wall_time`;
+- `reason`, `changed_by`, `created_at`, and `superseded_at`.
+
+### Invariants
+
+- Exactly one schedule version is current for a Lesson.
+- Changing a Student personal timezone changes display only; it never rewrites a
+  schedule version or an Enrolment recurring schedule timezone.
+- A genuine replacement/make-up occurrence is a new Lesson with
+  `replacement_for_lesson_id`, not an ordinary schedule-version change.
+
+Finance rate/currency snapshots and audited financial corrections remain future
+Platform Phase 9 Finance responsibilities. They are not Phase 1 Lesson fields.
+
+## 12. Attendance
 
 ### Responsibility
 
@@ -209,7 +348,7 @@ clicks, and manual decisions do not overwrite one another.
 - A provider or notification failure cannot undo an accepted absence report.
 - Manual correction records actor, time, prior outcome, new outcome, and reason.
 
-## 9. Notification
+## 13. Notification
 
 ### Responsibility
 
@@ -246,7 +385,7 @@ already advanced state while still retaining the raw event for audit.
 - Only known provider message IDs can update a Notification.
 - Templates and parameters never contain secrets.
 
-## 10. GoogleConnection
+## 14. GoogleConnection
 
 ### Responsibility
 
@@ -278,12 +417,14 @@ Represents renewable, revocable Google authorization for a Core Teacher.
   and records whether it succeeded; support policy defines safe handling when the
   provider is unavailable.
 
-## 11. LegacyReference
+## 15. External and legacy references
 
 ### Responsibility
 
-Provides traceable, idempotent mapping between external/legacy records and Core
-entities without promoting provider IDs into business identity.
+Provides traceable mapping between external/legacy records and Core entities
+without promoting provider IDs into business identity. It is a later
+provider-specific integration concern, not Phase 1 persistence and not an Amelia
+import pipeline.
 
 ### Conceptual attributes
 
@@ -293,23 +434,33 @@ entities without promoting provider IDs into business identity.
 - Core entity type and Core entity ID;
 - source version or account/tenant scope where necessary;
 - first/last observed timestamps;
-- source updated timestamp and safe fingerprint/import hash;
-- import run/checkpoint and mapping provenance;
-- active, superseded, conflicted, or retired state;
+- mapping source, actor, reason, and created/updated timestamps;
+- active, superseded, or retired state;
 - optional redacted diagnostic, never a secret-bearing raw payload.
 
 ### Invariants
 
 - The scoped `(provider, external_type, external_id)` mapping is unique unless an
   explicit historical-version policy says otherwise.
-- Re-import updates the same mapping or records a conflict; it never creates an
-  unbounded duplicate Core entity.
 - A mapping cannot by itself authorize a user or public action.
-- Conflicts require deterministic reporting and human review.
+- A mapping candidate cannot auto-create or merge a Core identity. Conflicts
+  require explicit administrator review.
 - Legacy references remain queryable after a provider is retired for audit and
   support.
 
-## 12. Hamnavaz profile relationship
+## 16. Operational Exception
+
+`OperationalException` represents a failure or ambiguity that requires human
+judgement. Its approved states are `open`, `acknowledged`, `resolved`, and
+`dismissed`.
+
+The platform principle is: **Automate the happy path. Surface failures and
+ambiguity. Require human intervention only where judgement is needed.**
+
+Administration is primarily exception management, not routine booking
+operation. Normal form-validation errors are not Operational Exceptions.
+
+## 17. Hamnavaz profile relationship
 
 ```text
 Core Teacher
@@ -321,22 +472,24 @@ The link is optional in both workflows:
 - an academy Teacher may have no public directory profile;
 - a Hamnavaz directory teacher may have no academy/Core Teacher.
 
-The link must be explicitly confirmed and must not be inferred from matching
-name, email, phone, or WordPress author. Where present it is one-to-one unless a
-future product decision deliberately permits historical/superseded profiles.
+The link must be explicitly confirmed by an authorized administrator and audited.
+It must not be inferred from matching name, email, phone, or WordPress author;
+those fields may only suggest a candidate. Where present it is one-to-one.
+Linking or unlinking does not create or delete either identity.
 
 Core retains academy identity and operational contact. Hamnavaz retains public
 name/biography/media, discovery taxonomies, Country → normalized City →
 Instrument filtering data, public contacts, listing status, verification state,
 directory commercial information, and SEO presentation.
 
-## 13. State separation matrix
+## 18. State separation matrix
 
 | Concern | Owning model/module | Example states |
 | --- | --- | --- |
 | Lesson scheduling | Lesson / Core or Academy service | scheduled, cancelled, completed |
 | Attendance outcome | Attendance | pending, absence reported, attended, review needed, no-show |
 | Notification delivery | Notification | requested, accepted, delivered, failed |
+| Operational exception | OperationalException | open, acknowledged, resolved, dismissed |
 | Payability | Finance record/policy | pending, payable, non-payable, overridden |
 | Archive | Each owning aggregate | active, archived |
 | Hamnavaz publication | Hamnavaz Profile | draft, active, verification due, on hold, archived |
@@ -344,32 +497,32 @@ directory commercial information, and SEO presentation.
 One state change may emit events used by other modules, but it does not directly
 overwrite their state.
 
-## 14. Import and compatibility rules
+## 19. Manual setup and coexistence rules
 
-- Amelia remains the source of truth during read-only import phases.
-- Store both Amelia appointment and customer-booking references when required;
-  one is not a substitute for the other.
-- Imported timestamps are normalized to UTC while retaining source timezone and
-  raw source timestamp where needed for parity.
-- Repeat import must be idempotent and produce counts for created, updated,
-  unchanged, conflicted, skipped, and failed records.
-- Source deletions/cancellations create a traceable state transition; they do not
-  erase completed Core history.
-- Import does not grant portal access, send notifications, charge payments, or
-  write back to Amelia.
+- Phase 2 manually creates and validates the small initial catalogue, active
+  identities, Enrolments, Terms, and required Lessons.
+- Introductory Lessons may be created for active Students before an Enrolment or
+  Term exists; standard and replacement Lessons use the applicable relationship.
+- Manual setup records actor, source/provenance where needed, validation outcome,
+  and counts without introducing an Amelia importer or synchronizer.
+- Existing Amelia-dependent runtime functionality remains in Delnavazan
+  Enhancements until its bounded replacement phase transfers authority.
+- New Core code does not query Amelia or acquire an Amelia data-model dependency.
+- Historical Amelia data may be exported to an access-controlled, read-only
+  archive outside operational Core under an approved retention procedure.
+- Historical source cancellation or deletion never erases completed Core
+  business history.
+- Manual mapping never grants portal access, sends notifications, charges
+  payments, or authorizes a public action.
 
-## 15. Product decisions required before physical schema approval
+## 20. Approved direction and remaining design work
 
-1. Final Teacher and Student duplicate-resolution/merge policy.
-2. Whether Term and Enrolment are separate records in the first schema or one
-   aggregate with explicit term allocation.
-3. Course/instrument catalogue ownership and versioning.
-4. Final scheduling and enrolment lifecycle vocabulary, state names, and
-   transition authority.
-5. Reschedule history model and treatment of provider appointment replacements.
-6. Canonical customer timezone capture, override, and fallback policy.
-7. Financial rate/currency snapshot point and manual override audit rules.
-8. Google disconnect-versus-revoke support policy and token-retention period.
-9. Data retention periods for attendance evidence, provider snapshots,
-   notifications, and archived identities.
-10. One-to-one Core Teacher/Hamnavaz Profile linking workflow and conflict UI.
+The binding decisions are recorded in
+[PRODUCT-DECISIONS.md](PRODUCT-DECISIONS.md). Remaining physical or workflow
+choices include:
+
+1. Retention durations and anonymization rules by data class.
+2. Google failed-revoke support policy and token-retention period.
+3. Historical Amelia archive format, storage, access, and inspection procedure.
+4. Platform Phase 9 Finance physical tables and audited correction implementation.
+5. Later provider-specific integration schemas.

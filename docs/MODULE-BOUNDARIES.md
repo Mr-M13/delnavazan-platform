@@ -28,8 +28,9 @@ Core never depends on those implementations.
 - stable Teacher and Student identities;
 - canonical Lesson identity and minimum lifecycle foundation;
 - stable identifiers and audit metadata;
+- Operational Exception lifecycle and exception-management conventions;
 - schema/data migration coordinator;
-- LegacyReference contract and mapping integrity;
+- external/legacy-reference contract and mapping integrity;
 - domain event envelope, idempotency contract, and durable publication boundary;
 - common clock, actor, transaction, and archive conventions.
 
@@ -54,7 +55,7 @@ Core never depends on those implementations.
 
 - Enrolment and Term educational relationships;
 - lesson allocation/consumption policy;
-- course/instrument/service catalogue rules approved for academy use;
+- shared Instrument references and minimal Academy Course catalogue rules;
 - term lifecycle and remaining-session facts;
 - introductory/trial classification at the business level.
 
@@ -153,7 +154,7 @@ Core never depends on those implementations.
 ### Owns
 
 - payability policy and audited overrides;
-- teacher rate/currency snapshots;
+- effective-dated teacher rates and per-Lesson rate/currency snapshots;
 - statement/report calculations;
 - finance-specific reconciliation and read models;
 - references to Stripe payment facts where applicable.
@@ -163,7 +164,7 @@ Core never depends on those implementations.
 - Core Teacher, Student, Lesson, and Term identities;
 - final Attendance outcomes;
 - provider-neutral payment facts from Stripe integration;
-- LegacyReference during parity reporting.
+- approved external/legacy references during controlled reconciliation.
 
 ### Must not
 
@@ -224,21 +225,23 @@ Core never depends on those implementations.
 
 ### Owns
 
-- read-only Amelia access during early migration;
-- typed translation of legacy records/events into import commands;
-- idempotent import checkpoints, source fingerprints, and conflict reports;
-- shadow comparison between legacy and Core outcomes;
-- transitional Amelia session/notification hook bridges.
+- narrowly scoped transitional runtime bridges when a replacement phase cannot
+  yet remove an existing Amelia dependency;
+- translation of explicitly supported legacy runtime events into versioned Core
+  commands/events;
+- temporary Amelia session/notification hook bridges owned outside Core.
 
 ### May use
 
-- Amelia tables/APIs/hooks with the minimum approved read scope;
-- Core import/mapping services;
+- Amelia tables/APIs/hooks only when a later bounded runtime-replacement brief
+  explicitly requires that temporary bridge;
+- explicit Core application services without exposing Amelia-shaped models;
 - explicit feature flags and cutover configuration.
 
 ### Must not
 
 - become a permanent domain layer;
+- become a general Amelia importer, synchronizer, or parity engine;
 - write to Amelia unless a later phase explicitly authorises one narrow path;
 - allow Core to call back into Amelia;
 - silently merge Core people;
@@ -249,7 +252,8 @@ Core never depends on those implementations.
 
 | Caller | Allowed boundary | Example |
 | --- | --- | --- |
-| Legacy Amelia Adapter | Core import/mapping service | Upsert a source observation for an Amelia customer booking and resolve its Core mapping |
+| Phase 2 administrator setup | Core application services | Manually create and validate the approved catalogue, identities, Enrolments, Terms, and required Lessons |
+| Academy | Core exception service | Surface an ambiguity requiring human judgement without treating a normal validation error as an exception |
 | Academy | Core lesson command service | Allocate and schedule a Lesson for an approved Enrolment |
 | Attendance | Core lesson read service | Confirm participants and schedule for an attendance evaluation |
 | Attendance | Google evidence port | Request normalized conference/participant intervals for a Lesson |
@@ -307,14 +311,15 @@ Reconciliation selects due Core Lesson
   → Finance and reporting consume the resulting event/read model
 ```
 
-### Amelia coexistence import
+### Manual Core setup and Amelia coexistence
 
 ```text
-Legacy Adapter reads Amelia in a bounded window
-  → maps external IDs through LegacyReference
-  → creates/updates Core shadow records idempotently
-  → records conflicts without provider writes
-  → parity report compares Core and current operational results
+Administrator uses an approved setup checklist
+  → creates the small Core catalogue and active academy records manually
+  → records only required provider mappings with audited provenance
+  → second-person review validates counts and relationships
+  → existing Amelia-dependent runtime stays in Delnavazan Enhancements
+  → later phases replace one bounded capability at a time
 ```
 
 ## 14. Enforcement expectations
