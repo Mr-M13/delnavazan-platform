@@ -12,7 +12,7 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'NonceLifecycleDiagnostic::register()'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
 }
 
@@ -29,6 +29,21 @@ foreach ([
 }
 foreach (['$_COOKIE', 'HTTP_AUTHORIZATION', 'AUTH_SALT', "'nonce_value'"] as $forbidden) {
     if (str_contains($screen, $forbidden)) throw new RuntimeException("Phase 1F nonce diagnostic exposes forbidden data: {$forbidden}");
+}
+
+$lifecycle = file_get_contents("{$root}/src/Admin/Diagnostic/NonceLifecycleDiagnostic.php");
+foreach ([
+    'plugin_bootstrap', 'plugins_loaded', 'admin_init_early', 'admin_menu_early',
+    'current_screen', 'admin_head', 'load_page', 'submenu_callback',
+    'watchLoadHook',
+    "'stage'", "'action'", "'nonce_present'", "'nonce_scalar'", "'nonce_verify'",
+    "'user_id'", "'capability_allowed'", "'page'", "'method'",
+    "'referer_field_present'", "'core_action_present'", "'core_action2_present'",
+] as $fragment) {
+    if (!str_contains($lifecycle . $screen, $fragment)) throw new RuntimeException("Phase 1F lifecycle diagnostic missing: {$fragment}");
+}
+foreach (['$_COOKIE', 'HTTP_AUTHORIZATION', 'AUTH_SALT', "'nonce_value'", "'post_body'", "'password'", "'credential'"] as $forbidden) {
+    if (str_contains($lifecycle, $forbidden)) throw new RuntimeException("Phase 1F lifecycle diagnostic exposes forbidden data: {$forbidden}");
 }
 
 $uninstall = file_get_contents("{$root}/uninstall.php");

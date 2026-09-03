@@ -22,6 +22,7 @@ spl_autoload_register( static function ( $class ) {
 	if ( is_readable( $file ) ) { require $file; }
 } );
 
+Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic::register();
 register_activation_hook( __FILE__, array( 'Delnavazan\\Platform\\Core\\Infrastructure\\Migration\\Migrator', 'on_activation' ) );
 add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();

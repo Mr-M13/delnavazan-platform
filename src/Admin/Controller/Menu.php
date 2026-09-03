@@ -1,6 +1,8 @@
 <?php
 namespace Delnavazan\Platform\Admin\Controller;
 
+use Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic;
+
 final class Menu {
     public static function register(): void {
         add_action('admin_menu', [__CLASS__, 'menu']);
@@ -19,9 +21,10 @@ final class Menu {
             'Lessons' => ['lesson', 'dzn_manage_lessons'],
             'Exceptions' => ['exception', 'dzn_manage_exceptions'],
         ] as $label => [$screen, $capability]) {
-            add_submenu_page('dzn-platform', $label, $label, $capability, 'dzn-' . $screen, static function () use ($screen): void {
+            $hook = add_submenu_page('dzn-platform', $label, $label, $capability, 'dzn-' . $screen, static function () use ($screen): void {
                 ScreenController::screen($screen);
             });
+            NonceLifecycleDiagnostic::watchLoadHook($hook);
         }
     }
 }

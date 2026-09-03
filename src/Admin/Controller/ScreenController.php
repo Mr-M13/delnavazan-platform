@@ -1,6 +1,7 @@
 <?php
 namespace Delnavazan\Platform\Admin\Controller;
 
+use Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic;
 use Delnavazan\Platform\Core\Application\{
     ArchiveService,
     CatalogueService,
@@ -51,6 +52,7 @@ final class ScreenController {
     }
 
     public static function screen(string $screen): void {
+        NonceLifecycleDiagnostic::logStage('submenu_callback');
         if ($screen === 'exception') { self::exceptionScreen(); return; }
         if (!isset(self::ENTITIES[$screen]) || !current_user_can(self::ENTITIES[$screen][1])) { self::forbidden(); return; }
         self::handleMutation(); self::renderMessages(); $id = absint($_GET['id'] ?? 0);
