@@ -32,11 +32,14 @@ The replacement is an incremental authority migration, not a clean-slate rewrite
 
 ## Architectural direction
 
-The canonical business entities are:
+The canonical business entities and reference data are:
 
 - Teacher
 - Student
-- Term / Enrolment
+- Instrument
+- Course
+- Enrolment
+- Term
 - Lesson
 
 Lesson is the operational centre for attendance, Google, notifications,
@@ -56,13 +59,16 @@ The migration is architecture-first and incremental:
 
 1. document boundaries, invariants, and exit criteria;
 2. establish a small Core foundation with versioned, retry-safe migrations;
-3. import Amelia data read-only into traceable Core mappings;
-4. compare Core results with proven production behaviour in shadow mode;
+3. manually create and validate the small active catalogue and academy dataset;
+4. keep Amelia-dependent runtime behaviour in Delnavazan Enhancements while
+   replacement capabilities are built and verified;
 5. move authority one module and workflow at a time;
-6. retain rollback and legacy traceability throughout;
+6. retain rollback and required legacy evidence throughout;
 7. retire Amelia only after every exit gate is independently verified.
 
-There is no big-bang cutover, and initial cutover never deletes Amelia tables.
+The Platform will not build an automated Amelia importer, synchronizer, or
+parity engine. There is no big-bang cutover, and initial cutover never deletes
+Amelia tables.
 
 ## Canonical Platform roadmap
 
@@ -70,7 +76,9 @@ Platform phase numbers are independent from Hamnavaz phase numbers.
 
 0. **Existing System Audit & Architecture** — complete.
 1. **Core Foundation & Canonical Data Model**.
-2. **Amelia Read Adapter & Migration Tools**.
+2. **Core Data Setup & Cutover Preparation** — manually create and validate the
+   initial Instrument/Course catalogue, Teachers, active Students, Enrolments,
+   Terms, and required Lessons; no Amelia importer.
 3. **Attendance Migration**.
 4. **Direct Google Integration** — including Core-owned connect, refresh,
    disconnect, and revoke lifecycle.
@@ -81,9 +89,11 @@ Platform phase numbers are independent from Hamnavaz phase numbers.
 9. **Finance / Teacher Reporting Migration**.
 10. **Amelia Cutover & Retirement**.
 
-Read-only imports, idempotent migration, shadow/parity comparison, the authority
-ledger, bounded cutovers, rollback gates, Amelia exit gates, and the strangler
-pattern apply across relevant phases; they do not replace this numbering. After
+The authority ledger, bounded cutovers, rollback gates, Amelia exit gates, and
+the strangler pattern apply across relevant phases. Idempotency remains a
+requirement for schema changes, events, and provider operations; controlled
+comparison remains replacement-validation evidence. These controls do not imply
+an Amelia importer or parity engine and do not replace this numbering. After
 Core stabilisation, Hamnavaz Phase 4 resumes against the shared architecture.
 
 ## Relationship to existing repositories
@@ -114,6 +124,7 @@ public presentation, and commercial profile fields do not become Core identity.
 - [Module boundaries](docs/MODULE-BOUNDARIES.md)
 - [Migration strategy](docs/MIGRATION-STRATEGY.md)
 - [Phase 1 Core foundation specification](docs/PHASE-1-CORE-FOUNDATION.md)
+- [Approved product decisions](docs/PRODUCT-DECISIONS.md)
 - [Changelog](docs/CHANGELOG.md)
 
 ## Repository rule

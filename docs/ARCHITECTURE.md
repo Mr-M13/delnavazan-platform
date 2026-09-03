@@ -21,8 +21,8 @@ The defining principle is:
 > integrations.**
 
 The immediate goal is not feature expansion. It is to establish canonical
-Teacher, Student, Term / Enrolment, and Lesson records and safe boundaries around
-them.
+Teacher, Student, Instrument, Course, Enrolment, Term, and Lesson records and
+safe boundaries around them.
 
 ## 3. Modular platform
 
@@ -35,10 +35,10 @@ The intended modules are:
 | Attendance | Attendance outcomes, evidence, review, and absence/join actions tied to a Lesson |
 | Notifications | Workflow eligibility, message attempts, idempotency, and delivery lifecycle across channels |
 | Integrations | Provider adapters for Google, Meta, Stripe, email, calendars, and future external services |
-| Finance & Reporting | Payability decisions, rate snapshots, statements, and financial reporting |
+| Finance & Reporting | Payability decisions, effective-dated teacher rates, per-Lesson rate/currency snapshots, statements, and financial reporting |
 | Portals | Authenticated student, teacher, and administrator application surfaces |
 | Hamnavaz | Directory profiles, discovery, public eligibility, and profile verification |
-| Legacy Adapters | Transitional read/import/compare paths for Amelia and other legacy sources |
+| Legacy Adapters | Narrow transitional runtime bridges isolated from Core; not a general Amelia import layer |
 
 Detailed dependency rules appear in
 [MODULE-BOUNDARIES.md](MODULE-BOUNDARIES.md).
@@ -60,6 +60,10 @@ integration-specific reference linked to a Core entity. A changed email, merged
 provider record, re-created Amelia customer, or replaced integration must not
 change the Core identity.
 
+Matching attributes may suggest duplicate Teachers or Students but never merge
+them automatically. Identity merges are explicit, administrator-authorized, and
+audited.
+
 Core owns only business identity and canonical state. It does not absorb every
 provider payload, public profile field, or operational log.
 
@@ -69,14 +73,13 @@ Every scheduled teaching occurrence is represented by a Core Lesson. Modules
 attach their own state to that lesson:
 
 ```text
-Teacher ─┐
-         ├─ Term / Enrolment ─ Lesson
-Student ─┘                      ├─ Attendance
-                               ├─ Google
-                               ├─ Notifications
-                               ├─ Scheduling
-                               ├─ Finance
-                               └─ Reporting
+Instrument ─ Course ─ Enrolment ─ Term ─ Lesson
+                         │         │       ├─ Attendance
+Teacher ─────────────────┘         │       ├─ Google
+Student ───────────────────────────┘       ├─ Notifications
+                                           ├─ Scheduling
+                                           ├─ Finance
+                                           └─ Reporting
 ```
 
 The Lesson owns the canonical scheduled occurrence and its lifecycle. It does
@@ -85,8 +88,10 @@ or accounting reports. Scheduling state and attendance outcome remain distinct:
 a cancelled lesson is a scheduling fact; a student absence is an attendance
 fact; a delivered reminder is a notification fact.
 
-Times are stored canonically in UTC. The originating timezone and wall-clock
-intent are retained when required for correct rescheduling and display.
+Lesson instants are stored canonically in UTC. Teacher and Student use explicit
+IANA timezones. Recurring schedules retain their schedule timezone and intended
+wall-clock time. Calendar/locale presentation—including Gregorian and
+Persian/Jalali—is separate and can never change the canonical instant.
 
 ## 6. Integrations as adapters and providers
 
@@ -96,7 +101,6 @@ not invent or become the owner of a Teacher, Student, Term, or Lesson.
 
 Examples:
 
-- the Amelia adapter maps appointments and customer bookings to Core Lessons;
 - the Google adapter maps a Core Teacher to a renewable Google connection and
   maps Meet evidence to a Lesson;
 - the Meta adapter sends an already-authorised notification command and reports
@@ -105,8 +109,10 @@ Examples:
   and Finance records without creating lessons;
 - Hamnavaz optionally maps a directory profile to a Core Teacher.
 
-Provider reads and writes must be explicit. During migration, the Amelia adapter
-is read-only unless a later cutover phase authorises a narrowly defined write.
+Provider reads and writes must be explicit. Existing Amelia-dependent runtime
+behaviour may remain temporarily in Delnavazan Enhancements, but new Platform
+Core code does not acquire an Amelia data-model dependency or general-purpose
+Amelia importer.
 
 ## 7. Event-driven internal workflows
 
@@ -139,7 +145,8 @@ The platform distinguishes:
 1. active canonical state used by current workflows;
 2. historical business evidence that must remain queryable;
 3. archived records hidden from normal operations but restorable;
-4. provider snapshots retained for traceability and parity checks;
+4. minimum provider provenance retained for a defined operational, audit, or
+   support purpose;
 5. secrets with a shorter, revocable lifecycle;
 6. data eligible for permanent deletion under an approved retention policy.
 
@@ -160,18 +167,19 @@ Application version and schema version are separate. Each migration must be:
 - tested against an anonymised production-shaped dataset;
 - backed up before production execution.
 
-Large imports use checkpoints and an import run identifier. A schema migration
-must not make a provider write. Data import and authority cutover are distinct
-operations.
+Manual initial data setup is separate from schema migration and authority
+cutover. A schema migration must not make a provider write. The Platform does
+not require a bulk Amelia import framework for the approved migration path.
 
 ## 10. Amelia retirement philosophy
 
 Amelia is replaced through strangler-style migration:
 
 - keep it installed and readable;
-- import with repeatable mappings;
-- run Core calculations in shadow mode;
-- compare results with current production behaviour;
+- manually recreate and validate the small active operational dataset in Core;
+- retain historical Amelia exports outside operational Core when needed;
+- compare each replacement with current production behaviour through controlled
+  validation, without building a shadow synchronizer or parity engine;
 - move one workflow's read or write authority at a time;
 - keep an immediate rollback path;
 - stop creating new Amelia coupling in new work;
@@ -195,9 +203,10 @@ verification lifecycle, public contact fields, biography, profile media,
 discovery taxonomies, commercial profile fields, and SEO data stay in Hamnavaz.
 
 Hamnavaz must also support independent directory teachers with no Core Teacher.
-Linking must therefore be nullable, explicit, capability-protected, and
-one-to-one where present. Neither system may infer identity from matching email
-or name alone.
+Linking must therefore be nullable, explicit, administrator-authorized,
+capability-protected, audited, and one-to-one where present. Matching fields may
+suggest a link but never establish one. Linking or unlinking does not create or
+delete either identity.
 
 ## 12. Canonical Platform roadmap
 
@@ -207,11 +216,12 @@ These are Platform phases and do not renumber Hamnavaz phases.
    architecture, migration map, module boundaries, security baseline, and
    roadmap; complete with this documentation baseline.
 2. **Phase 1 — Core Foundation & Canonical Data Model:** plugin/lifecycle shell,
-   migration framework, canonical identifiers and entities, `LegacyReference`,
-   and domain contracts; not started.
-3. **Phase 2 — Amelia Read Adapter & Migration Tools:** bounded read-only Amelia
-   access, typed adapters, repeatable/idempotent imports, conflict reporting,
-   and legacy traceability.
+   schema migration framework, canonical identifiers and entities, required
+   provider-reference mappings, and domain contracts; not started.
+3. **Phase 2 — Core Data Setup & Cutover Preparation:** manually create and
+   validate the initial Instrument/Course catalogue, Teachers, active Students,
+   Enrolments, Terms, and required Lessons; prepare cutover controls without an
+   Amelia importer.
 4. **Phase 3 — Attendance Migration:** move attendance evidence, outcome,
    signed-action, review, archive, and reconciliation ownership onto Core Lesson
    identities while preserving proven behaviour.
@@ -227,7 +237,7 @@ These are Platform phases and do not renumber Hamnavaz phases.
 8. **Phase 7 — Native Teacher & Student Portals:** replace operational dependence
    on Amelia Employee and Customer panels with Core-authenticated portal flows.
 9. **Phase 8 — Stripe Payments & Term Automation:** connect payment facts to the
-   canonical Term/Enrolment lifecycle and controlled Lesson generation.
+   canonical Enrolment and Term lifecycles and controlled Lesson generation.
 10. **Phase 9 — Finance / Teacher Reporting Migration:** move payability,
     statements, payouts, and reporting completely onto Core Lesson and
     Attendance identities.
@@ -235,10 +245,11 @@ These are Platform phases and do not renumber Hamnavaz phases.
     audit, controlled authority cutover, observation period, deactivation, and
     eventual retirement while preserving approved legacy evidence.
 
-Read-only import, idempotent migration, shadow/parity comparison, the authority
-ledger, bounded workflow cutovers, rollback gates, Amelia exit gates, and the
-strangler pattern are techniques used throughout relevant phases. They do not
-replace or renumber the roadmap above.
+The authority ledger, bounded workflow cutovers, rollback gates, Amelia exit
+gates, and strangler pattern apply throughout relevant phases. Idempotent schema
+migrations/events and controlled replacement comparisons remain requirements,
+but do not reinstate the superseded Amelia importer, synchronizer, or parity
+engine. These techniques do not replace or renumber the roadmap above.
 
 Every phase has its own approval, runtime validation, rollback evidence, and PR.
 After Core stabilisation, Hamnavaz Phase 4 resumes against this shared
@@ -255,6 +266,8 @@ This architecture does not:
 - define a public API or mobile application;
 - commit to microservices, a specific queue product, or a non-WordPress runtime;
 - copy entire provider payloads into Core without a retention purpose;
+- build an automated Amelia importer, shadow synchronizer, or parity engine for
+  the approved initial data setup;
 - make Stripe, Google, Meta, WordPress, or Amelia a scheduling authority;
 - merge scheduling state, attendance outcome, notification delivery, and
   payability into one status field;

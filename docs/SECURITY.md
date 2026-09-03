@@ -21,7 +21,7 @@ Treat all of the following as untrusted until verified:
 - Google OAuth callbacks and API payloads;
 - Meta webhook events and delivery IDs;
 - Stripe events and customer/payment references;
-- imported snapshots and historical exports;
+- historical snapshots and exports;
 - names, emails, phone numbers, URLs, timezones, and provider status strings.
 
 Core application services validate commands and authorize the acting principal.
@@ -140,7 +140,8 @@ provider resource. A click records evidence but never proves attendance.
   currency, and enum fields against explicit contracts.
 - Normalize only after retaining required provenance; normalization must not
   silently merge people.
-- Use prepared SQL for every dynamic query and bounded pagination for imports.
+- Use prepared SQL for every dynamic query and bounded pagination for
+  administrator lists, archive inspection, and data operations.
 - Escape output for its exact context: HTML, attribute, URL, JSON, CSV, or email.
 - Sanitize rich text through an explicit allowlist; do not execute unrelated
   global content filters or shortcodes at a public boundary.
@@ -151,7 +152,7 @@ provider resource. A click records evidence but never proves attendance.
 
 Logs must answer what happened without becoming a second sensitive database.
 
-- Use correlation/import/event IDs rather than raw tokens.
+- Use correlation, migration, and event IDs rather than raw tokens.
 - Redact credentials, OAuth codes, cabinet tokens, signed action tokens, full
   webhook URLs, and unnecessary personal data.
 - Prefer stable error codes plus short safe messages.
@@ -173,8 +174,9 @@ Logs must answer what happened without becoming a second sensitive database.
 - Amelia source tables are never deleted at initial cutover.
 - Backups and rollback artifacts have access controls and retention rules; they
   are not committed to Git.
-- Exports are temporary, access-controlled, and deleted under an approved
-  process after use.
+- The approved historical Amelia archive is read-only, access-controlled, and
+  retained under its explicit policy. Temporary working exports are deleted
+  under an approved process after use.
 
 ## 12. Integration isolation
 
@@ -185,8 +187,9 @@ Logs must answer what happened without becoming a second sensitive database.
 - Finance owns payability/rate decisions; Stripe transport cannot insert Lessons.
 - Attendance owns evidence/outcome; Google adapter cannot directly publish a
   final state without the Attendance policy service.
-- Legacy Amelia reads are scoped and read-only until an explicit cutover grants
-  a specific write.
+- Existing Amelia-dependent runtime stays isolated in Delnavazan Enhancements.
+  New Core code does not acquire Amelia data-model access; any later temporary
+  bridge requires explicit bounded scope and separate authorization.
 
 ## 13. WordPress implementation baseline
 

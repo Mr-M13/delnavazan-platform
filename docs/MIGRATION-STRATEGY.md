@@ -10,15 +10,18 @@ observable, and module-by-module.
 
 1. No big-bang rewrite.
 2. Amelia remains installed, operational, and readable during coexistence.
-3. Early imports are read-only; the platform does not write to Amelia.
-4. Imports and event processing are repeatable and idempotent.
-5. Legacy IDs remain traceable through `LegacyReference`.
-6. Core results are compared against current production behaviour before any
-   authority transfer.
+3. Initial Core catalogue and active academy data are recreated manually; the
+   Platform does not build an automated Amelia importer or synchronizer.
+4. Schema migrations, domain operations, provider calls, and event processing
+   are retry-safe and idempotent where required.
+5. Operationally required provider IDs remain traceable through explicit
+   mappings; historical Amelia data may remain in a separate read-only archive.
+6. Each replacement is compared with current production behaviour through
+   controlled validation, not a standing shadow/parity engine.
 7. Authority moves one bounded capability at a time with a named owner,
    activation time, rollback procedure, and acceptance evidence.
 8. Initial cutover never deletes Amelia tables.
-9. New work must not introduce fresh Amelia coupling outside Legacy Adapters.
+9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
 ## 3. Migration dimensions
@@ -57,23 +60,23 @@ Status: **NOT STARTED — requires explicit approval**
 
 - establish the approved plugin/lifecycle shell and module loader;
 - introduce separate application and schema versioning;
-- implement minimum canonical identity/state and `LegacyReference` foundations;
+- implement minimum canonical identity/state and required provider-reference
+  mapping foundations;
 - define domain commands/events and durable idempotency boundary;
 - add no production authority change, provider write, or Amelia retirement.
 
 See [Platform Phase 1 — Core Foundation & Canonical Data Model](PHASE-1-CORE-FOUNDATION.md)
 for the proposed scope.
 
-### Phase 2 — Amelia Read Adapter & Migration Tools
+### Phase 2 — Core Data Setup & Cutover Preparation
 
-- implement typed, bounded, read-only access to supported Amelia tables/APIs;
-- import Teacher, Student, Term/Enrolment, Lesson, and provider references into
-  shadow Core records;
-- checkpoint every import and report created, updated, unchanged, conflicted,
-  skipped, and failed counts;
-- never silently merge ambiguous people;
-- write nothing back to Amelia;
-- prove repeated imports converge.
+- manually create and validate the initial Instrument/Course catalogue;
+- manually create the handful of active Teachers and relevant active Students;
+- manually create and validate their Enrolments, Terms, and required Lessons;
+- record setup provenance, review outcomes, and reconciled counts;
+- prepare authority, rollback, validation, and operational cutover checklists;
+- do not build an Amelia importer, synchronizer, parity engine, or new Core
+  Amelia data-model dependency.
 
 ### Phase 3 — Attendance Migration
 
@@ -81,7 +84,8 @@ for the proposed scope.
 - preserve signed Join/Absence behaviour, review workflows, Meet overlap rules,
   manual decisions, archive/restore, and source traceability;
 - separate Lesson scheduling state from Attendance outcome;
-- use shadow/parity comparison before moving attendance read or write authority;
+- use controlled regression and runtime comparison before moving attendance read
+  or write authority;
 - keep Google provider access transitional until Phase 4.
 
 ### Phase 4 — Direct Google Integration
@@ -123,7 +127,7 @@ for the proposed scope.
 
 - map Stripe customers/payments to Core identities without making Stripe an
   identity authority;
-- connect payments to canonical Term/Enrolment lifecycle;
+- connect payments to canonical Enrolment and Term lifecycles;
 - generate Lessons only through approved Academy rules and idempotent commands;
 - preserve payment/term reconciliation and rollback evidence.
 
@@ -132,7 +136,7 @@ for the proposed scope.
 - move payability, rate snapshots, statements, payouts, and reporting completely
   onto Core Lesson and Attendance identities;
 - preserve introductory lesson visibility, distinct lesson counting, archive
-  exclusion, manual override audit, and historical parity;
+  exclusion, manual override audit, and approved historical totals;
 - retire teacher-email and Amelia-appointment report identity only after finance
   sign-off.
 
@@ -142,7 +146,8 @@ for the proposed scope.
 - execute controlled final authority cutover and observation period;
 - remove remaining runtime hooks, jobs, reads, and panel dependencies;
 - deactivate Amelia only with explicit authorization and rehearsed rollback;
-- retain Amelia tables and legacy references initially;
+- retain Amelia tables and approved historical archive/reference evidence
+  initially;
 - handle eventual archive or deletion under a separate retention decision.
 
 After Core stabilisation, resume Hamnavaz Phase 4 against the shared architecture
@@ -150,67 +155,74 @@ under its own approval.
 
 ## 5. Cross-phase migration techniques
 
-Read-only import, idempotent migration, shadow/parity comparison, the authority
-ledger, bounded workflow cutovers, rollback gates, Amelia exit gates, and the
-strangler-style migration are used throughout the applicable canonical phases.
-They are techniques and controls, not separate replacement phases.
+The authority ledger, bounded workflow cutovers, rollback gates, Amelia exit
+gates, and strangler-style migration are used throughout the applicable
+canonical phases. Idempotency remains required for schema migrations, domain
+commands/events, provider operations, and webhooks. Controlled comparisons are
+acceptance evidence for a replacement, not a permanent shadow/parity system.
 
-## 6. Idempotent import contract
+Phase 0 considered automated read-only Amelia import, repeatable mapping,
+checkpoints, and a shadow/parity engine. On 3 September 2026 that approach was
+deliberately rejected because the live dataset is small enough for controlled
+manual recreation. Those historical concepts do not authorize or require
+Amelia import infrastructure.
 
-Every import run must have:
+## 6. Manual Core data setup contract
 
-- a unique run ID, source version, bounded time/ID range, and checkpoint;
-- a stable source key `(provider, external_type, external_id, scope)`;
-- a normalized source fingerprint that excludes volatile/noisy values;
-- deterministic mapping and conflict outcomes;
-- per-record created, updated, unchanged, skipped, conflicted, or failed result;
-- aggregate counts and redacted diagnostics;
-- safe retry after interruption;
-- no external side effects such as messages, payments, portal invitations, or
-  Amelia writes.
+The Phase 2 setup must have:
 
-Source deletion is not mapped to hard deletion. It becomes a source-observation
-or cancellation/archive candidate and is resolved by owning business rules.
+- a reviewed list of the initial Instruments and approximately 13 Courses;
+- an approved list of active Teachers and relevant active Students;
+- explicit Enrolment, Term, and required Lesson creation decisions;
+- stable Core identifiers and only the provider mappings needed operationally;
+- per-entity actor, source/provenance, and review evidence;
+- expected and actual counts plus a second-person validation checklist;
+- no automated Amelia reads, provider side effects, portal invitations,
+  notifications, payments, or Amelia writes.
 
-## 7. Identity migration
+Setup errors are corrected through audited Core actions. They are not resolved
+by silently overwriting or auto-merging identities.
+
+## 7. Identity setup
 
 ### Teacher
 
-1. Import Amelia employee/provider references into candidates.
-2. Match only through explicit approved evidence; email/name matches may suggest
-   but do not silently establish identity.
-3. Create a Core Teacher or attach the reference to an approved existing Teacher.
-4. Separately propose/confirm an optional Hamnavaz profile link.
-5. Preserve all historical provider references.
+1. Create each active Core Teacher deliberately.
+2. Treat email, phone, WordPress, Google, Amelia, and other provider values as
+   attributes/mappings, not identity.
+3. Let matching data suggest a duplicate but never auto-merge.
+4. Record any merge as an explicit, administrator-authorized, audited action.
+5. Separately propose and explicitly authorize any optional Hamnavaz profile
+   link; linking or unlinking does not create or delete either identity.
 
 ### Student
 
-1. Import Amelia customers and known WordPress/Stripe references independently.
-2. Do not treat shared/reused email or phone as conclusive identity.
-3. Surface conflicts and duplicate candidates for controlled review.
+1. Create each relevant active Core Student deliberately.
+2. Treat WordPress, Amelia, Stripe, email, and phone as attributes/mappings.
+3. Surface possible duplicates for controlled review without auto-merging.
 4. Grant no portal access merely because a mapping exists.
 
-## 8. Lesson and enrolment migration
+## 8. Catalogue, Enrolment, Term, and Lesson setup
 
-- Map both Amelia appointment and customer-booking identifiers where one
-  appointment can have multiple booking rows.
-- Preserve service, provider, customer, approval, start/end, timezone, and Meet
-  URL observations needed for parity, but attach canonical state to Core IDs.
-- Group lessons into an Enrolment/Term only under explicit rules; do not assume
-  every 12 appointments are a term without retaining the current heuristic and
-  its uncertainty.
-- Keep schedule versions or an audit trail so reschedules do not erase prior
-  facts or leave valid public capabilities attached to the wrong time.
-- Completed attendance/payment evidence survives source cancellation or deletion.
+- Create shared Instruments, then minimal Academy Courses that reference them.
+- Create each continuing Student–Teacher–Course relationship as an Enrolment.
+- Create each bounded allocation/payment/renewal cycle as a separate Term within
+  its Enrolment.
+- Create only required Lessons, with canonical UTC instants and explicit IANA
+  schedule timezones/wall-clock intent.
+- Normal rescheduling preserves Lesson identity and appends schedule history. A
+  genuine replacement/make-up Lesson explicitly links to the original.
+- Apply the effective teacher-rate/currency snapshot to each Lesson; Student
+  pricing remains separate.
 
-## 9. Shadow comparison
+## 9. Replacement validation during coexistence
 
-Before a cutover, compare at least:
+Before each bounded runtime cutover, compare the affected business outcomes, as
+applicable:
 
-- Teacher and Student mapping counts/conflicts;
-- upcoming and historical Lesson counts;
-- appointment/customer-booking mapping cardinality;
-- start/end UTC and display timezone;
+- manually approved Core setup counts and relationships;
+- upcoming Lesson counts and schedule instances;
+- start/end UTC, wall-clock time, IANA timezone, and calendar presentation;
 - approved/cancelled eligibility;
 - assigned teacher/student/service;
 - Meet code and conference candidate;
@@ -221,7 +233,9 @@ Before a cutover, compare at least:
   totals;
 - archive/restore visibility.
 
-Comparisons use stable identifiers and machine-readable difference reasons. No
+Comparisons use stable Core identifiers and documented difference reasons. They
+may be test scripts, reports, or controlled runtime checklists scoped to the
+replacement; they are not a continuously synchronized Amelia parity engine. No
 private production data belongs in Git or PR descriptions.
 
 ## 10. Authority ledger
@@ -238,7 +252,7 @@ Maintain a production authority ledger for each capability:
 | Cohort/scope | Teachers, students, services, or dates included |
 | Activated at/by | Auditable cutover record |
 | Rollback flag/procedure | Exact safe return path |
-| Validation evidence | Tests, parity window, and runtime observations |
+| Validation evidence | Tests, controlled comparison, and runtime observations |
 
 Ambiguous dual authority is a release blocker.
 
@@ -246,8 +260,9 @@ Ambiguous dual authority is a release blocker.
 
 1. Define scope, owner, success metrics, and rollback.
 2. Back up files/database and confirm restoration path.
-3. Run repeatable import and resolve blocking conflicts.
-4. Complete shadow parity for the agreed period/data range.
+3. Confirm required Core records were manually created and independently
+   validated for the bounded scope.
+4. Complete the defined controlled before/after comparison.
 5. Review security and privacy boundary changes.
 6. Deploy inactive/dark code where practical.
 7. Enable for controlled test data or a bounded beta cohort.
@@ -262,19 +277,19 @@ Ambiguous dual authority is a release blocker.
 - Rollback changes authority flags/routes; it does not delete new or legacy data.
 - Events accepted during the cutover are reconciled before or after rollback so
   they are not lost or duplicated.
-- Provider idempotency keys and mapping references survive rollback.
+- Provider idempotency keys and required mapping references survive rollback.
 - Schema rollback favors forward-compatible repair over destructive downgrade.
 - The exact prior plugin package, database backup, configuration, and operational
   test checklist remain available.
-- Any temporary dual-written records have a source-of-truth marker and conflict
-  report.
+- Any temporary dual-written records have a source-of-truth marker and audited
+  reconciliation procedure.
 
 ## 13. Amelia exit gates
 
 Amelia may be deactivated only when all applicable gates pass:
 
-- all active Teachers, Students, Terms/Enrolments, and Lessons have canonical
-  Core identities and resolved mappings;
+- all in-scope active Instruments, Courses, Teachers, Students, Enrolments,
+  Terms, and Lessons have been manually created and independently validated;
 - no active portal, public route, scheduled job, notification, attendance,
   finance, reporting, or support procedure depends on Amelia runtime behaviour;
 - scheduling and approval writes are Core-authoritative for every in-scope
@@ -283,10 +298,10 @@ Amelia may be deactivated only when all applicable gates pass:
   storage;
 - Meta workflows no longer depend on Amelia hooks, cron, or webhook callback;
 - password/account onboarding no longer depends on Amelia controls;
-- financial and attendance parity has been signed off for agreed historical and
-  live periods;
-- imports have reached a stable final checkpoint and legacy mappings remain
-  queryable;
+- financial and attendance outcomes have been signed off for agreed controlled
+  and operational periods;
+- required provider mappings remain queryable and the approved historical Amelia
+  archive is available under its retention/access procedure;
 - rollback and business-continuity procedures have been rehearsed;
 - support/admin tools expose required diagnostics without Amelia;
 - legal/retention decisions for the source data have been approved;
@@ -300,16 +315,15 @@ recoverable backup. Permanent deletion is a separate decision.
 Every migration phase should expose:
 
 - current authority per capability;
-- last successful import and checkpoint;
-- record/result counts and conflicts;
+- manually approved setup counts and outstanding review items;
 - queue/outbox backlog and retry age;
 - provider connection health without secrets;
 - notification acceptance and delivery progression;
-- reconciliation/parity differences;
-- last schema/data migration result;
+- controlled replacement-validation differences;
+- last schema migration and manual setup result;
 - archive/purge job scope and outcome.
 
-“Job ran”, “API accepted”, “row imported”, and “page loaded” are intermediate
+“Job ran”, “API accepted”, “record created”, and “page loaded” are intermediate
 states. Acceptance requires the defined end-to-end business outcome.
 
 ## 15. Data and secret handling during migration
@@ -324,15 +338,17 @@ states. Acceptance requires the defined end-to-end business outcome.
 - Preserve evidence needed for rollback, audit, and financial reconciliation
   under an approved retention policy.
 
-## 16. Open product decisions
+## 16. Product decisions and remaining design work
 
-The decisions listed in [DATA-MODEL.md](DATA-MODEL.md) must be resolved before
-their corresponding schema or workflow becomes authoritative. In particular,
-Phase 1 requires agreement on identity conflict handling, Term/Enrolment shape,
-minimum lifecycle vocabularies, timezone provenance, and Core/Hamnavaz linking.
+The binding post-Phase-0 decisions are recorded in
+[PRODUCT-DECISIONS.md](PRODUCT-DECISIONS.md). Exact lifecycle vocabularies,
+minimum Course fields, `DZN-*` allocation rules, physical schema/history shapes,
+retention durations, Google failed-revoke handling, and the historical Amelia
+archive procedure remain to be resolved or deliberately deferred in the
+relevant implementation brief.
 
 ## 17. Phase 0 restriction
 
 This strategy is documentation only. It does not authorize Platform Phase 1,
-production import, provider reconfiguration, Amelia writes, or any authority
+production data setup, provider reconfiguration, Amelia writes, or any authority
 cutover.
