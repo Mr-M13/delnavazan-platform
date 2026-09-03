@@ -6,9 +6,9 @@ final class Migrator {
 	public static function maybe_upgrade(): void {
 		if ( get_option( self::OPTION ) === DZN_PLATFORM_SCHEMA_VERSION ) { return; }
 		$token = wp_generate_uuid4(); $lock = get_option( self::LOCK );
-		if ( $lock && isset( $lock['at'] ) && time() - (int) $lock['at'] < 900 ) { return; }
-		update_option( self::LOCK, array( 'token' => $token, 'at' => time() ), false );
-		try { foreach(array('001_initial_core_schema'=>array(__CLASS__,'install')) as $id=>$migration){$done=(array)get_option(self::COMPLETED,array());if(in_array($id,$done,true))continue;call_user_func($migration);$done[]=$id;update_option(self::COMPLETED,$done,false);} update_option( self::OPTION, DZN_PLATFORM_SCHEMA_VERSION, false ); }
+		if ( $lock && isset( $lock['at'] ) && time() - (int) $lock['at'] >= 900 ) { delete_option( self::LOCK ); }
+		if ( ! add_option( self::LOCK, array( 'token' => $token, 'at' => time() ), '', 'no' ) ) { return; }
+		try { foreach(array('001_initial_core_schema'=>array(__CLASS__,'install')) as $id=>$migration){$done=(array)get_option(self::COMPLETED,array());if(in_array($id,$done,true))continue;call_user_func($migration);self::verify_schema();$done[]=$id;update_option(self::COMPLETED,$done,false);} update_option( self::OPTION, DZN_PLATFORM_SCHEMA_VERSION, false ); }
 		finally { $current = get_option( self::LOCK ); if ( is_array( $current ) && ( $current['token'] ?? '' ) === $token ) { delete_option( self::LOCK ); } }
 	}
 	private static function install(): void {
@@ -25,6 +25,13 @@ final class Migrator {
 		"CREATE TABLE {$p}operational_exceptions (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,exception_type varchar(32) NOT NULL,severity varchar(32) NOT NULL,entity_type varchar(32) NULL,entity_id bigint unsigned NULL,fingerprint varchar(255) NOT NULL,status varchar(32) NOT NULL,summary varchar(255) NOT NULL,safe_detail text NULL,error_code varchar(255) NULL,detected_at datetime NOT NULL,last_seen_at datetime NOT NULL,resolved_at datetime NULL,resolved_by bigint unsigned NULL,resolution_note text NULL,retry_available tinyint(1) NOT NULL DEFAULT 0,retry_count smallint unsigned NOT NULL DEFAULT 0,PRIMARY KEY(id),UNIQUE KEY uid(uid),KEY fingerprint_status(fingerprint,status),KEY status(status)) ENGINE=InnoDB $c",
 		"CREATE TABLE {$p}teacher_profile_links (id bigint unsigned NOT NULL AUTO_INCREMENT,teacher_id bigint unsigned NOT NULL,profile_source varchar(32) NOT NULL,profile_id bigint unsigned NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,removed_at datetime NULL,removed_by bigint unsigned NULL,PRIMARY KEY(id),KEY teacher_id(teacher_id),KEY profile(profile_source,profile_id),KEY removed_at(removed_at)) ENGINE=InnoDB $c"
 		); foreach ( $tables as $sql ) { dbDelta( $sql ); }
+		// NULL only exists between insert and ID-derived reference update; no commit may retain it.
+		foreach(array('teachers','students','instruments','courses','enrolments','terms','lessons') as $table){$wpdb->query("ALTER TABLE {$p}{$table} MODIFY reference_code varchar(32) NULL");}
+		$wpdb->query("ALTER TABLE {$p}enrolments ADD KEY schedule_timezone(schedule_timezone)");
+		$wpdb->query("ALTER TABLE {$p}terms ADD KEY enrolment_id(enrolment_id), ADD KEY payment_state(payment_state)");
+		$wpdb->query("ALTER TABLE {$p}lessons ADD KEY current_schedule_version_id(current_schedule_version_id), ADD KEY replacement_for_lesson_id(replacement_for_lesson_id)");
+		$wpdb->query("ALTER TABLE {$p}operational_exceptions MODIFY exception_type varchar(64) NOT NULL, MODIFY severity varchar(16) NOT NULL, MODIFY fingerprint char(64) NOT NULL, MODIFY error_code varchar(64) NULL, ADD KEY severity(severity), ADD KEY exception_type(exception_type), ADD KEY fingerprint(fingerprint), ADD KEY entity(entity_type,entity_id), ADD KEY detected_at(detected_at), ADD KEY last_seen_at(last_seen_at)");
 	}
+	private static function verify_schema():void { global $wpdb; $p=$wpdb->prefix.'dzn_';$tables=array('teachers','students','instruments','courses','enrolments','terms','lessons','lesson_schedule_versions','operational_exceptions','teacher_profile_links');foreach($tables as $table){if($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.$table))!==$p.$table)throw new \RuntimeException('Migration verification failed: missing '.$table);}foreach(array('teachers','students','instruments','courses','enrolments','terms','lessons')as$table){$column=$wpdb->get_row("SHOW COLUMNS FROM {$p}{$table} LIKE 'reference_code'");if(!$column||$column->Null!=='YES')throw new \RuntimeException('Migration verification failed: reference_code');}}
 	private static function install_capabilities():void{$role=get_role('administrator');if(!$role)return;foreach(array('dzn_manage_platform','dzn_manage_students','dzn_manage_teachers','dzn_manage_courses','dzn_manage_enrolments','dzn_manage_terms','dzn_manage_lessons','dzn_manage_exceptions','dzn_view_diagnostics')as$cap)$role->add_cap($cap);}
 }

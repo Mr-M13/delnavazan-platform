@@ -1,0 +1,8 @@
+<?php
+$schema = file_get_contents( dirname( __DIR__ ) . '/src/Core/Infrastructure/Migration/Migrator.php' );
+$required = array( 'teachers','students','instruments','courses','enrolments','terms','lessons','lesson_schedule_versions','operational_exceptions','teacher_profile_links' );
+foreach ( $required as $table ) { if ( ! str_contains( $schema, "'{$table}'" ) ) { throw new RuntimeException( "Missing schema table: {$table}" ); } }
+foreach ( array( 'teachers','students','instruments','courses','enrolments','terms','lessons' ) as $table ) { if ( ! str_contains( $schema, '{$p}' . $table . ' MODIFY reference_code varchar(32) NULL' ) ) { throw new RuntimeException( "Reference nullable migration absent: {$table}" ); } }
+foreach ( array( 'schedule_timezone','payment_state','current_schedule_version_id','replacement_for_lesson_id','exception_type varchar(64)','severity varchar(16)','fingerprint char(64)','error_code varchar(64)' ) as $fragment ) { if ( ! str_contains( $schema, $fragment ) ) { throw new RuntimeException( "Missing schema fragment: {$fragment}" ); } }
+if ( str_contains( $schema, 'LIKE {$p}teachers' ) || str_contains( $schema, 'finance' ) || str_contains( $schema, 'amelia' ) ) { throw new RuntimeException( 'Forbidden schema direction.' ); }
+echo "Schema contract static test passed\n";
