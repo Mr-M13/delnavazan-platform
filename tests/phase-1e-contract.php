@@ -28,7 +28,7 @@ if (str_contains($screen, '$wpdb') || str_contains($screen, 'DELETE FROM') || st
 $read = file_get_contents("{$root}/src/Core/Application/CoreReadService.php");
 phase_1e_require($read, ['recent', 'exceptions', 'lessonSchedule', 'current_user_can'], 'read service');
 $diagnostics = file_get_contents("{$root}/src/Core/Application/DiagnosticsService.php");
-phase_1e_require($diagnostics, ['dzn_view_diagnostics', 'platform_version', 'exception_counts'], 'diagnostics service');
+phase_1e_require($diagnostics, ['dzn_view_diagnostics', 'platform_version', 'exception_counts', 'tables_healthy', 'schema_current', 'required_migration_complete'], 'diagnostics service');
 foreach (['last_error', 'token', 'secret', 'credential', 'amelia', 'google', 'whatsapp'] as $forbidden) {
     if (str_contains(strtolower($diagnostics), $forbidden)) throw new RuntimeException('Diagnostics source must not expose sensitive integration data');
 }

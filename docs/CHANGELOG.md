@@ -5,6 +5,16 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Unreleased
 
+### Phase 1 — Core Foundation & Controlled Runtime Validation
+
+- Implemented the Phase 1 canonical schema, migration verification/locking,
+  capabilities, Core identities, relationship validation, Lesson schedule
+  history, archive safeguards, Operational Exceptions, and minimal protected
+  engineering admin surfaces.
+- Added a controlled Phase 1F beta validation runbook and clean-package
+  preparation. Runtime validation remains pending; no business authority,
+  Amelia dependency, provider integration, or Phase 2 work has begun.
+
 ### Product decision reconciliation — 3 September 2026
 
 - Confirmed permanent Core Teacher and Student identities; contact details and
@@ -75,7 +85,7 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ### Current status
 
 - Platform Phase 0 — Existing System Audit & Architecture is complete.
-- Platform Phase 1 — Core Foundation & Canonical Data Model is not started and
-  requires explicit approval.
+- Platform Phase 1 — Core Foundation & Canonical Data Model is implemented on
+  its review branch and awaiting controlled Phase 1F beta runtime validation.
 - Amelia remains installed, operational, authoritative, and readable.
 - Hamnavaz Phase 4 remains intentionally paused.
