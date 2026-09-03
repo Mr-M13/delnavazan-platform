@@ -29,4 +29,38 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$root}/s
     }
 }
 
+$runtimeFiles = [
+    "{$root}/delnavazan-platform.php",
+    "{$root}/uninstall.php",
+];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$root}/src")) as $file) {
+    if ($file->isFile() && $file->getExtension() === 'php') {
+        $runtimeFiles[] = $file->getPathname();
+    }
+}
+
+// These are source-code contexts, not string literals: an autoloader prefix
+// such as 'Delnavazan\\Platform\\' is intentional and must remain untouched.
+$doubledNamespaceContexts = [
+    'new \\\\',
+    'extends \\\\',
+    'implements \\\\',
+    'instanceof \\\\',
+    'catch (\\\\',
+    'use \\\\',
+];
+foreach ($runtimeFiles as $runtimeFile) {
+    $source = file_get_contents($runtimeFile);
+    foreach ($doubledNamespaceContexts as $needle) {
+        if (str_contains($source, $needle)) {
+            throw new RuntimeException('Phase 1F malformed doubled namespace separator: ' . $runtimeFile);
+        }
+    }
+    foreach (['\\\\RuntimeException', '\\\\InvalidArgumentException'] as $needle) {
+        if (str_contains($source, $needle)) {
+            throw new RuntimeException('Phase 1F malformed global exception reference: ' . $runtimeFile);
+        }
+    }
+}
+
 echo "Phase 1F source/package-readiness contract passed (not runtime evidence)\n";
