@@ -22,6 +22,8 @@ phase_1e_require($screen, [
     'safe_detail', 'No current schedule', 'Schedule history',
     'CREATE_FIELDS', 'createPayload', 'array_intersect_key', 'dzn_action',
     'Operation failed; no change was saved.',
+    'check_admin_referer(self::nonceAction($action))',
+    'wp_nonce_field(self::nonceAction($action))',
 ], 'admin screen');
 foreach (['teacher', 'student', 'instrument', 'course', 'enrolment', 'term', 'lesson'] as $entity) {
     if (!str_contains($screen, "self::createPayload('{$entity}', \$post)")) {

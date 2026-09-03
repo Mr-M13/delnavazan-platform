@@ -71,7 +71,8 @@ final class ScreenController {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
         $post = wp_unslash($_POST); $action = sanitize_key($post['dzn_action'] ?? '');
         if ($action === '') return;
-        check_admin_referer('dzn_platform_' . $action);
+        self::logNonceDiagnostic($action, $post);
+        check_admin_referer(self::nonceAction($action));
         try {
             $id = match ($action) {
                 'create_teacher' => (new TeacherService())->create(self::createPayload('teacher', $post)),
@@ -96,6 +97,31 @@ final class ScreenController {
     private static function createPayload(string $entity, array $post): array {
         if (!isset(self::CREATE_FIELDS[$entity])) throw new \InvalidArgumentException('Unsupported create entity');
         return array_intersect_key($post, array_flip(self::CREATE_FIELDS[$entity]));
+    }
+
+    private static function nonceAction(string $action): string {
+        return 'dzn_platform_' . $action;
+    }
+
+    private static function logNonceDiagnostic(string $action, array $post): void {
+        if (!defined('DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS') || DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS !== true) return;
+        $noncePresent = array_key_exists('_wpnonce', $post);
+        $nonceScalar = $noncePresent && is_string($post['_wpnonce']) && $post['_wpnonce'] !== '';
+        $verification = $nonceScalar ? (int) wp_verify_nonce($post['_wpnonce'], self::nonceAction($action)) : 0;
+        $page = sanitize_key(wp_unslash($_GET['page'] ?? ''));
+        $entity = str_starts_with($page, 'dzn-') ? substr($page, 4) : '';
+        $capability = $entity === 'exception' ? 'dzn_manage_exceptions' : (self::ENTITIES[$entity][1] ?? '');
+        $diagnostic = [
+            'action' => $action,
+            'nonce_present' => $noncePresent,
+            'nonce_scalar' => $nonceScalar,
+            'nonce_verify' => $verification,
+            'user_id' => get_current_user_id(),
+            'capability_allowed' => $capability !== '' && current_user_can($capability),
+            'page' => $page,
+            'method' => sanitize_key(wp_unslash($_SERVER['REQUEST_METHOD'] ?? '')),
+        ];
+        error_log('[Delnavazan Platform Phase 1F nonce] ' . wp_json_encode($diagnostic));
     }
 
     private static function archive(array $post): int { (new ArchiveService())->archive(self::entityFromPost($post), absint($post['id'] ?? 0)); return 0; }
@@ -170,7 +196,7 @@ final class ScreenController {
     private static function entityActionForm(string $action, string $entity, int $id, string $label): void { self::formStart($action); echo '<input type="hidden" name="entity" value="' . esc_attr($entity) . '"><input type="hidden" name="id" value="' . esc_attr((string) $id) . '">'; submit_button($label, 'secondary', 'submit', false); echo '</form> '; }
     private static function actionForm(string $action, int $id, string $label): void { self::formStart($action); echo '<input type="hidden" name="id" value="' . esc_attr((string) $id) . '">'; submit_button($label, 'secondary', 'submit', false); echo '</form> '; }
     private static function noteActionForm(string $action, int $id, string $label): void { self::formStart($action); echo '<input type="hidden" name="id" value="' . esc_attr((string) $id) . '"><p><label>Resolution note<br><textarea name="resolution_note" rows="3" cols="60"></textarea></label></p>'; submit_button($label, 'secondary', 'submit', false); echo '</form> '; }
-    private static function formStart(string $action): void { echo '<form method="post">'; wp_nonce_field('dzn_platform_' . $action); echo '<input type="hidden" name="dzn_action" value="' . esc_attr($action) . '">'; }
+    private static function formStart(string $action): void { echo '<form method="post">'; wp_nonce_field(self::nonceAction($action)); echo '<input type="hidden" name="dzn_action" value="' . esc_attr($action) . '">'; }
     private static function input(string $name, string $label, bool $required = false, string $type = 'text', string $value = ''): void { echo '<p><label>' . esc_html($label) . '<br><input class="regular-text" type="' . esc_attr($type) . '" name="' . esc_attr($name) . '" value="' . esc_attr($value) . '"' . ($required ? ' required' : '') . '></label></p>'; }
     private static function select(string $name, string $label, array $options, string $selected): void { echo '<p><label>' . esc_html($label) . '<br><select name="' . esc_attr($name) . '">'; foreach ($options as $option) echo '<option value="' . esc_attr($option) . '"' . selected($selected, $option, false) . '>' . esc_html($option) . '</option>'; echo '</select></label></p>'; }
 

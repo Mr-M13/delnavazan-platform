@@ -12,8 +12,23 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
+}
+
+$screen = file_get_contents("{$root}/src/Admin/Controller/ScreenController.php");
+foreach ([
+    'logNonceDiagnostic($action, $post)',
+    'wp_verify_nonce($post[\'_wpnonce\'], self::nonceAction($action))',
+    'check_admin_referer(self::nonceAction($action))',
+    'wp_nonce_field(self::nonceAction($action))',
+    "'nonce_present'", "'nonce_scalar'", "'nonce_verify'", "'user_id'",
+    "'capability_allowed'", "'page'", "'method'",
+] as $fragment) {
+    if (!str_contains($screen, $fragment)) throw new RuntimeException("Phase 1F nonce diagnostic missing: {$fragment}");
+}
+foreach (['$_COOKIE', 'HTTP_AUTHORIZATION', 'AUTH_SALT', "'nonce_value'"] as $forbidden) {
+    if (str_contains($screen, $forbidden)) throw new RuntimeException("Phase 1F nonce diagnostic exposes forbidden data: {$forbidden}");
 }
 
 $uninstall = file_get_contents("{$root}/uninstall.php");
