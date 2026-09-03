@@ -1,4 +1,4 @@
-# Platform Phase 1 — Core Foundation
+# Platform Phase 1 — Core Foundation & Canonical Data Model
 
 ## 1. Status
 
@@ -167,11 +167,11 @@ Adapter.
 
 ## 11. Compatibility and rollout
 
-Phase 1 runs dark beside the current system:
+Platform Phase 1 runs dark beside the current system:
 
 - Delnavazan Enhancements remains active and unchanged;
 - Amelia remains installed and authoritative;
-- Hamnavaz remains independently operational at Phase 3;
+- Hamnavaz remains independently operational at Hamnavaz Phase 3;
 - no production workflow reads Core records for decisions;
 - no provider or user-facing side effect originates from Core;
 - activation/deactivation is reversible and preserves existing site behaviour.

@@ -2,10 +2,10 @@
 
 ## 1. Status and scope
 
-This is the canonical Phase 0 architecture for Delnavazan Platform. It defines
-direction, ownership, and migration constraints before implementation begins.
-It is not an implementation plan for a big-bang Amelia replacement and does not
-authorise Platform Phase 1.
+This is the canonical specification for Platform Phase 0 — Existing System
+Audit & Architecture. It defines direction, ownership, and migration constraints
+before implementation begins. It is not an implementation plan for a big-bang
+Amelia replacement and does not authorise Platform Phase 1.
 
 ## 2. Architectural goal
 
@@ -199,27 +199,50 @@ Linking must therefore be nullable, explicit, capability-protected, and
 one-to-one where present. Neither system may infer identity from matching email
 or name alone.
 
-## 12. Platform migration phases
+## 12. Canonical Platform roadmap
 
 These are Platform phases and do not renumber Hamnavaz phases.
 
-1. **Phase 0 — Architecture and audit:** canonical documentation and migration
-   map; complete with this baseline.
-2. **Phase 1 — Core foundation:** plugin/lifecycle shell, migration framework,
-   canonical identifiers, minimum Core records, LegacyReference, and domain
-   contracts; not started.
-3. **Phase 2 — Read-only Amelia bridge:** idempotent import and reconciliation,
-   no authority change.
-4. **Phase 3 — Shadow operations:** Core Lesson projections and parity reports
-   beside current production workflows.
-5. **Phase 4 — Workflow cutovers:** attendance, notifications, finance, and
-   portal capabilities moved in separately approved increments.
-6. **Phase 5 — Scheduling authority:** Core scheduling becomes authoritative for
-   approved cohorts after rollback and support readiness.
-7. **Phase 6 — Amelia retirement:** freeze legacy writes, retain traceability,
-   remove runtime dependencies, and archive rather than delete source tables.
+1. **Phase 0 — Existing System Audit & Architecture:** completed audit,
+   architecture, migration map, module boundaries, security baseline, and
+   roadmap; complete with this documentation baseline.
+2. **Phase 1 — Core Foundation & Canonical Data Model:** plugin/lifecycle shell,
+   migration framework, canonical identifiers and entities, `LegacyReference`,
+   and domain contracts; not started.
+3. **Phase 2 — Amelia Read Adapter & Migration Tools:** bounded read-only Amelia
+   access, typed adapters, repeatable/idempotent imports, conflict reporting,
+   and legacy traceability.
+4. **Phase 3 — Attendance Migration:** move attendance evidence, outcome,
+   signed-action, review, archive, and reconciliation ownership onto Core Lesson
+   identities while preserving proven behaviour.
+5. **Phase 4 — Direct Google Integration:** move teacher Google ownership away
+   from Amelia and implement the complete connect, refresh, disconnect, and
+   revoke lifecycle against Core Teacher identity.
+6. **Phase 5 — Notification Platform / WhatsApp Migration:** extract Meta
+   transport and webhook handling, and move workflows away from Amelia hooks to
+   Core/Academy/Attendance events.
+7. **Phase 6 — Availability & Scheduling:** implement native teacher
+   availability, recurring scheduling, rescheduling, timezone handling, lesson
+   buffers, and capacity.
+8. **Phase 7 — Native Teacher & Student Portals:** replace operational dependence
+   on Amelia Employee and Customer panels with Core-authenticated portal flows.
+9. **Phase 8 — Stripe Payments & Term Automation:** connect payment facts to the
+   canonical Term/Enrolment lifecycle and controlled Lesson generation.
+10. **Phase 9 — Finance / Teacher Reporting Migration:** move payability,
+    statements, payouts, and reporting completely onto Core Lesson and
+    Attendance identities.
+11. **Phase 10 — Amelia Cutover & Retirement:** complete the final dependency
+    audit, controlled authority cutover, observation period, deactivation, and
+    eventual retirement while preserving approved legacy evidence.
+
+Read-only import, idempotent migration, shadow/parity comparison, the authority
+ledger, bounded workflow cutovers, rollback gates, Amelia exit gates, and the
+strangler pattern are techniques used throughout relevant phases. They do not
+replace or renumber the roadmap above.
 
 Every phase has its own approval, runtime validation, rollback evidence, and PR.
+After Core stabilisation, Hamnavaz Phase 4 resumes against this shared
+architecture under its own approval.
 
 ## 13. Architectural non-goals
 

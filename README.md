@@ -18,14 +18,17 @@ The replacement is an incremental authority migration, not a clean-slate rewrite
 ## Current status
 
 - Delnavazan remains a beta platform operating alongside the live academy.
-- Platform Phase 0 architecture and migration audit are complete in this
+- Platform Phase 0 — Existing System Audit & Architecture is complete in this
   documentation baseline.
-- Platform Phase 1 has not started and requires explicit approval.
+- Platform Phase 1 — Core Foundation & Canonical Data Model has not started and
+  requires explicit approval.
 - This repository is documentation-only until that approval. It intentionally
   contains no PHP, plugin bootstrap, implementation directories, or database
   migrations.
 - Hamnavaz Phase 3 is complete. Hamnavaz Phase 4 is intentionally paused while
   the shared platform architecture is established.
+- After Core stabilisation, Hamnavaz Phase 4 will resume against the shared
+  architecture under its own separate approval.
 
 ## Architectural direction
 
@@ -60,6 +63,28 @@ The migration is architecture-first and incremental:
 7. retire Amelia only after every exit gate is independently verified.
 
 There is no big-bang cutover, and initial cutover never deletes Amelia tables.
+
+## Canonical Platform roadmap
+
+Platform phase numbers are independent from Hamnavaz phase numbers.
+
+0. **Existing System Audit & Architecture** — complete.
+1. **Core Foundation & Canonical Data Model**.
+2. **Amelia Read Adapter & Migration Tools**.
+3. **Attendance Migration**.
+4. **Direct Google Integration** — including Core-owned connect, refresh,
+   disconnect, and revoke lifecycle.
+5. **Notification Platform / WhatsApp Migration**.
+6. **Availability & Scheduling**.
+7. **Native Teacher & Student Portals**.
+8. **Stripe Payments & Term Automation**.
+9. **Finance / Teacher Reporting Migration**.
+10. **Amelia Cutover & Retirement**.
+
+Read-only imports, idempotent migration, shadow/parity comparison, the authority
+ledger, bounded cutovers, rollback gates, Amelia exit gates, and the strangler
+pattern apply across relevant phases; they do not replace this numbering. After
+Core stabilisation, Hamnavaz Phase 4 resumes against the shared architecture.
 
 ## Relationship to existing repositories
 

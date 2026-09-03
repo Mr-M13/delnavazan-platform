@@ -364,7 +364,8 @@ overwrite their state.
 2. Whether Term and Enrolment are separate records in the first schema or one
    aggregate with explicit term allocation.
 3. Course/instrument catalogue ownership and versioning.
-4. Final scheduling and enrolment state names and transition authority.
+4. Final scheduling and enrolment lifecycle vocabulary, state names, and
+   transition authority.
 5. Reschedule history model and treatment of provider appointment replacements.
 6. Canonical customer timezone capture, override, and fallback policy.
 7. Financial rate/currency snapshot point and manual override audit rules.

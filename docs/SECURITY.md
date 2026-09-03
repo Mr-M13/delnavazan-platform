@@ -221,7 +221,7 @@ Before any production authority transfer:
 9. run focused security review before merge and runtime validation before
    cutover.
 
-## 15. Phase 0 restriction
+## 15. Platform Phase 0 restriction
 
 This file defines requirements only. It does not authorise code, credentials,
 provider reconfiguration, production tests, or changes to Amelia.

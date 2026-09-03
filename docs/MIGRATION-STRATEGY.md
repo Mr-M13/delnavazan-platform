@@ -35,21 +35,25 @@ Each capability moves through independent dimensions:
 A capability is not “migrated” merely because data was copied or a new screen
 exists.
 
-## 4. Platform phases
+## 4. Canonical Platform roadmap
 
-### Phase 0 — Architecture and audit
+Platform phase numbers are independent from Hamnavaz phase numbers. The
+migration techniques documented below support relevant phases; they do not
+replace or renumber this roadmap.
 
-Status: complete when this documentation is reviewed and merged.
+### Phase 0 — Existing System Audit & Architecture
+
+Status: **COMPLETE**
 
 - inventory current behaviours and dependencies;
-- define Core ownership, module boundaries, security, data concepts, and exit
-  philosophy;
+- define Core ownership, module boundaries, security, data concepts, migration
+  techniques, and Amelia exit philosophy;
 - record unresolved product decisions;
 - add no runtime code or schema.
 
-### Phase 1 — Core foundation
+### Phase 1 — Core Foundation & Canonical Data Model
 
-Status: not started; requires explicit approval.
+Status: **NOT STARTED — requires explicit approval**
 
 - establish the approved plugin/lifecycle shell and module loader;
 - introduce separate application and schema versioning;
@@ -57,61 +61,101 @@ Status: not started; requires explicit approval.
 - define domain commands/events and durable idempotency boundary;
 - add no production authority change, provider write, or Amelia retirement.
 
-See [Phase 1 Core foundation](PHASE-1-CORE-FOUNDATION.md) for the proposed scope.
+See [Platform Phase 1 — Core Foundation & Canonical Data Model](PHASE-1-CORE-FOUNDATION.md)
+for the proposed scope.
 
-### Phase 2 — Read-only Amelia bridge
+### Phase 2 — Amelia Read Adapter & Migration Tools
 
-- implement typed, bounded reads from supported Amelia tables/APIs;
-- import Teacher, Student, Enrolment/Term, Lesson, and provider references into
+- implement typed, bounded, read-only access to supported Amelia tables/APIs;
+- import Teacher, Student, Term/Enrolment, Lesson, and provider references into
   shadow Core records;
-- checkpoint every import and report created/updated/unchanged/conflicted/skipped/
-  failed counts;
+- checkpoint every import and report created, updated, unchanged, conflicted,
+  skipped, and failed counts;
 - never silently merge ambiguous people;
 - write nothing back to Amelia;
 - prove repeated imports converge.
 
-### Phase 3 — Shadow operations and parity
+### Phase 3 — Attendance Migration
 
-- run Core Lesson projections beside current Amelia/Enhancements operation;
-- compare lesson schedules, approval/cancellation, attendance eligibility,
-  reminder eligibility, term counts, and teacher payment totals;
-- classify every difference as a Core defect, source inconsistency, intended
-  policy change, or unresolved product decision;
-- make no authority change from parity data alone.
+- move attendance records and evidence onto canonical Core `lesson_id`;
+- preserve signed Join/Absence behaviour, review workflows, Meet overlap rules,
+  manual decisions, archive/restore, and source traceability;
+- separate Lesson scheduling state from Attendance outcome;
+- use shadow/parity comparison before moving attendance read or write authority;
+- keep Google provider access transitional until Phase 4.
 
-### Phase 4 — Workflow cutovers
+### Phase 4 — Direct Google Integration
 
-Move capabilities independently, for example:
+- move teacher Google ownership away from Amelia and onto Core Teacher identity;
+- implement proper connect, refresh, disconnect, and provider revoke lifecycle;
+- isolate OAuth credentials and Meet API access behind the Google adapter;
+- migrate/re-consent active teacher connections with explicit reconciliation;
+- retire Amelia combined OAuth and the Google-specific Employee Panel identity
+  bridge once Direct Google ownership is complete; broader Amelia Employee and
+  Customer Panel retirement remains Phase 7.
 
-1. notification delivery storage and Meta transport;
-2. attendance read model and Google evidence integration;
-3. teacher payment reporting;
-4. absence/join public capabilities;
-5. student and teacher portal functions.
+### Phase 5 — Notification Platform / WhatsApp Migration
 
-Each cutover has its own branch, review, production flag, runtime matrix, rollback,
-and observation window. Phase numbering here is for Platform and is unrelated to
-Hamnavaz Phase 4.
+- extract generic Notification, attempt, provider-message, and delivery state;
+- extract Meta transport and provider-authenticated webhook handling;
+- move reminder/confirmation/absence/renewal workflows away from Amelia hooks;
+- trigger workflows from Core, Academy, and Attendance events;
+- preserve template contracts, idempotency, disabled settings, test-send
+  isolation, retries, and delivery progression.
 
-### Phase 5 — Scheduling authority
+### Phase 6 — Availability & Scheduling
 
-- introduce Core scheduling for a deliberately bounded cohort or workflow;
-- maintain a documented coexistence contract with Amelia;
-- avoid uncontrolled dual-write; if temporary dual-write is approved, record a
-  durable outbox and reconciliation state;
-- expand only after operational support and rollback are proven.
+- implement native Delnavazan teacher availability;
+- support recurring scheduling, rescheduling, and schedule-version history;
+- define canonical timezone handling and wall-clock provenance;
+- implement lesson buffers and capacity constraints;
+- transfer scheduling authority only through bounded cohorts and rollback gates.
 
-### Phase 6 — Amelia retirement
+### Phase 7 — Native Teacher & Student Portals
 
-- freeze new Amelia authority after the final cutover;
-- retain read-only access and legacy mappings for the approved period;
-- remove hooks, scheduled jobs, portal dependencies, and report reads only after
-  dependency scans and runtime evidence;
-- deactivate Amelia under explicit authorization;
-- preserve database tables/backups initially;
-- decide long-term archive or deletion in a separate data-governance action.
+- implement Core-authenticated teacher and student portal workflows;
+- replace operational dependence on Amelia Employee and Customer panels;
+- provide object-level authorization, onboarding, and account-recovery flows;
+- retire the Amelia password helper and session bridge only after end-to-end
+  portal acceptance.
 
-## 5. Idempotent import contract
+### Phase 8 — Stripe Payments & Term Automation
+
+- map Stripe customers/payments to Core identities without making Stripe an
+  identity authority;
+- connect payments to canonical Term/Enrolment lifecycle;
+- generate Lessons only through approved Academy rules and idempotent commands;
+- preserve payment/term reconciliation and rollback evidence.
+
+### Phase 9 — Finance / Teacher Reporting Migration
+
+- move payability, rate snapshots, statements, payouts, and reporting completely
+  onto Core Lesson and Attendance identities;
+- preserve introductory lesson visibility, distinct lesson counting, archive
+  exclusion, manual override audit, and historical parity;
+- retire teacher-email and Amelia-appointment report identity only after finance
+  sign-off.
+
+### Phase 10 — Amelia Cutover & Retirement
+
+- perform the final dependency and authority audit;
+- execute controlled final authority cutover and observation period;
+- remove remaining runtime hooks, jobs, reads, and panel dependencies;
+- deactivate Amelia only with explicit authorization and rehearsed rollback;
+- retain Amelia tables and legacy references initially;
+- handle eventual archive or deletion under a separate retention decision.
+
+After Core stabilisation, resume Hamnavaz Phase 4 against the shared architecture
+under its own approval.
+
+## 5. Cross-phase migration techniques
+
+Read-only import, idempotent migration, shadow/parity comparison, the authority
+ledger, bounded workflow cutovers, rollback gates, Amelia exit gates, and the
+strangler-style migration are used throughout the applicable canonical phases.
+They are techniques and controls, not separate replacement phases.
+
+## 6. Idempotent import contract
 
 Every import run must have:
 
@@ -128,7 +172,7 @@ Every import run must have:
 Source deletion is not mapped to hard deletion. It becomes a source-observation
 or cancellation/archive candidate and is resolved by owning business rules.
 
-## 6. Identity migration
+## 7. Identity migration
 
 ### Teacher
 
@@ -146,7 +190,7 @@ or cancellation/archive candidate and is resolved by owning business rules.
 3. Surface conflicts and duplicate candidates for controlled review.
 4. Grant no portal access merely because a mapping exists.
 
-## 7. Lesson and enrolment migration
+## 8. Lesson and enrolment migration
 
 - Map both Amelia appointment and customer-booking identifiers where one
   appointment can have multiple booking rows.
@@ -159,7 +203,7 @@ or cancellation/archive candidate and is resolved by owning business rules.
   facts or leave valid public capabilities attached to the wrong time.
 - Completed attendance/payment evidence survives source cancellation or deletion.
 
-## 8. Shadow comparison
+## 9. Shadow comparison
 
 Before a cutover, compare at least:
 
@@ -180,7 +224,7 @@ Before a cutover, compare at least:
 Comparisons use stable identifiers and machine-readable difference reasons. No
 private production data belongs in Git or PR descriptions.
 
-## 9. Authority ledger
+## 10. Authority ledger
 
 Maintain a production authority ledger for each capability:
 
@@ -198,7 +242,7 @@ Maintain a production authority ledger for each capability:
 
 Ambiguous dual authority is a release blocker.
 
-## 10. Cutover procedure per capability
+## 11. Cutover procedure per capability
 
 1. Define scope, owner, success metrics, and rollback.
 2. Back up files/database and confirm restoration path.
@@ -213,7 +257,7 @@ Ambiguous dual authority is a release blocker.
 10. Record authority change and observe through a defined window.
 11. Retain the old read/rollback path until explicit closeout.
 
-## 11. Rollback principles
+## 12. Rollback principles
 
 - Rollback changes authority flags/routes; it does not delete new or legacy data.
 - Events accepted during the cutover are reconciled before or after rollback so
@@ -225,7 +269,7 @@ Ambiguous dual authority is a release blocker.
 - Any temporary dual-written records have a source-of-truth marker and conflict
   report.
 
-## 12. Amelia exit gates
+## 13. Amelia exit gates
 
 Amelia may be deactivated only when all applicable gates pass:
 
@@ -251,7 +295,7 @@ Amelia may be deactivated only when all applicable gates pass:
 Even after those gates pass, initial retirement preserves Amelia tables and a
 recoverable backup. Permanent deletion is a separate decision.
 
-## 13. Observability and evidence
+## 14. Observability and evidence
 
 Every migration phase should expose:
 
@@ -268,7 +312,7 @@ Every migration phase should expose:
 “Job ran”, “API accepted”, “row imported”, and “page loaded” are intermediate
 states. Acceptance requires the defined end-to-end business outcome.
 
-## 14. Data and secret handling during migration
+## 15. Data and secret handling during migration
 
 - Use anonymised or controlled fixtures in source control and automated tests.
 - Do not place production exports, IDs, emails, phone numbers, OAuth credentials,
@@ -280,14 +324,14 @@ states. Acceptance requires the defined end-to-end business outcome.
 - Preserve evidence needed for rollback, audit, and financial reconciliation
   under an approved retention policy.
 
-## 15. Open product decisions
+## 16. Open product decisions
 
 The decisions listed in [DATA-MODEL.md](DATA-MODEL.md) must be resolved before
 their corresponding schema or workflow becomes authoritative. In particular,
 Phase 1 requires agreement on identity conflict handling, Term/Enrolment shape,
 minimum lifecycle vocabularies, timezone provenance, and Core/Hamnavaz linking.
 
-## 16. Phase 0 restriction
+## 17. Phase 0 restriction
 
 This strategy is documentation only. It does not authorize Platform Phase 1,
 production import, provider reconfiguration, Amelia writes, or any authority
