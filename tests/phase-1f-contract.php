@@ -18,10 +18,16 @@ foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_registe
 
 $screen = file_get_contents("{$root}/src/Admin/Controller/ScreenController.php");
 foreach ([
+    'public static function handlePost(string $screen)',
+    "NonceLifecycleDiagnostic::logStage('mutation_load_hook')",
     'logNonceDiagnostic($action, $post)',
     'wp_verify_nonce($post[\'_wpnonce\'], self::nonceAction($action))',
     'check_admin_referer(self::nonceAction($action))',
     'wp_nonce_field(self::nonceAction($action))',
+    "NonceLifecycleDiagnostic::logStage('nonce_verified')",
+    "NonceLifecycleDiagnostic::logStage('mutation_complete')",
+    "NonceLifecycleDiagnostic::logStage('redirect_enter')",
+    'if (wp_safe_redirect($url)) exit',
     "'nonce_present'", "'nonce_scalar'", "'nonce_verify'", "'user_id'",
     "'capability_allowed'", "'page'", "'method'",
 ] as $fragment) {
@@ -30,11 +36,21 @@ foreach ([
 foreach (['$_COOKIE', 'HTTP_AUTHORIZATION', 'AUTH_SALT', "'nonce_value'"] as $forbidden) {
     if (str_contains($screen, $forbidden)) throw new RuntimeException("Phase 1F nonce diagnostic exposes forbidden data: {$forbidden}");
 }
+if (str_contains($screen, 'self::handleMutation(); self::renderMessages()')) {
+    throw new RuntimeException('Phase 1F mutation handling must not run in the post-header render callback');
+}
+
+$menu = file_get_contents("{$root}/src/Admin/Controller/Menu.php");
+foreach (["add_action('load-' . \$hook", 'ScreenController::handlePost($screen)', 'before admin-header.php'] as $fragment) {
+    if (!str_contains($menu, $fragment)) throw new RuntimeException("Phase 1F pre-header mutation hook missing: {$fragment}");
+}
 
 $lifecycle = file_get_contents("{$root}/src/Admin/Diagnostic/NonceLifecycleDiagnostic.php");
 foreach ([
     'plugin_bootstrap', 'plugins_loaded', 'admin_init_early', 'admin_menu_early',
-    'current_screen', 'admin_head', 'load_page', 'submenu_callback',
+    'current_screen', 'admin_head', 'load_page', 'mutation_load_hook',
+    'nonce_verified', 'mutation_complete', 'redirect_enter', 'redirect_failed',
+    'submenu_callback',
     'watchLoadHook',
     "'stage'", "'action'", "'nonce_present'", "'nonce_scalar'", "'nonce_verify'",
     "'user_id'", "'capability_allowed'", "'page'", "'method'",

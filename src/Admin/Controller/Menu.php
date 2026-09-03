@@ -25,6 +25,14 @@ final class Menu {
                 ScreenController::screen($screen);
             });
             NonceLifecycleDiagnostic::watchLoadHook($hook);
+            if ($hook) {
+                // WordPress fires load-$hook before admin-header.php. Mutations
+                // must run here so their post/redirect/get response can still
+                // send headers; the submenu callback is rendering-only.
+                add_action('load-' . $hook, static function () use ($screen): void {
+                    ScreenController::handlePost($screen);
+                });
+            }
         }
     }
 }

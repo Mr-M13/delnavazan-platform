@@ -55,15 +55,27 @@ final class ScreenController {
         NonceLifecycleDiagnostic::logStage('submenu_callback');
         if ($screen === 'exception') { self::exceptionScreen(); return; }
         if (!isset(self::ENTITIES[$screen]) || !current_user_can(self::ENTITIES[$screen][1])) { self::forbidden(); return; }
-        self::handleMutation(); self::renderMessages(); $id = absint($_GET['id'] ?? 0);
+        self::renderMessages(); $id = absint($_GET['id'] ?? 0);
         echo '<div class="wrap"><h1>Delnavazan ' . esc_html(self::ENTITIES[$screen][0]) . '</h1>';
         if ($id) self::entityDetail($screen, $id); else { self::entityCreateForm($screen); self::entityList($screen); }
         echo '</div>';
     }
 
+    public static function handlePost(string $screen): void {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') return;
+        $capability = $screen === 'exception'
+            ? 'dzn_manage_exceptions'
+            : (self::ENTITIES[$screen][1] ?? '');
+        if ($capability === '' || !current_user_can($capability)) {
+            wp_die('Access denied.', 'Delnavazan', ['response' => 403]);
+        }
+        NonceLifecycleDiagnostic::logStage('mutation_load_hook');
+        self::handleMutation();
+    }
+
     private static function exceptionScreen(): void {
         if (!current_user_can('dzn_manage_exceptions')) { self::forbidden(); return; }
-        self::handleMutation(); self::renderMessages(); $id = absint($_GET['id'] ?? 0);
+        self::renderMessages(); $id = absint($_GET['id'] ?? 0);
         echo '<div class="wrap"><h1>Delnavazan Exceptions</h1>';
         if ($id) self::exceptionDetail($id); else self::exceptionList();
         echo '</div>';
@@ -75,6 +87,7 @@ final class ScreenController {
         if ($action === '') return;
         self::logNonceDiagnostic($action, $post);
         check_admin_referer(self::nonceAction($action));
+        NonceLifecycleDiagnostic::logStage('nonce_verified');
         try {
             $id = match ($action) {
                 'create_teacher' => (new TeacherService())->create(self::createPayload('teacher', $post)),
@@ -92,6 +105,7 @@ final class ScreenController {
                 'retry_exception' => self::retry($post),
                 default => throw new \InvalidArgumentException('Unsupported action'),
             };
+            NonceLifecycleDiagnostic::logStage('mutation_complete');
             self::redirectNotice('Saved' . ($id ? ' #' . (int) $id : ''));
         } catch (\Throwable) { self::redirectNotice('Operation failed; no change was saved.', true); }
     }
@@ -209,7 +223,14 @@ final class ScreenController {
         echo '</tbody></table>';
     }
     private static function displayValue(mixed $value): string { return ($value === null || $value === '' || !is_scalar($value)) ? '—' : (string) $value; }
-    private static function redirectNotice(string $notice, bool $error = false): never { $url = add_query_arg(['page' => sanitize_key(wp_unslash($_GET['page'] ?? 'dzn-platform')), 'dzn_notice' => $notice, 'dzn_error' => $error ? '1' : '0'], admin_url('admin.php')); wp_safe_redirect($url); exit; }
+    private static function redirectNotice(string $notice, bool $error = false): never {
+        $url = add_query_arg(['page' => sanitize_key(wp_unslash($_GET['page'] ?? 'dzn-platform')), 'dzn_notice' => $notice, 'dzn_error' => $error ? '1' : '0'], admin_url('admin.php'));
+        NonceLifecycleDiagnostic::logStage('redirect_enter');
+        nocache_headers();
+        if (wp_safe_redirect($url)) exit;
+        NonceLifecycleDiagnostic::logStage('redirect_failed');
+        wp_die(esc_html($notice), 'Delnavazan', ['response' => $error ? 500 : 200, 'back_link' => true]);
+    }
     private static function renderMessages(): void { if (!isset($_GET['dzn_notice'])) return; $notice = sanitize_text_field(wp_unslash($_GET['dzn_notice'])); echo '<div class="notice ' . esc_attr((($_GET['dzn_error'] ?? '') === '1') ? 'notice-error' : 'notice-success') . '"><p>' . esc_html($notice) . '</p></div>'; }
     private static function forbidden(): void { echo '<div class="wrap"><h1>Delnavazan</h1><p>Access denied.</p></div>'; }
 }
