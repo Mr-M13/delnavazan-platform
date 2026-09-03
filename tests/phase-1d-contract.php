@@ -40,7 +40,8 @@ phase_1d_require_fragments($archive, [
     'Course instrument', 'Enrolment student', 'Enrolment teacher', 'Enrolment course', 'Term enrolment',
     'Lesson student', 'Lesson teacher', 'Lesson course', 'Lesson identity does not match Enrolment',
     'Lesson Term does not belong to Enrolment', 'Replacement original relationship is invalid',
-    "['scheduled', 'completed', 'cancelled']", 'Archive conflict',
+    "['scheduled', 'completed', 'cancelled']", 'lessonRestoreStatus', "return 'draft';", "return 'scheduled';",
+    'Schedule Version history has no current pointer', 'Schedule Version pointer is invalid', 'Archive conflict',
 ], 'archive service');
 
 phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Repository/TeacherRepository.php"), ['hasOperationalEnrolments', 'teacher_id'], 'teacher archive repository');
@@ -50,5 +51,10 @@ phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Re
 phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Repository/EnrolmentRepository.php"), ['hasOperationalTerms', 'hasOperationalLessons'], 'enrolment archive repository');
 phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Repository/TermRepository.php"), ['belongsToUsableEnrolment', 'hasOperationalLessons'], 'term archive repository');
 phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Repository/LessonRepository.php"), ['findNotArchived'], 'lesson archive repository');
+phase_1d_require_fragments(file_get_contents("{$root}/src/Core/Infrastructure/Repository/LessonScheduleVersionRepository.php"), [
+    'hasHistory', 'assertRetainedCurrentPointer', 'Pointed Schedule Version is missing',
+    'Pointed Schedule Version belongs to another Lesson', 'Pointed Schedule Version is superseded',
+    'exactly one current Schedule Version', 'pointer does not match current version', 'superseded_at IS NULL',
+], 'lesson schedule restore repository');
 
 echo "Phase 1D source contract passed (not a WordPress/MySQL behavioural test)\n";

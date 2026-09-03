@@ -7,6 +7,7 @@ use Delnavazan\Platform\Core\Infrastructure\Repository\{
     EnrolmentRepository,
     InstrumentRepository,
     LessonRepository,
+    LessonScheduleVersionRepository,
     StudentRepository,
     TeacherRepository,
     TermRepository
@@ -47,10 +48,10 @@ final class ArchiveService {
 
         try {
             $this->assertRestoreParents($type, $row);
+            if ($type === 'lesson') $restoreStatus = $this->lessonRestoreStatus($row);
         } catch (\InvalidArgumentException $exception) {
             throw new \InvalidArgumentException('Archive conflict: ' . $exception->getMessage(), 0, $exception);
         }
-        if ($type === 'lesson') $restoreStatus = $row->current_schedule_version_id ? 'scheduled' : 'draft';
         $repository->restore($id, $restoreStatus, gmdate('Y-m-d H:i:s'), get_current_user_id() ?: null);
     }
 
@@ -137,6 +138,21 @@ final class ArchiveService {
         if (!$original || !$this->sameIdentity($lesson, $original) || (int) $original->enrolment_id !== (int) $lesson->enrolment_id || (int) $original->term_id !== (int) $lesson->term_id) {
             throw new \InvalidArgumentException('Replacement original relationship is invalid');
         }
+    }
+
+    private function lessonRestoreStatus(object $lesson): string {
+        $schedules = new LessonScheduleVersionRepository();
+        if ($lesson->current_schedule_version_id === null) {
+            if ($schedules->hasHistory((int) $lesson->id)) {
+                throw new \InvalidArgumentException('Lesson Schedule Version history has no current pointer');
+            }
+            return 'draft';
+        }
+        if (!$this->hasPositiveId($lesson->current_schedule_version_id)) {
+            throw new \InvalidArgumentException('Lesson Schedule Version pointer is invalid');
+        }
+        $schedules->assertRetainedCurrentPointer((int) $lesson->id, (int) $lesson->current_schedule_version_id);
+        return 'scheduled';
     }
 
     private function requireUsable(BaseRepository $repository, mixed $id, string $relationship): object {

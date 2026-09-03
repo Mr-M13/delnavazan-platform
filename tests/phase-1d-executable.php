@@ -14,7 +14,10 @@
 // Student, Instrument, Course, Enrolment, and Term dependency conflicts reject;
 // scheduled/completed/cancelled Lessons reject; restore requires every specified
 // parent and validates Lesson identity, Term ownership, and replacement original;
-// no operation cascades or mutates identity/reference/history.
+// no operation cascades or mutates identity/reference/history. A retained valid
+// current Schedule Version restores a Lesson to scheduled; no history/pointer
+// restores draft; missing, foreign, superseded, pointer-mismatched, or multiple
+// current Schedule Versions reject as archive conflicts.
 $root = dirname(__DIR__);
 foreach (['ExceptionService', 'ArchiveService'] as $service) {
     if (!is_file("{$root}/src/Core/Application/{$service}.php")) throw new RuntimeException("Missing {$service}");
