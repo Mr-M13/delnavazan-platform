@@ -25,6 +25,17 @@ final class ScreenController {
         'term' => ['Terms', 'dzn_manage_terms'],
         'lesson' => ['Lessons', 'dzn_manage_lessons'],
     ];
+    // Form data crosses into repositories through the application services.
+    // Never pass nonce, action, referrer, or other request-control fields on.
+    private const CREATE_FIELDS = [
+        'teacher' => ['persian_name', 'english_name', 'display_name', 'email', 'phone', 'whatsapp_phone', 'country_code', 'city', 'timezone', 'timezone_source', 'locale', 'calendar_preference', 'status'],
+        'student' => ['first_name', 'last_name', 'display_name', 'email', 'phone', 'whatsapp_phone', 'country_code', 'city', 'timezone', 'timezone_source', 'locale', 'calendar_preference', 'status'],
+        'instrument' => ['slug', 'name_fa', 'name_en', 'status'],
+        'course' => ['instrument_id', 'name_fa', 'name_en', 'course_type', 'status', 'default_duration_minutes', 'default_buffer_minutes'],
+        'enrolment' => ['student_id', 'teacher_id', 'course_id', 'status', 'preferred_weekday', 'preferred_local_time', 'schedule_timezone'],
+        'term' => ['enrolment_id', 'sequence_number', 'status', 'lesson_allocation', 'replacement_allowance', 'payment_state'],
+        'lesson' => ['student_id', 'teacher_id', 'course_id', 'lesson_type', 'status', 'enrolment_id', 'term_id', 'replacement_for_lesson_id'],
+    ];
 
     public static function status(): void {
         self::renderMessages();
@@ -63,13 +74,13 @@ final class ScreenController {
         check_admin_referer('dzn_platform_' . $action);
         try {
             $id = match ($action) {
-                'create_teacher' => (new TeacherService())->create($post),
-                'create_student' => (new StudentService())->create($post),
-                'create_instrument' => (new CatalogueService())->instrument($post),
-                'create_course' => (new CatalogueService())->course($post),
-                'create_enrolment' => (new EnrolmentService())->create($post),
-                'create_term' => (new TermService())->create($post),
-                'create_lesson' => (new LessonService())->create($post),
+                'create_teacher' => (new TeacherService())->create(self::createPayload('teacher', $post)),
+                'create_student' => (new StudentService())->create(self::createPayload('student', $post)),
+                'create_instrument' => (new CatalogueService())->instrument(self::createPayload('instrument', $post)),
+                'create_course' => (new CatalogueService())->course(self::createPayload('course', $post)),
+                'create_enrolment' => (new EnrolmentService())->create(self::createPayload('enrolment', $post)),
+                'create_term' => (new TermService())->create(self::createPayload('term', $post)),
+                'create_lesson' => (new LessonService())->create(self::createPayload('lesson', $post)),
                 'archive' => self::archive($post), 'restore' => self::restore($post),
                 'initial_schedule' => self::schedule($post, true), 'reschedule' => self::schedule($post, false),
                 'acknowledge_exception' => self::transition($post, 'acknowledged'),
@@ -79,7 +90,12 @@ final class ScreenController {
                 default => throw new \InvalidArgumentException('Unsupported action'),
             };
             self::redirectNotice('Saved' . ($id ? ' #' . (int) $id : ''));
-        } catch (\Throwable) { self::redirectNotice('Operation failed', true); }
+        } catch (\Throwable) { self::redirectNotice('Operation failed; no change was saved.', true); }
+    }
+
+    private static function createPayload(string $entity, array $post): array {
+        if (!isset(self::CREATE_FIELDS[$entity])) throw new \InvalidArgumentException('Unsupported create entity');
+        return array_intersect_key($post, array_flip(self::CREATE_FIELDS[$entity]));
     }
 
     private static function archive(array $post): int { (new ArchiveService())->archive(self::entityFromPost($post), absint($post['id'] ?? 0)); return 0; }

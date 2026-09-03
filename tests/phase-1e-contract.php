@@ -20,7 +20,14 @@ phase_1e_require($screen, [
     'CoreReadService', 'DiagnosticsService', 'initial_schedule', 'reschedule',
     'acknowledge_exception', 'resolve_exception', 'dismiss_exception', 'retry_exception',
     'safe_detail', 'No current schedule', 'Schedule history',
+    'CREATE_FIELDS', 'createPayload', 'array_intersect_key', 'dzn_action',
+    'Operation failed; no change was saved.',
 ], 'admin screen');
+foreach (['teacher', 'student', 'instrument', 'course', 'enrolment', 'term', 'lesson'] as $entity) {
+    if (!str_contains($screen, "self::createPayload('{$entity}', \$post)")) {
+        throw new RuntimeException("Phase 1F {$entity} create must use the allowlisted payload");
+    }
+}
 if (str_contains($screen, '$wpdb') || str_contains($screen, 'DELETE FROM') || str_contains($screen, "'delete' =>") || str_contains($screen, 'add_rest_route') || str_contains($screen, 'wp_ajax_')) {
     throw new RuntimeException('Phase 1E Admin must not contain direct SQL, delete, or public writable endpoint registration');
 }
