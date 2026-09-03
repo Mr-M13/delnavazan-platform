@@ -28,12 +28,15 @@ the early migration.
 
 ## 2. Audited source baseline
 
-The audit used the Delnavazan Enhancements 2.0.16 source and its bundled
-operational documentation. The current system treats Amelia as authoritative for
-appointments, booking approval, employees, customers, services, scheduled times,
-and Meet URLs. Delnavazan Enhancements owns its attendance table, signed actions,
-Meet reconciliation, WhatsApp workflow/delivery records, soft archive, and
-teacher payment reporting.
+The audit used the Delnavazan Enhancements 2.0.17 repository/source baseline,
+including Attendance database schema 9 and its bundled operational
+documentation. Delnavazan Enhancements 2.0.16 with Attendance schema 8 remains
+an earlier production acceptance milestone recorded in the operational history;
+it is not the source baseline for this Platform audit. The current system treats
+Amelia as authoritative for appointments, booking approval, employees,
+customers, services, scheduled times, and Meet URLs. Delnavazan Enhancements
+owns its attendance table, signed actions, Meet reconciliation, WhatsApp
+workflow/delivery records, soft archive, and teacher payment reporting.
 
 ## 3. Component map
 
