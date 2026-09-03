@@ -84,11 +84,14 @@ Student ────────────────────────
 Student ─ Introductory Lesson (no Enrolment or Term required)
 ```
 
-The Lesson owns the canonical scheduled occurrence and its lifecycle. It does
-not directly own attendance evidence, Meta delivery states, OAuth credentials,
-or accounting reports. Scheduling state and attendance outcome remain distinct:
-a cancelled lesson is a scheduling fact; a student absence is an attendance
-fact; a delivered reminder is a notification fact.
+The Lesson owns the canonical scheduled occurrence and its lifecycle. It
+directly retains `student_id`, `teacher_id`, and `course_id` as the
+operational/historical identity of that occurrence; these are not derived again
+from a later Enrolment change. It does not directly own attendance evidence,
+Meta delivery states, OAuth credentials, or accounting reports. Scheduling
+state and attendance outcome remain distinct: a cancelled lesson is a
+scheduling fact; a student absence is an attendance fact; a delivered reminder
+is a notification fact.
 
 Lesson instants are stored canonically in UTC. Teacher and Student use explicit
 IANA timezones. Recurring schedules retain their schedule timezone and intended

@@ -210,9 +210,13 @@ by silently overwriting or auto-merging identities.
 - Create each continuing Student–Teacher–Course relationship as an Enrolment.
 - Create each bounded allocation/payment/renewal cycle as a separate Term within
   its Enrolment.
-- Create Introductory Lessons directly for Students as needed. Create standard
+- Create every Lesson with direct `student_id`, `teacher_id`, and `course_id`
+  to preserve its operational/historical identity. Create Introductory Lessons
+  directly for Students as needed, with nullable Enrolment/Term. Create standard
   Lessons under their Enrolment and Term; replacement Lessons normally remain in
-  that Term and explicitly link to the original.
+  that Term and explicitly link to the original through
+  `replacement_for_lesson_id`. On standard/replacement creation, verify direct
+  Teacher/Student/Course references against the Enrolment.
 - Use the approved default Term policy of 12 standard Lessons and two eligible
   replacement Lessons, with explicit audited exceptions only.
 - Create required Lessons with canonical UTC instants and explicit IANA schedule

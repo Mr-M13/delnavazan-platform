@@ -52,14 +52,22 @@ extend them.
 
 ## 5. Lesson relationship and scheduling
 
+- The initial Lesson types are `introductory`, `standard`, and `replacement`.
 - An `introductory` Lesson may exist with `enrolment_id = NULL` and
-  `term_id = NULL`.
-- A `standard` Lesson normally requires an Enrolment and Term.
+  `term_id = NULL`. Its `student_id`, `teacher_id`, and `course_id` are direct
+  Lesson references.
+- A `standard` Lesson requires the applicable Enrolment and Term.
+- A `replacement` Lesson normally requires the applicable Enrolment and Term
+  and must explicitly reference its original Lesson through
+  `replacement_for_lesson_id`.
+- Every Lesson stores direct `student_id`, `teacher_id`, and `course_id`.
+  These preserve the operational/historical identity of the occurrence. When a
+  standard or replacement Lesson is created, the service layer must verify that
+  these direct references match its selected Enrolment; a later change to a
+  Teacher, Course, or Enrolment does not retrospectively alter the Lesson.
 - A Student may therefore hold an Introductory Lesson before any continuing
   Enrolment exists: Student → Introductory Lesson → Enrolment → Term → standard
   Lessons.
-- A replacement Lesson normally requires the applicable Enrolment and Term and
-  explicitly links to its original Lesson.
 
 - Normal rescheduling preserves Lesson identity and appends an audited schedule
   version/history record.

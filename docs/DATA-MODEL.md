@@ -244,15 +244,17 @@ attendance, notifications, Google evidence, finance, and reporting.
 
 - internal numeric primary key, immutable opaque ULID-style `lesson_uid`, and
   required `DZN-LSN-` human reference code;
-- required `lesson_type` (`introductory` or `standard`);
+- required `lesson_type`, constrained to the initial types `introductory`,
+  `standard`, and `replacement`;
 - nullable `enrolment_id` and `term_id` for an `introductory` Lesson; required
-  for a `standard` Lesson and normally required for a replacement Lesson;
-- required `student_id`; `teacher_id` is direct for introductory Lessons and is
-  otherwise derived from the approved Enrolment relationship;
+  for a `standard` Lesson and normally required for a `replacement` Lesson;
+- required direct `student_id`, `teacher_id`, and `course_id` on every Lesson;
+  these preserve the operational/historical identity of the occurrence;
 - canonical `starts_at_utc` and `ends_at_utc`;
 - source timezone and wall-clock provenance;
 - scheduling lifecycle and append-only reschedule/version history;
-- optional `replacement_for_lesson_id` for a genuine replacement/make-up;
+- required `replacement_for_lesson_id` for a `replacement` Lesson; absent for
+  other initial Lesson types;
 - sequence/allocation position where applicable;
 - delivery mode and provider-neutral join-resource reference;
 - created, updated, cancelled, completed, and archived audit metadata.
@@ -261,10 +263,15 @@ attendance, notifications, Google evidence, finance, and reporting.
 
 - A Lesson can exist before any provider appointment is created.
 - An `introductory` Lesson may exist for a Core Student before that Student has
-  an Enrolment or Term.
-- A `standard` Lesson requires its Enrolment and Term. A genuine replacement
-  Lesson normally uses that same Enrolment/Term and explicitly links to the
-  original Lesson.
+  an Enrolment or Term. Its direct `student_id`, `teacher_id`, and `course_id`
+  identify the occurrence.
+- A `standard` Lesson requires its Enrolment and Term. A `replacement` Lesson
+  normally uses that same Enrolment/Term and must explicitly link to the
+  original Lesson through `replacement_for_lesson_id`.
+- On creation of a standard or replacement Lesson, the service layer validates
+  that its direct `student_id`, `teacher_id`, and `course_id` match the selected
+  Enrolment. Those direct Lesson references are not subsequently derived from,
+  or rewritten by, Enrolment changes.
 - Scheduling state is separate from Attendance outcome, Notification delivery,
   and Finance payability.
 - Normal rescheduling preserves Lesson identity, appends the prior schedule to

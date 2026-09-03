@@ -33,6 +33,9 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
   ULID-style UIDs/reference prefixes, custom-table direction, append-only Lesson
   Schedule Versions, introductory-Lesson relationship rules, Term replacement
   defaults, timezone onboarding, and Operational Exception framework.
+- Corrected the initial Lesson vocabulary to `introductory`, `standard`, and
+  `replacement`, and confirmed direct Lesson Student/Teacher/Course identity
+  snapshots with creation-time Enrolment consistency validation.
 - Removed premature Finance persistence from the proposed Phase 1 foundation;
   Finance tables, rate snapshots, and audited corrections remain Phase 9 work.
 - Rejected the Phase 0 proposal for an automated Amelia importer, shadow

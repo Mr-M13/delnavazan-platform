@@ -113,9 +113,16 @@ At minimum:
   encoded: standard Term allocation is 12 Lessons with two eligible replacement
   Lessons, subject only to explicit audited administrator override;
 - an introductory Lesson has nullable Enrolment/Term references and may exist
-  for a Student before a continuing Enrolment; standard Lessons require an
-  Enrolment and Term, while replacement Lessons normally require them and link
-  explicitly to an original Lesson;
+  for a Student before a continuing Enrolment; the initial Lesson types are
+  `introductory`, `standard`, and `replacement` only;
+- every Lesson stores direct `student_id`, `teacher_id`, and `course_id` as its
+  operational/historical identity; standard Lessons require an Enrolment and
+  Term, while replacement Lessons normally require them and must link through
+  `replacement_for_lesson_id` to an original Lesson;
+- the Lesson creation/service layer validates direct Teacher/Student/Course
+  references against the selected Enrolment for standard and replacement
+  Lessons; introductory Lessons retain their direct references while their
+  Enrolment/Term may be NULL;
 - Lesson stores canonical UTC instants plus explicit schedule
   timezone/wall-clock provenance, and keeps schedule history separately from
   attendance, delivery, and payability;
@@ -232,9 +239,11 @@ Before Phase 1 can be proposed for merge, validate:
    identities;
 8. approved lifecycle vocabulary, Course fields/types, UID/reference-code
    formatting, and no identifier-as-capability behavior;
-9. introductory Lesson nullable Enrolment/Term behavior, standard/replacement
-   Lesson relationship rules, and Student → Introductory Lesson → Enrolment →
-   Term flow;
+9. the approved `introductory`, `standard`, and `replacement` Lesson types;
+   introductory nullable Enrolment/Term behavior; direct Lesson
+   Student/Teacher/Course identities; creation-time Enrolment consistency for
+   standard/replacement Lessons; and Student → Introductory Lesson → Enrolment
+   → Term flow;
 10. Schedule Version append-only/current-version behavior, normal rescheduling,
     replacement linking, timezone display-only changes, and recurring-schedule
     timezone separation;
