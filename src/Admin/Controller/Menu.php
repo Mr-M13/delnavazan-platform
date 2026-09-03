@@ -1,8 +1,27 @@
 <?php
 namespace Delnavazan\Platform\Admin\Controller;
+
 final class Menu {
-	public static function register(): void { add_action('admin_menu', array(__CLASS__,'menu')); }
-	public static function menu(): void { add_menu_page('Delnavazan','Delnavazan','dzn_view_diagnostics','dzn-platform',array(__CLASS__,'status'),'dashicons-networking',58); foreach(array('Teachers'=>array('teachers','dzn_manage_teachers'),'Students'=>array('students','dzn_manage_students'),'Instruments'=>array('instruments','dzn_manage_courses'),'Courses'=>array('courses','dzn_manage_courses'),'Enrolments'=>array('enrolments','dzn_manage_enrolments'),'Terms'=>array('terms','dzn_manage_terms'),'Lessons'=>array('lessons','dzn_manage_lessons'),'Exceptions'=>array('operational_exceptions','dzn_manage_exceptions')) as $name=>$config)add_submenu_page('dzn-platform',$name,$name,$config[1],'dzn-'.$config[0],array(__CLASS__,'placeholder')); }
-	public static function status(): void { global $wpdb; $tables=array('teachers','students','instruments','courses','enrolments','terms','lessons','lesson_schedule_versions','operational_exceptions','teacher_profile_links'); echo '<div class="wrap"><h1>Delnavazan Core Status</h1><p>Platform '.esc_html(DZN_PLATFORM_VERSION).' · Schema '.esc_html(get_option('dzn_platform_schema_version','not installed')).'</p><ul>'; foreach($tables as $t){$n=$wpdb->prefix.'dzn_'.$t; echo '<li>'.esc_html($n).': '.( $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$n))===$n?'ready':'missing').'</li>'; } echo '</ul></div>'; }
-	public static function placeholder(): void { echo '<div class="wrap"><h1>Delnavazan Core</h1><p>Phase 1 controlled validation surface.</p></div>'; }
+    public static function register(): void {
+        add_action('admin_menu', [__CLASS__, 'menu']);
+    }
+
+    public static function menu(): void {
+        add_menu_page('Delnavazan', 'Delnavazan', 'dzn_view_diagnostics', 'dzn-platform', [ScreenController::class, 'status'], 'dashicons-networking', 58);
+        add_submenu_page('dzn-platform', 'Core Status', 'Core Status', 'dzn_view_diagnostics', 'dzn-platform', [ScreenController::class, 'status']);
+        foreach ([
+            'Teachers' => ['teacher', 'dzn_manage_teachers'],
+            'Students' => ['student', 'dzn_manage_students'],
+            'Instruments' => ['instrument', 'dzn_manage_courses'],
+            'Courses' => ['course', 'dzn_manage_courses'],
+            'Enrolments' => ['enrolment', 'dzn_manage_enrolments'],
+            'Terms' => ['term', 'dzn_manage_terms'],
+            'Lessons' => ['lesson', 'dzn_manage_lessons'],
+            'Exceptions' => ['exception', 'dzn_manage_exceptions'],
+        ] as $label => [$screen, $capability]) {
+            add_submenu_page('dzn-platform', $label, $label, $capability, 'dzn-' . $screen, static function () use ($screen): void {
+                ScreenController::screen($screen);
+            });
+        }
+    }
 }

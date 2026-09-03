@@ -15,6 +15,19 @@ final class OperationalExceptionRepository extends BaseRepository {
         ));
     }
 
+    public function recentByStatus(?string $status, int $limit = 50): array {
+        global $wpdb;
+        $limit = max(1, min($limit, 100));
+        if ($status === null) {
+            return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->table} ORDER BY last_seen_at DESC, id DESC LIMIT %d", $limit));
+        }
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->table} WHERE status = %s ORDER BY last_seen_at DESC, id DESC LIMIT %d",
+            $status,
+            $limit
+        ));
+    }
+
     /**
      * Serialize the read-or-create active-exception path without making
      * historical fingerprints globally unique. MySQL releases this lock with
