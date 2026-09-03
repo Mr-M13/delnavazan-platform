@@ -1,0 +1,3 @@
+<?php
+namespace Delnavazan\Platform\Core\Application; use Delnavazan\Platform\Core\Infrastructure\Repository\StudentRepository;
+final class StudentService { public function create(array $d):int{if(!current_user_can('dzn_manage_students'))throw new \RuntimeException('Unauthorized');$d['status']=Normalizer::one($d['status']??'active',['active','inactive'],'student state');$d['display_name']=Normalizer::text($d['display_name']??'',191,true);$d['email']=Normalizer::email($d['email']??null);$d['country_code']=Normalizer::country($d['country_code']??null);$d['timezone']=Normalizer::timezone($d['timezone']??null);return Creator::create(new StudentRepository,$d,'DZN-STU-');} }
