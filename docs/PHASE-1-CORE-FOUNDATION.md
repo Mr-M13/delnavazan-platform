@@ -23,17 +23,17 @@ After approval, Phase 1 may deliver:
 2. application version and independent schema/data version tracking;
 3. a retry-safe migration runner with lock, audit result, and failure recovery;
 4. minimum canonical Teacher, Student, Instrument, Course, Enrolment, Term,
-   Lesson, effective-dated teacher-rate, Lesson rate/currency snapshot, optional
-   Hamnavaz link, and required external/legacy-reference persistence;
-5. internal numeric primary keys, immutable opaque UIDs, optional `DZN-*`
-   reference-code support, and audit/archive conventions;
-6. application-service interfaces for creating/resolving identities and source
-   mappings;
+   Lesson, Lesson Schedule Version, Operational Exception, optional Hamnavaz
+   link, and generic extension/audit foundations;
+5. internal numeric primary keys, immutable opaque ULID-style UIDs, approved
+   `DZN-*` reference-code support, and audit/archive conventions;
+6. application-service interfaces for creating and administering Core identities
+   without automatic duplicate merges;
 7. a versioned domain event envelope plus durable idempotency/outbox boundary;
 8. capability-protected administrator diagnostics showing version, schema,
    migration health, and documentation links;
-9. automated tests for schema-migration retry, mapping uniqueness, identity
-   non-merging, state separation, authorization, and direct-file safety;
+9. automated tests for schema-migration retry, identity non-merging, state
+   separation, exception handling, authorization, and direct-file safety;
 10. build/package validation and a documented rollback plan.
 
 These deliverables remain proposals until a separately reviewed Phase 1 brief
@@ -49,19 +49,19 @@ Phase 1 must implement the binding decisions in
 - normal rescheduling that preserves Lesson identity and schedule history;
 - UTC Lesson instants, explicit IANA timezones, and separate calendar/locale
   presentation;
-- numeric internal keys plus immutable opaque UIDs, with optional human-readable
-  `DZN-*` references that never authorize access;
+- numeric internal keys plus immutable opaque ULID-style UIDs and approved
+  human-readable `DZN-*` references that never authorize access;
 - explicit audited one-to-one Core Teacher/Hamnavaz Profile linking;
 - soft archive by default and separate authorized deletion/anonymization;
-- effective-dated teacher rates and a teacher-rate/currency snapshot per Lesson;
+- approved initial lifecycle vocabulary, Course fields, identifier prefixes,
+  custom-table direction, schedule-version model, Term replacement defaults,
+  timezone onboarding, and Operational Exception framework;
 - manual Phase 2 Core data setup with no Amelia importer or parity engine.
 
 Before implementation, the Phase 1 brief must resolve or deliberately defer the
-exact lifecycle enum/transition rules, minimum Course fields, `DZN-*` allocation
-rules, physical schema/history/correction shapes, applicable retention durations,
-and any historical Amelia archive fields required as manual references. Google
-failed-revoke support remains a later integration decision unless Phase 1 stores
-related policy metadata.
+applicable retention durations, any historical Amelia archive fields required as
+manual references, and exact implementation-level indexes/constraints. Google
+failed-revoke support remains a later integration decision.
 
 ## 5. Scope boundaries
 
@@ -86,6 +86,8 @@ related policy metadata.
 - Meta/WhatsApp sends or webhook cutover;
 - Stripe/payment processing;
 - teacher payment statements;
+- Finance module tables, TeacherRate persistence, Lesson finance snapshot
+  persistence, or audited financial-correction implementation;
 - Hamnavaz Phase 4, public directory search, or profile changes;
 - production migration, cutover, deactivation, or deletion;
 - copying production personal data into tests, docs, commits, or PRs.
@@ -97,35 +99,55 @@ The Phase 1 schema must encode the invariants in
 
 At minimum:
 
-- Teacher and Student use an internal numeric primary key and immutable opaque
-  UID independent of mutable contact data; matches never auto-merge identities;
+- Teacher and Student use an internal numeric primary key, immutable opaque
+  ULID-style UID, and approved human reference prefix independent of mutable
+  contact data; matches never auto-merge identities;
 - Instrument is shared reference data and Course is a minimal Academy product
-  that references one Instrument;
+  that references one Instrument, with the approved fields `name_fa`, `name_en`,
+  `course_type`, `status`, `default_duration_minutes`, and
+  `default_buffer_minutes`; its initial types are `standard` and
+  `introductory`, and status is `active`, `inactive`, or `archived`;
 - Enrolment is the continuing Student–Teacher–Course relationship and Term is a
   separate bounded allocation/payment/renewal cycle within it;
-- Lesson references an approved Enrolment and Term, stores canonical UTC
-  instants plus explicit schedule timezone/wall-clock provenance, and keeps
-  schedule history separately from attendance, delivery, and payability;
+- the initial Enrolment and Term state vocabularies and default policy are
+  encoded: standard Term allocation is 12 Lessons with two eligible replacement
+  Lessons, subject only to explicit audited administrator override;
+- an introductory Lesson has nullable Enrolment/Term references and may exist
+  for a Student before a continuing Enrolment; standard Lessons require an
+  Enrolment and Term, while replacement Lessons normally require them and link
+  explicitly to an original Lesson;
+- Lesson stores canonical UTC instants plus explicit schedule
+  timezone/wall-clock provenance, and keeps schedule history separately from
+  attendance, delivery, and payability;
 - normal rescheduling preserves Lesson identity; a genuine replacement/make-up
   Lesson explicitly links to the original;
-- each Lesson holds an effective teacher-rate/currency snapshot, separate from
-  Student pricing;
-- external/legacy references map scoped provider IDs to Core records and enforce
-  uniqueness without authorizing access or merging identities;
+- append-only Schedule Versions contain the approved version, UTC, timezone,
+  wall-clock, reason, actor, and supersession fields, with one current version
+  per Lesson;
+- Operational Exceptions use `open`, `acknowledged`, `resolved`, and
+  `dismissed`; ordinary form-validation errors do not create exceptions;
 - calendar preference is independent of timezone and supports at least Gregorian
   and Persian/Jalali presentation without changing canonical instants;
 - academy Teachers default to `Asia/Tehran`, Iran-based Persian Teachers default
-  to Persian calendar presentation, and both settings remain editable;
+  to Persian calendar presentation, country Iran, and editable settings;
+- Student country/city onboarding resolves to an explicit IANA timezone with
+  provenance; later Student timezone changes affect display only and never
+  reschedule Lessons or recurring schedules;
 - an optional Core Teacher/Hamnavaz Profile link is one-to-one, explicitly
   administrator-authorized, and audited; candidate matching never creates it;
 - every mutable aggregate has created/updated provenance and reversible archive
   metadata;
 - no provider secret or arbitrary raw payload is stored in Core entity rows.
 
-Physical table names, keys, indexes, and constraints require design review in the
-approved implementation PR. Custom tables are expected only where they are
-justified by transactional/query needs; WordPress-native APIs remain preferred
-for configuration and capability integration.
+Phase 1 uses InnoDB WordPress-prefixed custom tables with
+`$wpdb->get_charset_collate()`: `{prefix}dzn_teachers`,
+`{prefix}dzn_students`, `{prefix}dzn_instruments`, `{prefix}dzn_courses`,
+`{prefix}dzn_enrolments`, `{prefix}dzn_terms`, `{prefix}dzn_lessons`,
+`{prefix}dzn_lesson_schedule_versions`,
+`{prefix}dzn_operational_exceptions`, and
+`{prefix}dzn_teacher_profile_links`. Defined business fields use defined columns;
+generic JSON metadata columns are not a substitute for the Core model. Exact
+indexes and constraints require design review in the approved implementation PR.
 
 ## 7. Migration framework contract
 
@@ -160,21 +182,14 @@ An event is written atomically with the business change or through an equivalent
 durable mechanism. External delivery is not performed inside a Core transaction.
 Phase 1 need not implement production consumers.
 
-## 9. External/legacy-reference foundation
+## 9. Later provider-reference schemas
 
-Phase 1 establishes only the mapping contract needed for approved manual setup
-and later integrations:
-
-- scoped provider + external type + external ID uniqueness;
-- target Core type + Core ID;
-- mapping actor, source, reason, and timestamps;
-- active/superseded/conflicted/retired state;
-- explicit conflict review without automatic identity creation or merge;
-- no authorization based on the reference alone;
-- no dependency from Core identity creation to Amelia availability.
-
-No Amelia-specific SQL, importer, synchronizer, checkpoint, or source fingerprint
-belongs in Core or Phase 2.
+Provider IDs remain attributes/mappings rather than identity, but Phase 1 does
+not create provider-reference persistence beyond the approved Core tables.
+Later provider-specific integration schemas will define the required mapping
+fields, provenance, uniqueness, and authorization boundaries. No Amelia-specific
+SQL, importer, synchronizer, checkpoint, or source fingerprint belongs in Core
+or Phase 2.
 
 ## 10. Security requirements
 
@@ -213,21 +228,28 @@ Before Phase 1 can be proposed for merge, validate:
 4. clean install and every supported upgrade/retry path;
 5. migration lock, partial-failure recovery, and idempotent rerun;
 6. stable Core ID behavior independent of email/provider IDs;
-7. external/legacy-reference uniqueness, manual mapping conflict handling, and
-   proof that duplicate candidates never auto-merge;
-8. Lesson schedule state remains separate from attendance, notification, and
-   finance state;
-9. effective-dated rate selection, immutable historical Lesson snapshot
-   behavior, and separation of Student pricing;
-10. optional Hamnavaz link authorization, audit, one-to-one constraint, and
+7. duplicate candidate handling and proof that no workflow auto-merges Core
+   identities;
+8. approved lifecycle vocabulary, Course fields/types, UID/reference-code
+   formatting, and no identifier-as-capability behavior;
+9. introductory Lesson nullable Enrolment/Term behavior, standard/replacement
+   Lesson relationship rules, and Student → Introductory Lesson → Enrolment →
+   Term flow;
+10. Schedule Version append-only/current-version behavior, normal rescheduling,
+    replacement linking, timezone display-only changes, and recurring-schedule
+    timezone separation;
+11. Operational Exception state transitions and proof that normal form errors
+    do not create exceptions;
+12. optional Hamnavaz link authorization, audit, one-to-one constraint, and
     non-destructive unlink behavior without changing Hamnavaz itself;
-11. archive/restore audit behavior;
-12. capability, nonce, object-level authorization, SQL, sanitization, escaping,
+13. archive/restore audit behavior;
+14. capability, nonce, object-level authorization, SQL, sanitization, escaping,
     and direct-access protections;
-13. private REST/public exposure baseline;
-14. no Amelia queries/writes, provider calls, cron sends, or Hamnavaz changes;
-15. no secrets or production personal data in repository/build artifacts;
-16. static checks, tests, `git diff --check`, package contents/hash, and runtime
+15. private REST/public exposure baseline;
+16. no Amelia queries/writes, provider calls, cron sends, Hamnavaz changes, or
+    Finance module persistence;
+17. no secrets or production personal data in repository/build artifacts;
+18. static checks, tests, `git diff --check`, package contents/hash, and runtime
     smoke tests proportionate to the approved deliverable.
 
 ## 13. Acceptance criteria

@@ -28,6 +28,7 @@ Core never depends on those implementations.
 - stable Teacher and Student identities;
 - canonical Lesson identity and minimum lifecycle foundation;
 - stable identifiers and audit metadata;
+- Operational Exception lifecycle and exception-management conventions;
 - schema/data migration coordinator;
 - external/legacy-reference contract and mapping integrity;
 - domain event envelope, idempotency contract, and durable publication boundary;
@@ -252,6 +253,7 @@ Core never depends on those implementations.
 | Caller | Allowed boundary | Example |
 | --- | --- | --- |
 | Phase 2 administrator setup | Core application services | Manually create and validate the approved catalogue, identities, Enrolments, Terms, and required Lessons |
+| Academy | Core exception service | Surface an ambiguity requiring human judgement without treating a normal validation error as an exception |
 | Academy | Core lesson command service | Allocate and schedule a Lesson for an approved Enrolment |
 | Attendance | Core lesson read service | Confirm participants and schedule for an attendance evaluation |
 | Attendance | Google evidence port | Request normalized conference/participant intervals for a Lesson |

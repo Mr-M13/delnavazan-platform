@@ -27,20 +27,67 @@ Hamnavaz Phase 4.
 - Instrument is shared Delnavazan reference data.
 - Academy Course is the teaching product, references an Instrument, and is the
   catalogue item referenced by Enrolments.
-- Phase 1 keeps Course fields to the minimum needed for identity, display,
-  Instrument association, lifecycle, and audit.
+- Phase 1 Course fields are: numeric internal ID, immutable opaque ULID-style
+  UID, human reference code, `instrument_id`, `name_fa`, `name_en`,
+  `course_type`, `status`, `default_duration_minutes`,
+  `default_buffer_minutes`, and audit/archive metadata.
+- The initial Course types are `standard` and `introductory`.
+- Pricing, location, Stripe information, curriculum, and teacher-specific
+  commercial configuration are outside Phase 1.
 
-## 4. Lesson scheduling
+## 4. Initial lifecycle vocabulary
+
+The following are approved initial states. Later migrations may deliberately
+extend them.
+
+| Entity | States |
+| --- | --- |
+| Teacher | `active`, `inactive`, `archived` |
+| Student | `active`, `inactive`, `archived` |
+| Course | `active`, `inactive`, `archived` |
+| Enrolment | `draft`, `active`, `paused`, `ending`, `completed`, `cancelled`, `archived` |
+| Term | `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived` |
+| Lesson | `draft`, `scheduled`, `cancelled`, `completed`, `archived` |
+| Operational Exception | `open`, `acknowledged`, `resolved`, `dismissed` |
+
+## 5. Lesson relationship and scheduling
+
+- An `introductory` Lesson may exist with `enrolment_id = NULL` and
+  `term_id = NULL`.
+- A `standard` Lesson normally requires an Enrolment and Term.
+- A Student may therefore hold an Introductory Lesson before any continuing
+  Enrolment exists: Student → Introductory Lesson → Enrolment → Term → standard
+  Lessons.
+- A replacement Lesson normally requires the applicable Enrolment and Term and
+  explicitly links to its original Lesson.
 
 - Normal rescheduling preserves Lesson identity and appends an audited schedule
   version/history record.
-- `rescheduled` is an event/history fact, not necessarily a terminal Lesson
-  state.
+- `rescheduled` is an event/history fact, not a persistent Lesson state.
 - A genuine replacement or make-up occurrence may be a new Lesson explicitly
   linked to the original. Creating it must be an intentional business action,
   not an automatic consequence of changing time.
 
-## 5. Timezone and calendar
+Normal schedule history uses append-only Lesson Schedule Versions with:
+
+- `lesson_id`, `version_number`, `starts_at_utc`, `ends_at_utc`,
+  `schedule_timezone`, `local_wall_date`, `local_wall_time`, `reason`,
+  `changed_by`, `created_at`, and `superseded_at`;
+- exactly one current version per Lesson;
+- `replacement_for_lesson_id` on a genuine replacement/make-up Lesson.
+
+## 6. Term policy defaults
+
+- A standard Term allocates 12 Lessons by default.
+- A Term has an allowance of two eligible replacement Lessons by default.
+- An eligible replacement belongs to the same Term and must be scheduled and
+  used within that Term.
+- Unused replacement entitlement expires when the Term closes; it does not
+  automatically carry into the next Term.
+- These are policy defaults, not immutable database constants. An exceptional
+  administrator override is explicit and audited.
+
+## 7. Timezone, location, and calendar
 
 - Canonical Lesson instants are stored in UTC.
 - Teacher and Student have explicit IANA timezones.
@@ -52,18 +99,49 @@ Hamnavaz Phase 4.
   supports at least Gregorian and Persian/Jalali calendars.
 - Iran-based Persian teachers default to the Persian calendar.
 - Calendar conversion never changes the canonical instant.
+- Student onboarding asks for human-readable country and city, resolves that
+  choice to an explicit IANA timezone, and stores location separately from
+  timezone with provenance/source.
+- A Student may later change personal timezone under Profile/Preferences. That
+  changes display only: it never reschedules existing Lessons or changes an
+  Enrolment recurring schedule.
+- Recurring schedule timezone is a separate scheduling value.
+- Academy teachers default to country Iran, `Asia/Tehran`, and Persian
+  locale/calendar; each remains editable.
 
-## 6. Identifiers and public capabilities
+## 8. Identifiers and public capabilities
 
-- Every Core entity uses an internal numeric primary key and an immutable,
-  opaque UID.
-- Operationally useful entities may additionally receive a human-readable
-  `DZN-*` reference code.
+- Every Core entity uses an internal numeric database primary key and immutable
+  opaque ULID-style UID.
+- Operational entities use human-readable reference codes with these prefixes:
+  Teacher `DZN-TCH-`, Student `DZN-STU-`, Instrument `DZN-INS-`, Course
+  `DZN-CRS-`, Enrolment `DZN-ENR-`, Term `DZN-TRM-`, and Lesson `DZN-LSN-`.
+- Numeric padding is a minimum display format, not a maximum; for example,
+  `DZN-LSN-001842`.
 - Numeric IDs, opaque UIDs, and reference codes are identifiers, not
   authorization credentials.
 - Public actions use independent opaque or signed, purpose-bound capabilities.
 
-## 7. Hamnavaz linking
+## 9. Physical storage direction
+
+Phase 1 uses dedicated WordPress-prefixed InnoDB custom tables, with
+`$wpdb->get_charset_collate()`:
+
+- `{prefix}dzn_teachers`, `{prefix}dzn_students`, `{prefix}dzn_instruments`,
+  `{prefix}dzn_courses`, `{prefix}dzn_enrolments`, `{prefix}dzn_terms`, and
+  `{prefix}dzn_lessons`;
+- `{prefix}dzn_lesson_schedule_versions`;
+- `{prefix}dzn_operational_exceptions`;
+- `{prefix}dzn_teacher_profile_links`.
+
+Application and schema versions remain separate. Normal hard deletion is not
+used. Defined business fields belong in defined columns; generic JSON metadata
+columns are not a substitute for the Core model.
+
+Provider-specific mapping schemas are later integration work. They may not make
+a provider ID an identity or authorization credential.
+
+## 10. Hamnavaz linking
 
 - A Core Teacher ↔ Hamnavaz Profile link is optional, explicit,
   administrator-authorized, audited, and one-to-one where present.
@@ -71,7 +149,7 @@ Hamnavaz Phase 4.
 - Linking or unlinking does not create or delete either a Core Teacher or a
   Hamnavaz Profile.
 
-## 8. Retention and archive
+## 11. Retention and archive
 
 - Historical business records are soft-archived and retained by default.
 - Permanent deletion or anonymization is a separate, explicitly authorized
@@ -80,7 +158,7 @@ Hamnavaz Phase 4.
 - Provider provenance may be retained where it supports operations, audit, or
   support; unnecessary raw provider payloads need not be retained indefinitely.
 
-## 9. Finance
+## 12. Finance architecture — Platform Phase 9
 
 - Teacher rates are effective-dated.
 - Each Lesson receives a teacher-rate and currency snapshot.
@@ -88,8 +166,21 @@ Hamnavaz Phase 4.
   Lessons.
 - A post-completion financial correction is explicit and audited.
 - Student pricing and teacher compensation are separate concepts.
+- Phase 1 provides no TeacherRate persistence, Lesson finance snapshot
+  persistence, Finance tables, or Finance implementation. It may provide only
+  generic extension and audit foundations required by future modules.
 
-## 10. Amelia data setup and coexistence
+## 13. Operational exceptions
+
+The approved operating principle is: **Automate the happy path. Surface failures
+and ambiguity. Require human intervention only where judgement is needed.**
+
+Administration is primarily exception management, not routine booking
+operation. `OperationalException` is therefore part of the Phase 1 Core
+foundation and uses the states `open`, `acknowledged`, `resolved`, and
+`dismissed`. Ordinary form-validation errors are not Operational Exceptions.
+
+## 14. Amelia data setup and coexistence
 
 The automated Amelia migration approach considered during Phase 0 is rejected.
 The Platform will not build an Amelia importer, shadow synchronizer, parity
@@ -119,20 +210,17 @@ provider calls, and webhooks. Controlled before/after comparison remains a
 validation technique for each replacement. Neither requirement reinstates an
 Amelia importer, synchronizer, or parity engine.
 
-## 11. Remaining decisions before relevant implementation
+## 15. Remaining later decisions
 
 The approved direction does not yet choose:
 
-- exact lifecycle enum names and transition authorities for Teacher, Student,
-  Course, Enrolment, Term, and Lesson;
-- the exact minimum Course fields and catalogue governance/versioning workflow;
-- which entities receive `DZN-*` reference codes and their formatting rules;
-- physical table, key, index, schedule-history, and financial-correction shapes;
 - retention durations and anonymization rules for each business, technical, and
   archived provider-data class;
 - Google failed-revoke support procedure and token-retention period;
 - historical Amelia export format, storage location, access control, retention,
-  and restore/inspection procedure.
+  and restore/inspection procedure;
+- later Finance physical tables and audited correction implementation;
+- later provider-specific integration schemas.
 
 These items require explicit resolution or deliberate deferral in the relevant
 implementation brief. Platform Phase 1 remains not started until separately

@@ -19,14 +19,22 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 - Confirmed UTC canonical Lesson instants, explicit IANA timezones, retained
   recurring wall-clock intent, and separate Gregorian/Persian calendar
   presentation.
-- Confirmed numeric internal keys plus immutable opaque UIDs, optional `DZN-*`
-  references, and independent public-action capabilities.
+- Confirmed numeric internal keys plus immutable opaque ULID-style UIDs,
+  approved `DZN-*` reference prefixes, and independent public-action
+  capabilities.
 - Confirmed explicit, administrator-authorized, audited, one-to-one optional
   Core Teacher ↔ Hamnavaz Profile links.
 - Confirmed soft archive/default retention, separately authorized deletion or
   anonymization, and purpose-limited provider provenance.
 - Confirmed effective-dated teacher rates and a teacher-rate/currency snapshot
-  per Lesson, independent from Student pricing.
+  per Lesson, independent from Student pricing, as Platform Phase 9 Finance
+  architecture rather than Phase 1 persistence.
+- Confirmed the approved initial lifecycle vocabulary, Phase 1 Course fields,
+  ULID-style UIDs/reference prefixes, custom-table direction, append-only Lesson
+  Schedule Versions, introductory-Lesson relationship rules, Term replacement
+  defaults, timezone onboarding, and Operational Exception framework.
+- Removed premature Finance persistence from the proposed Phase 1 foundation;
+  Finance tables, rate snapshots, and audited corrections remain Phase 9 work.
 - Rejected the Phase 0 proposal for an automated Amelia importer, shadow
   synchronizer, parity engine, and repeatable mapping/checkpoint pipeline. The
   small active dataset will be recreated manually; historical Amelia data may

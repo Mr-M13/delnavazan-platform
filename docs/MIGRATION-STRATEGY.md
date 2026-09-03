@@ -60,8 +60,8 @@ Status: **NOT STARTED — requires explicit approval**
 
 - establish the approved plugin/lifecycle shell and module loader;
 - introduce separate application and schema versioning;
-- implement minimum canonical identity/state and required provider-reference
-  mapping foundations;
+- implement minimum canonical identity/state, schedule-history, exception, and
+  generic extension/audit foundations;
 - define domain commands/events and durable idempotency boundary;
 - add no production authority change, provider write, or Amelia retirement.
 
@@ -73,6 +73,8 @@ for the proposed scope.
 - manually create and validate the initial Instrument/Course catalogue;
 - manually create the handful of active Teachers and relevant active Students;
 - manually create and validate their Enrolments, Terms, and required Lessons;
+- create an Introductory Lesson directly for a Student when required, before any
+  continuing Enrolment/Term exists;
 - record setup provenance, review outcomes, and reconciled counts;
 - prepare authority, rollback, validation, and operational cutover checklists;
 - do not build an Amelia importer, synchronizer, parity engine, or new Core
@@ -174,7 +176,7 @@ The Phase 2 setup must have:
 - a reviewed list of the initial Instruments and approximately 13 Courses;
 - an approved list of active Teachers and relevant active Students;
 - explicit Enrolment, Term, and required Lesson creation decisions;
-- stable Core identifiers and only the provider mappings needed operationally;
+- stable Core identifiers and required country/city/timezone provenance;
 - per-entity actor, source/provenance, and review evidence;
 - expected and actual counts plus a second-person validation checklist;
 - no automated Amelia reads, provider side effects, portal invitations,
@@ -208,12 +210,17 @@ by silently overwriting or auto-merging identities.
 - Create each continuing Student–Teacher–Course relationship as an Enrolment.
 - Create each bounded allocation/payment/renewal cycle as a separate Term within
   its Enrolment.
-- Create only required Lessons, with canonical UTC instants and explicit IANA
-  schedule timezones/wall-clock intent.
+- Create Introductory Lessons directly for Students as needed. Create standard
+  Lessons under their Enrolment and Term; replacement Lessons normally remain in
+  that Term and explicitly link to the original.
+- Use the approved default Term policy of 12 standard Lessons and two eligible
+  replacement Lessons, with explicit audited exceptions only.
+- Create required Lessons with canonical UTC instants and explicit IANA schedule
+  timezones/wall-clock intent.
 - Normal rescheduling preserves Lesson identity and appends schedule history. A
   genuine replacement/make-up Lesson explicitly links to the original.
-- Apply the effective teacher-rate/currency snapshot to each Lesson; Student
-  pricing remains separate.
+- Finance rate/currency snapshots and audited financial corrections are deferred
+  to Platform Phase 9 and are not Phase 1 or Phase 2 setup work.
 
 ## 9. Replacement validation during coexistence
 
@@ -229,8 +236,8 @@ applicable:
 - attendance overlap and review outcomes;
 - next-day notification eligible/skipped/sent sets;
 - term-renewal eligible sets;
-- payability, introductory classification, distinct lesson counts, and statement
-  totals;
+- introductory classification, distinct lesson counts, and, when Finance is in
+  scope during Phase 9, payability and statement totals;
 - archive/restore visibility.
 
 Comparisons use stable Core identifiers and documented difference reasons. They
@@ -341,11 +348,11 @@ states. Acceptance requires the defined end-to-end business outcome.
 ## 16. Product decisions and remaining design work
 
 The binding post-Phase-0 decisions are recorded in
-[PRODUCT-DECISIONS.md](PRODUCT-DECISIONS.md). Exact lifecycle vocabularies,
-minimum Course fields, `DZN-*` allocation rules, physical schema/history shapes,
-retention durations, Google failed-revoke handling, and the historical Amelia
-archive procedure remain to be resolved or deliberately deferred in the
-relevant implementation brief.
+[PRODUCT-DECISIONS.md](PRODUCT-DECISIONS.md). Remaining later decisions are
+retention/anonymization durations, Google failed-revoke handling and token
+retention, the historical Amelia archive procedure, Platform Phase 9 Finance
+physical tables/audited correction implementation, and later provider-specific
+integration schemas.
 
 ## 17. Phase 0 restriction
 

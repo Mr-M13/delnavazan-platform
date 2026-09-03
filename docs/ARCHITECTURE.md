@@ -30,7 +30,7 @@ The intended modules are:
 
 | Module | Primary responsibility |
 | --- | --- |
-| Core | Stable business identities, canonical state, identifiers, migrations, domain events, and audit metadata |
+| Core | Stable business identities, canonical state, identifiers, migrations, domain events, Operational Exceptions, and audit metadata |
 | Academy | Enrolment, term allocation, course/instrument relationships, and academy policy |
 | Attendance | Attendance outcomes, evidence, review, and absence/join actions tied to a Lesson |
 | Notifications | Workflow eligibility, message attempts, idempotency, and delivery lifecycle across channels |
@@ -80,6 +80,8 @@ Student ────────────────────────
                                            ├─ Scheduling
                                            ├─ Finance
                                            └─ Reporting
+
+Student ─ Introductory Lesson (no Enrolment or Term required)
 ```
 
 The Lesson owns the canonical scheduled occurrence and its lifecycle. It does
@@ -216,8 +218,9 @@ These are Platform phases and do not renumber Hamnavaz phases.
    architecture, migration map, module boundaries, security baseline, and
    roadmap; complete with this documentation baseline.
 2. **Phase 1 — Core Foundation & Canonical Data Model:** plugin/lifecycle shell,
-   schema migration framework, canonical identifiers and entities, required
-   provider-reference mappings, and domain contracts; not started.
+   schema migration framework, canonical identifiers/entities, Lesson schedule
+   history, Operational Exceptions, generic extension/audit foundations, and
+   domain contracts; not started.
 3. **Phase 2 — Core Data Setup & Cutover Preparation:** manually create and
    validate the initial Instrument/Course catalogue, Teachers, active Students,
    Enrolments, Terms, and required Lessons; prepare cutover controls without an
