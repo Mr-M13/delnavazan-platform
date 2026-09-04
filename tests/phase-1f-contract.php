@@ -12,7 +12,7 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'NonceLifecycleDiagnostic::register()'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', "'phase1f-identity-gate-20260904.1'", 'NonceLifecycleDiagnostic::register()'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
 }
 
@@ -28,6 +28,7 @@ foreach ([
     "NonceLifecycleDiagnostic::logStage('mutation_complete')",
     "NonceLifecycleDiagnostic::logStage('redirect_enter')",
     'if (wp_safe_redirect($url)) exit',
+    "' · Build ' . esc_html(DZN_PLATFORM_BUILD_ID)",
     "'nonce_present'", "'nonce_scalar'", "'nonce_verify'", "'user_id'",
     "'capability_allowed'", "'page'", "'method'",
 ] as $fragment) {

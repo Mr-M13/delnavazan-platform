@@ -42,7 +42,7 @@ final class ScreenController {
         self::renderMessages();
         try { $status = (new DiagnosticsService())->status(); } catch (\Throwable) { self::forbidden(); return; }
         echo '<div class="wrap"><h1>Delnavazan Core Status</h1>';
-        echo '<p>Platform ' . esc_html((string) $status['platform_version']) . ' · Schema ' . esc_html((string) $status['schema_version']) . '</p>';
+        echo '<p>Platform ' . esc_html((string) $status['platform_version']) . ' · Build ' . esc_html(DZN_PLATFORM_BUILD_ID) . ' · Schema ' . esc_html((string) $status['schema_version']) . '</p>';
         echo '<p><strong>' . esc_html($status['healthy'] ? 'Core schema ready' : 'Core/schema problem detected') . '</strong></p>';
         echo '<p>Tables: ' . esc_html($status['tables_healthy'] ? 'ready' : 'problem') . ' · Schema version: ' . esc_html($status['schema_current'] ? 'current' : 'wrong') . ' · Required migration: ' . esc_html($status['required_migration_complete'] ? 'recorded' : 'missing') . '</p>';
         echo '<h2>Migration state</h2><p>' . esc_html(implode(', ', array_map('strval', $status['migration_state'])) ?: 'No completed migrations') . '</p>';
