@@ -62,12 +62,20 @@ if (($instrumentDefinition[1] ?? '') === '' || str_contains($instrumentDefinitio
 
 $lesson = file_get_contents("{$root}/src/Core/Application/LessonService.php");
 foreach ([
+    "isset(\$d['enrolment_id'])?Normalizer::id(\$d['enrolment_id'],false):null",
+    "isset(\$d['term_id'])?Normalizer::id(\$d['term_id'],false):null",
     "Normalizer::id(\$d['replacement_for_lesson_id']??null,false)",
+    "\$d['enrolment_id']=\$enrolment",
+    "\$d['term_id']=\$term",
     "\$d['replacement_for_lesson_id']=\$original",
     "if(\$type!=='replacement'&&\$original!==null)",
     'Replacement Lesson requires original Lesson',
 ] as $fragment) {
     if (!str_contains($lesson, $fragment)) throw new RuntimeException("Phase 1F optional Lesson relationship normalization missing: {$fragment}");
+}
+$normalizer = file_get_contents("{$root}/src/Core/Application/Normalizer.php");
+if (!str_contains($normalizer, 'return false===$v?null:(int)$v;')) {
+    throw new RuntimeException('Phase 1F optional Lesson relationship IDs must normalize invalid or blank inputs to null');
 }
 $archive = file_get_contents("{$root}/src/Core/Application/ArchiveService.php");
 foreach ([
