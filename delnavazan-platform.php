@@ -8,7 +8,7 @@
  */
 defined( 'ABSPATH' ) || exit;
 define( 'DZN_PLATFORM_VERSION', '0.1.0' );
-define( 'DZN_PLATFORM_SCHEMA_VERSION', '1' );
+define( 'DZN_PLATFORM_SCHEMA_VERSION', '2' );
 // Package-stamped Phase 1F deployment identity. This is deliberately explicit
 // because production packages do not include Git metadata.
 define( 'DZN_PLATFORM_BUILD_ID', 'phase1f-lesson-optional-id-20260904.1' );

@@ -34,5 +34,7 @@ final class Menu {
                 });
             }
         }
+        $hook = add_submenu_page('dzn-platform', 'Teacher onboarding', 'Teacher onboarding', 'dzn_manage_onboarding', 'dzn-onboarding', [OnboardingController::class, 'screen']);
+        if ($hook) add_action('load-' . $hook, [OnboardingController::class, 'handlePost']);
     }
 }
