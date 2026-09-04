@@ -12,7 +12,7 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', "'phase1f-instrument-audit-20260904.1'", 'NonceLifecycleDiagnostic::register()'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', "'phase1f-lesson-optional-id-20260904.1'", 'NonceLifecycleDiagnostic::register()'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
 }
 
@@ -58,6 +58,25 @@ $schema = file_get_contents("{$root}/src/Core/Infrastructure/Migration/Migrator.
 preg_match('/CREATE TABLE \\{\\$p\\}instruments \(([^\"]+)/', $schema, $instrumentDefinition);
 if (($instrumentDefinition[1] ?? '') === '' || str_contains($instrumentDefinition[1], 'created_by') || str_contains($instrumentDefinition[1], 'updated_by')) {
     throw new RuntimeException('Phase 1F Instrument schema/audit contract changed unexpectedly');
+}
+
+$lesson = file_get_contents("{$root}/src/Core/Application/LessonService.php");
+foreach ([
+    "Normalizer::id(\$d['replacement_for_lesson_id']??null,false)",
+    "\$d['replacement_for_lesson_id']=\$original",
+    "if(\$type!=='replacement'&&\$original!==null)",
+    'Replacement Lesson requires original Lesson',
+] as $fragment) {
+    if (!str_contains($lesson, $fragment)) throw new RuntimeException("Phase 1F optional Lesson relationship normalization missing: {$fragment}");
+}
+$archive = file_get_contents("{$root}/src/Core/Application/ArchiveService.php");
+foreach ([
+    'optionalLessonRelationshipId',
+    "\$value === 0 || \$value === '0'",
+    'Lesson relationship identifier is invalid',
+    'replacementOriginalId',
+] as $fragment) {
+    if (!str_contains($archive, $fragment)) throw new RuntimeException("Phase 1F legacy optional Lesson relationship restore guard missing: {$fragment}");
 }
 
 $lifecycle = file_get_contents("{$root}/src/Admin/Diagnostic/NonceLifecycleDiagnostic.php");

@@ -102,12 +102,12 @@ final class ArchiveService {
         $this->requireUsable($teachers, $lesson->teacher_id, 'Lesson teacher');
         $this->requireUsable($courses, $lesson->course_id, 'Lesson course');
 
-        $hasEnrolment = $this->hasPositiveId($lesson->enrolment_id);
-        $hasTerm = $this->hasPositiveId($lesson->term_id);
-        $hasReplacementOriginal = $this->hasPositiveId($lesson->replacement_for_lesson_id);
-        if (($lesson->enrolment_id !== null && !$hasEnrolment) || ($lesson->term_id !== null && !$hasTerm) || ($lesson->replacement_for_lesson_id !== null && !$hasReplacementOriginal)) {
-            throw new \InvalidArgumentException('Lesson relationship identifier is invalid');
-        }
+        $enrolmentId = $this->optionalLessonRelationshipId($lesson->enrolment_id);
+        $termId = $this->optionalLessonRelationshipId($lesson->term_id);
+        $replacementOriginalId = $this->optionalLessonRelationshipId($lesson->replacement_for_lesson_id);
+        $hasEnrolment = $enrolmentId !== null;
+        $hasTerm = $termId !== null;
+        $hasReplacementOriginal = $replacementOriginalId !== null;
         if ($lesson->lesson_type === 'introductory') {
             if ($hasTerm && !$hasEnrolment) throw new \InvalidArgumentException('Introductory Lesson term requires Enrolment');
             if (!$hasEnrolment) {
@@ -121,10 +121,10 @@ final class ArchiveService {
         }
 
         /** @var object $enrolment */
-        $enrolment = $this->requireUsable($enrolments, $lesson->enrolment_id, 'Lesson enrolment');
+        $enrolment = $this->requireUsable($enrolments, $enrolmentId, 'Lesson enrolment');
         if (!$this->sameIdentity($lesson, $enrolment)) throw new \InvalidArgumentException('Lesson identity does not match Enrolment');
 
-        if ($hasTerm && !$terms->belongsToUsableEnrolment((int) $lesson->term_id, (int) $lesson->enrolment_id)) {
+        if ($hasTerm && !$terms->belongsToUsableEnrolment($termId, $enrolmentId)) {
             throw new \InvalidArgumentException('Lesson Term does not belong to Enrolment');
         }
 
@@ -134,8 +134,8 @@ final class ArchiveService {
         }
 
         if (!$hasReplacementOriginal) throw new \InvalidArgumentException('Replacement Lesson requires original Lesson');
-        $original = $lessons->findNotArchived((int) $lesson->replacement_for_lesson_id);
-        if (!$original || !$this->sameIdentity($lesson, $original) || (int) $original->enrolment_id !== (int) $lesson->enrolment_id || (int) $original->term_id !== (int) $lesson->term_id) {
+        $original = $lessons->findNotArchived($replacementOriginalId);
+        if (!$original || !$this->sameIdentity($lesson, $original) || (int) $original->enrolment_id !== $enrolmentId || (int) $original->term_id !== $termId) {
             throw new \InvalidArgumentException('Replacement original relationship is invalid');
         }
     }
@@ -164,6 +164,12 @@ final class ArchiveService {
 
     private function hasPositiveId(mixed $id): bool {
         return filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) !== false;
+    }
+
+    private function optionalLessonRelationshipId(mixed $value): ?int {
+        if ($value === null || $value === '' || $value === 0 || $value === '0') return null;
+        if (!$this->hasPositiveId($value)) throw new \InvalidArgumentException('Lesson relationship identifier is invalid');
+        return (int) $value;
     }
 
     private function sameIdentity(object $left, object $right): bool {
