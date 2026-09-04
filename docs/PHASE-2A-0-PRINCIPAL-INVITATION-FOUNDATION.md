@@ -16,14 +16,24 @@ Teacher authority into Student access.
 ## Invitation and secret handling
 
 An administrator can issue, reissue, or revoke an invitation for an active,
-unarchived Core Teacher. Reissue supersedes an unclaimed active generation.
-Each generation is recipient-bound, single-use, revocable, and expiry-bound.
+unarchived Core Teacher. Issuance creates a recipient-bound queued-for-delivery
+generation and a durable delivery intent; it does not generate, retain, or
+return a raw secret. Reissue supersedes an unclaimed queued or active
+generation. Each generation is single-use, revocable, and expiry-bound.
 
-The raw secret is generated in memory and returned only to the calling service
-for a future delivery adapter. Only a keyed digest is stored. Audit and outbox
-tables contain invitation/generation references and idempotency keys only;
-there is no provider integration in this slice. The minimal admin surface
-creates delivery intent but never renders a secret or places one in a URL.
+The bounded Core delivery-preparation contract is internal-only: a trusted
+delivery worker locks and revalidates the current queued generation, recipient,
+Teacher, expiry, and pending intent. It then generates the raw secret in
+memory, persists only its keyed digest plus active/delivery-preparation facts,
+and returns the ephemeral send payload to the transport boundary. There is no
+provider integration in this slice. A crash or uncertain outcome after
+preparation must be recovered by superseding and replacing the generation, not
+by attempting to recover or reuse a lost secret. Only the current active
+generation may be claimed.
+
+Audit and outbox tables contain invitation/generation references and
+idempotency keys only; no raw reusable secret appears in the database, admin
+UI, audit, outbox, logs, or URL.
 
 ## Claim and WordPress provisioning recovery
 
