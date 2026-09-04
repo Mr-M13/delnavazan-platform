@@ -19,17 +19,21 @@ An administrator can issue, reissue, or revoke an invitation for an active,
 unarchived Core Teacher. Issuance creates a recipient-bound queued-for-delivery
 generation and a durable delivery intent; it does not generate, retain, or
 return a raw secret. Reissue supersedes an unclaimed queued or active
-generation. Each generation is single-use, revocable, and expiry-bound.
+generation. Each generation stores an immutable, normalized Core-owned
+recipient snapshot and its digest. Each generation is single-use, revocable,
+and expiry-bound; a changed recipient always requires a replacement generation.
 
 The bounded Core delivery-preparation contract is internal-only: a trusted
-delivery worker locks and revalidates the current queued generation, recipient,
-Teacher, expiry, and pending intent. It then generates the raw secret in
+delivery worker locks and revalidates the current queued generation, frozen
+recipient snapshot/digest, Teacher, expiry, and pending intent. It obtains the
+recipient only from that Core-owned snapshot; it never accepts caller-supplied
+recipient text as delivery authority. It then generates the raw secret in
 memory, persists only its keyed digest plus active/delivery-preparation facts,
-and returns the ephemeral send payload to the transport boundary. There is no
-provider integration in this slice. A crash or uncertain outcome after
-preparation must be recovered by superseding and replacing the generation, not
-by attempting to recover or reuse a lost secret. Only the current active
-generation may be claimed.
+and returns the recipient and secret only in the ephemeral send payload to the
+transport boundary. There is no provider integration in this slice. A crash or
+uncertain outcome after preparation must be recovered by superseding and
+replacing the generation, not by attempting to recover or reuse a lost secret.
+Only the current active generation may be claimed.
 
 Audit and outbox tables contain invitation/generation references and
 idempotency keys only; no raw reusable secret appears in the database, admin
@@ -38,8 +42,10 @@ UI, audit, outbox, logs, or URL.
 ## Claim and WordPress provisioning recovery
 
 Existing-account claim requires the authenticated WordPress user to own the
-recipient email; email equality alone is never authority. A new WordPress user
-is provisioned outside the Core SQL transaction and is recorded by an
+frozen generation recipient snapshot; matching an email alone is never
+authority. Claim validation does not resolve a recipient from a mutable Teacher
+profile. A new WordPress user is provisioned outside the Core SQL transaction
+using the frozen snapshot and is recorded by an
 untrusted-to-domain, random attempt marker. A crash or uncertain external
 outcome transitions the attempt to recovery_required; it must be reconciled,
 not retried by blindly creating another account or deleting one.
@@ -50,6 +56,17 @@ writes the unique Teacher link, updates onboarding state, and writes audit
 facts. Reissue/revoke makes a stale attempt non-finalisable. Repeating the
 same command returns its existing durable attempt; competing claims are
 rejected by the unique generation owner and unique Teacher/User link slots.
+
+## Recipient privacy and retention
+
+The recipient snapshot is contact PII held only on the invitation generation;
+admin state views, audit events, and outbox rows remain reference-only. A
+high-trust, service-only anonymisation operation may clear generation snapshots
+and recipient digests, and replaces the parent digest with a non-recipient
+tombstone, only after every generation is terminal (`claimed`, `revoked`, or
+`superseded`). It rejects any invitation with a queued or active generation, so
+no live delivery or claim can lose its authoritative binding. The operation
+records a safe reason only and never writes the recipient into audit or outbox.
 
 ## Offboarding
 
