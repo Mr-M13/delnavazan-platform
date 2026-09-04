@@ -12,7 +12,7 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', "'phase1f-identity-gate-20260904.1'", 'NonceLifecycleDiagnostic::register()'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', "'phase1f-instrument-audit-20260904.1'", 'NonceLifecycleDiagnostic::register()'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
 }
 
