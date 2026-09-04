@@ -46,6 +46,20 @@ foreach (["add_action('load-' . \$hook", 'ScreenController::handlePost($screen)'
     if (!str_contains($menu, $fragment)) throw new RuntimeException("Phase 1F pre-header mutation hook missing: {$fragment}");
 }
 
+$creator = file_get_contents("{$root}/src/Core/Application/Creator.php");
+$repository = file_get_contents("{$root}/src/Core/Infrastructure/Repository/BaseRepository.php");
+foreach (['creationAuditValues', 'array_replace($data,$repo->creationAuditValues'] as $fragment) {
+    if (!str_contains($creator, $fragment)) throw new RuntimeException("Phase 1F schema-aware creation audit missing: {$fragment}");
+}
+foreach (['creationAuditValues', 'hasColumn', 'DESCRIBE {$this->table}', 'Unable to inspect persistence schema'] as $fragment) {
+    if (!str_contains($repository, $fragment)) throw new RuntimeException("Phase 1F repository audit compatibility missing: {$fragment}");
+}
+$schema = file_get_contents("{$root}/src/Core/Infrastructure/Migration/Migrator.php");
+preg_match('/CREATE TABLE \\{\\$p\\}instruments \(([^\"]+)/', $schema, $instrumentDefinition);
+if (($instrumentDefinition[1] ?? '') === '' || str_contains($instrumentDefinition[1], 'created_by') || str_contains($instrumentDefinition[1], 'updated_by')) {
+    throw new RuntimeException('Phase 1F Instrument schema/audit contract changed unexpectedly');
+}
+
 $lifecycle = file_get_contents("{$root}/src/Admin/Diagnostic/NonceLifecycleDiagnostic.php");
 foreach ([
     'plugin_bootstrap', 'plugins_loaded', 'admin_init_early', 'admin_menu_early',
