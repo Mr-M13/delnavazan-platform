@@ -8,6 +8,8 @@ $migration = file_get_contents( $root . '/src/Core/Infrastructure/Migration/Migr
 $service = file_get_contents( $root . '/src/Core/Application/PrincipalInvitationService.php' );
 $repository = file_get_contents( $root . '/src/Core/Infrastructure/Repository/PrincipalInvitationRepository.php' );
 $admin = file_get_contents( $root . '/src/Admin/Controller/OnboardingController.php' );
+$runtime = file_get_contents( $root . '/tests/phase-2a0-isolated-delivery-assertion.php' );
+$runbook = file_get_contents( $root . '/docs/PHASE-2A-0-RUNTIME-VALIDATION.md' );
 $required = [
     '002_principal_invitation_foundation', '003_invitation_recipient_snapshot',
     'teacher_onboarding_states', 'teacher_principal_links', 'student_principal_links',
@@ -31,4 +33,6 @@ if ( strpos( $service, 'beginExistingClaim(string $secret,string $recipient' ) !
 foreach ( ['check_admin_referer', 'dzn_manage_onboarding', 'never rendered, retained, logged, or placed in URLs'] as $fragment ) if ( strpos( $admin, $fragment ) === false ) throw new RuntimeException( 'Missing admin security contract: ' . $fragment );
 if ( strpos( $admin, "['secret']" ) !== false ) throw new RuntimeException( 'Admin must not render invitation secrets' );
 if ( strpos( $migration, 'booking_requests' ) !== false || strpos( $migration, 'availability_windows' ) !== false ) throw new RuntimeException( '2A.0 must not introduce booking/routing/availability tables' );
+foreach ( ['DZN_PHASE_2A0_RUNTIME_TEST', "wp_get_environment_type() === 'production'", 'dzn_phase_2a0_isolated_runtime_marker', 'prepareDelivery', 'dzn_phase_2a0_assert_no_raw_secret_persistence', 'no invitation secret printed'] as $fragment ) if ( strpos( $runtime, $fragment ) === false ) throw new RuntimeException( 'Missing isolated runtime safety contract: ' . $fragment );
+foreach ( ['002 → 003', 'No beta data or accounts', 'raw invitation secret', 'existing authenticated WordPress account', 'recovery_required', 'terminal recipient anonymization', 'rollback', 'Cleanup'] as $fragment ) if ( strpos( $runbook, $fragment ) === false ) throw new RuntimeException( 'Missing runtime validation runbook coverage: ' . $fragment );
 echo "Phase 2A.0 source contract passed\n";

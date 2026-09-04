@@ -5,6 +5,16 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Unreleased
 
+### Phase 2A.0 — Principal invitation runtime-validation preparation
+
+- Added an isolated-only, reversible WordPress/MySQL validation matrix and a
+  WP-CLI delivery-preparation assertion helper. The helper is not packaged,
+  creates no accounts, emits no raw secret, and requires an explicit
+  non-production database marker.
+- Stamped the clean runtime-validation package identity for the approved
+  schema-version-3 Phase 2A.0 head. No deployment, provider send, Amelia
+  change, or authority cutover is included.
+
 ### Phase 1 — Core Foundation & Controlled Runtime Validation
 
 - Implemented the Phase 1 canonical schema, migration verification/locking,

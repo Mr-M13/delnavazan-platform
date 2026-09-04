@@ -81,3 +81,8 @@ Before production use, run fresh-install/rerun migration verification and the
 invitation, claim, collision, recovery, capability/nonce, and raw-secret
 non-persistence cases in isolated WordPress + MySQL. No beta Teacher/Student
 account or provider delivery should be used for this foundation.
+
+The exact reversible procedure, including the 002 → 003 recipient-snapshot
+upgrade, terminal-recipient retention check, and cleanup boundary, is in
+`PHASE-2A-0-RUNTIME-VALIDATION.md`. Its WP-CLI-only assertion helper is test
+support, not plugin runtime code and is excluded from the installable package.
