@@ -24,6 +24,15 @@ $required = [
     'UNIQUE KEY idempotency_key(idempotency_key)', 'ENGINE=InnoDB',
 ];
 foreach ( $required as $fragment ) if ( strpos( $migration, $fragment ) === false ) throw new RuntimeException( 'Missing 2A.0 schema contract: ' . $fragment );
+foreach ( [
+    'install_invitation_recipient_snapshot',
+    "SHOW COLUMNS FROM {\$table} LIKE %s",
+    'ALTER TABLE {$table} ADD COLUMN {$definition}',
+    "'recipient_snapshot' => 'recipient_snapshot varchar(320) NULL'",
+    "'recipient_digest' => 'recipient_digest char(64) NULL'",
+    'if ( $result === false )',
+] as $fragment ) if ( strpos( $migration, $fragment ) === false ) throw new RuntimeException( 'Missing 002-to-003 upgrade contract: ' . $fragment );
+if ( strpos( $migration, '002_principal_invitation_foundation' ) >= strpos( $migration, '003_invitation_recipient_snapshot' ) ) throw new RuntimeException( 'Migration 003 must remain ordered after the schema-2 foundation' );
 foreach ( ['queued_for_delivery', 'prepareDelivery(int $generationId)', 'bin2hex(random_bytes(32))', 'hash_hmac(', 'recovery_required', 'Authenticated principal ownership and recipient binding required', 'Invitation has been superseded', 'Teacher principal link already exists', 'teacher_principal.claim_finalized', 'anonymizeTerminalInvitationRecipient', 'Nonterminal invitation recipient cannot be anonymized'] as $fragment ) if ( strpos( $service, $fragment ) === false ) throw new RuntimeException( 'Missing invitation/claim contract: ' . $fragment );
 $issue = substr( $service, strpos( $service, 'public function issue' ), strpos( $service, 'public function prepareDelivery' ) - strpos( $service, 'public function issue' ) );
 if ( strpos( $issue, 'random_bytes' ) !== false || strpos( $issue, "'secret'=>" ) !== false ) throw new RuntimeException( 'Issuance must not generate or return an invitation secret' );

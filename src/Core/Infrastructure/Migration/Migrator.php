@@ -43,8 +43,31 @@ final class Migrator {
 		"CREATE TABLE {$p}platform_outbox (id bigint unsigned NOT NULL AUTO_INCREMENT,aggregate_type varchar(32) NOT NULL,aggregate_id bigint unsigned NOT NULL,event_type varchar(64) NOT NULL,invitation_id bigint unsigned NULL,generation_id bigint unsigned NULL,idempotency_key char(64) NOT NULL,status varchar(16) NOT NULL,available_at datetime NOT NULL,leased_at datetime NULL,processed_at datetime NULL,attempt_count smallint unsigned NOT NULL DEFAULT 0,created_at datetime NOT NULL,PRIMARY KEY(id),UNIQUE KEY idempotency_key(idempotency_key),KEY available(status,available_at),KEY invitation_generation(invitation_id,generation_id)) ENGINE=InnoDB $c"
 		); foreach($tables as $sql){dbDelta($sql); if($wpdb->last_error!=='')throw new \RuntimeException('Migration operation failed: '.$wpdb->last_error);}
 	}
-	/** Adds the immutable Core-owned recipient binding for databases that ran 002 before this correction. */
-	private static function install_invitation_recipient_snapshot(): void { global $wpdb; require_once ABSPATH . 'wp-admin/includes/upgrade.php'; $p=$wpdb->prefix.'dzn_'; $c=$wpdb->get_charset_collate(); $sql="CREATE TABLE {$p}teacher_invitation_generations (id bigint unsigned NOT NULL AUTO_INCREMENT,invitation_id bigint unsigned NOT NULL,generation_number int unsigned NOT NULL,recipient_snapshot varchar(320) NULL,recipient_digest char(64) NULL,secret_digest char(64) NULL,status varchar(24) NOT NULL,expires_at datetime NOT NULL,delivery_prepared_at datetime NULL,delivery_attempt_count smallint unsigned NOT NULL DEFAULT 0,claimed_at datetime NULL,revoked_at datetime NULL,superseded_at datetime NULL,delivery_key char(64) NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY invitation_generation(invitation_id,generation_number),UNIQUE KEY secret_digest(secret_digest),UNIQUE KEY delivery_key(delivery_key),KEY status_expires(status,expires_at)) ENGINE=InnoDB $c"; dbDelta($sql); if($wpdb->last_error!=='')throw new \RuntimeException('Migration operation failed: '.$wpdb->last_error); }
+	/**
+	 * Adds the immutable Core-owned recipient binding for databases that completed
+	 * 002 before these fields were introduced. dbDelta() did not reliably add
+	 * these nullable fields to that existing table, so this is deliberately
+	 * introspection-driven and only alters columns that are genuinely absent.
+	 */
+	private static function install_invitation_recipient_snapshot(): void {
+		global $wpdb;
+		$table = $wpdb->prefix . 'dzn_teacher_invitation_generations';
+		$columns = array(
+			'recipient_snapshot' => 'recipient_snapshot varchar(320) NULL',
+			'recipient_digest' => 'recipient_digest char(64) NULL',
+		);
+
+		foreach ( $columns as $name => $definition ) {
+			$column = $wpdb->get_row( $wpdb->prepare( "SHOW COLUMNS FROM {$table} LIKE %s", $name ) );
+			if ( $column ) {
+				continue;
+			}
+			$result = $wpdb->query( "ALTER TABLE {$table} ADD COLUMN {$definition}" );
+			if ( $result === false ) {
+				throw new \RuntimeException( 'Migration operation failed: ' . $wpdb->last_error );
+			}
+		}
+	}
 	private static function verify_principal_invitation_schema(): void { global $wpdb; $p=$wpdb->prefix.'dzn_'; $spec=array('teacher_onboarding_states'=>array('teacher_id','state'),'teacher_principal_links'=>array('teacher_id','wordpress_user_id'),'student_principal_links'=>array('student_id','wordpress_user_id'),'teacher_invitations'=>array('teacher_id','recipient_digest'),'teacher_invitation_generations'=>array('recipient_snapshot','recipient_digest','secret_digest','delivery_key'),'student_account_invitations'=>array('student_id','recipient_digest'),'student_account_invitation_generations'=>array('secret_digest','delivery_key'),'account_claim_attempts'=>array('command_key','generation_id','state'),'platform_audit_events'=>array('idempotency_key','event_type'),'platform_outbox'=>array('idempotency_key','status')); foreach($spec as $table=>$columns){if($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.$table))!==$p.$table)throw new \RuntimeException('Migration verification failed: missing '.$table); foreach($columns as $column){if(!$wpdb->get_row("SHOW COLUMNS FROM {$p}{$table} LIKE '{$column}'"))throw new \RuntimeException('Migration verification failed: missing '.$table.'.'.$column);}} foreach(array(array('teacher_principal_links','teacher_id',true),array('teacher_principal_links','wordpress_user_id',true),array('student_principal_links','student_id',true),array('student_principal_links','wordpress_user_id',true),array('teacher_invitation_generations','secret_digest',true),array('account_claim_attempts','command_key',true),array('platform_audit_events','idempotency_key',true),array('platform_outbox','idempotency_key',true)) as $index){if(!self::has_index($p.$index[0],$index[1],$index[2]))throw new \RuntimeException('Migration verification failed: principal index '.$index[1]);}}
 	private static function has_index(string $table,string $index,bool $unique):bool { global $wpdb; $row=$wpdb->get_row($wpdb->prepare("SHOW INDEX FROM {$table} WHERE Key_name=%s",$index)); return $row && (!$unique || (int)$row->Non_unique===0); }
 	private static function verify_delivery_preparation_schema(): void { global $wpdb; $table=$wpdb->prefix.'dzn_teacher_invitation_generations'; foreach(array('recipient_snapshot'=>'varchar(320)','recipient_digest'=>'char(64)','secret_digest'=>'char(64)') as $column=>$type){$row=$wpdb->get_row("SHOW COLUMNS FROM {$table} LIKE '{$column}'");if(!$row||strtolower($row->Type)!==$type||$row->Null!=='YES')throw new \RuntimeException('Migration verification failed: invitation recipient/secret field '.$column);} foreach(array('delivery_prepared_at','delivery_attempt_count') as $column){if(!$wpdb->get_row("SHOW COLUMNS FROM {$table} LIKE '{$column}'"))throw new \RuntimeException('Migration verification failed: missing delivery preparation field '.$column);} }
