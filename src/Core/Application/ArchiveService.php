@@ -57,7 +57,7 @@ final class ArchiveService {
 
     private function assertNoArchiveDependencies(string $type, int $id, BaseRepository $repository): void {
         $conflict = match ($type) {
-            'teacher' => $repository instanceof TeacherRepository && $repository->hasOperationalEnrolments($id),
+            'teacher' => $repository instanceof TeacherRepository && ($repository->hasOperationalEnrolments($id) || $repository->hasActivePrincipalAuthority($id)),
             'student' => $repository instanceof StudentRepository && $repository->hasOperationalEnrolments($id),
             'instrument' => $repository instanceof InstrumentRepository && $repository->hasUnarchivedCourses($id),
             'course' => $repository instanceof CourseRepository && $repository->hasOperationalEnrolments($id),

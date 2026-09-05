@@ -15,4 +15,14 @@ final class TeacherRepository extends BaseRepository {
             $teacherId
         ));
     }
+
+    /** Archival is blocked until Teacher-domain authority is explicitly offboarded. */
+    public function hasActivePrincipalAuthority(int $teacherId): bool {
+        global $wpdb;
+        $links = $wpdb->prefix . 'dzn_teacher_principal_links';
+        return (bool) $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$links} WHERE teacher_id = %d AND status = 'active' LIMIT 1",
+            $teacherId
+        ));
+    }
 }
