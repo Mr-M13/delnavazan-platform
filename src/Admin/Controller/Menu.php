@@ -36,6 +36,8 @@ final class Menu {
         }
 		$hook = add_submenu_page('dzn-platform', 'Teaching eligibility', 'Teaching eligibility', 'dzn_manage_teaching_eligibility', 'dzn-teaching-eligibility', [TeachingEligibilityController::class, 'screen']);
 		if ($hook) add_action('load-' . $hook, [TeachingEligibilityController::class, 'handlePost']);
+		$hook = add_submenu_page('dzn-platform', 'Teacher availability', 'Teacher availability', 'dzn_manage_teacher_availability', 'dzn-teacher-availability', [TeacherAvailabilityController::class, 'screen']);
+		if ($hook) add_action('load-' . $hook, [TeacherAvailabilityController::class, 'handlePost']);
         $hook = add_submenu_page('dzn-platform', 'Teacher onboarding', 'Teacher onboarding', 'dzn_manage_onboarding', 'dzn-onboarding', [OnboardingController::class, 'screen']);
         if ($hook) add_action('load-' . $hook, [OnboardingController::class, 'handlePost']);
     }

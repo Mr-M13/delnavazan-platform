@@ -14,5 +14,6 @@ foreach(['course_type!==\'introductory\'','instrument_id!==$instrument','Valid a
 foreach(['accepting','limited','paused','Teacher not found']as$f)if(strpos($accepting,$f)===false)throw new RuntimeException('Missing accepting-state contract: '.$f);
 foreach(['check_admin_referer','dzn_manage_teaching_eligibility','set_teacher_course_eligibility','set_instrument_intro_default','set_teacher_accepting_state']as$f)if(strpos($admin,$f)===false)throw new RuntimeException('Missing protected admin contract: '.$f);
 if(preg_match('/(?:amelia_|wp_amelia|Amelia\\\\)/',$migration.$repo.$eligibility.$default.$accepting.$admin))throw new RuntimeException('2A.1-A must not acquire Amelia dependency');
-foreach(['teacher_availability','booking_requests','teacher_offers','platform_payments']as$f)if(stripos($migration,$f)!==false)throw new RuntimeException('2A.1-A introduced later-slice schema: '.$f);
+$phase2a1aSchema=substr($migration,strpos($migration,'private static function install_teaching_eligibility_foundation'),strpos($migration,'private static function install_teacher_availability_foundation')-strpos($migration,'private static function install_teaching_eligibility_foundation'));
+foreach(['teacher_availability','booking_requests','teacher_offers','platform_payments']as$f)if(stripos($phase2a1aSchema,$f)!==false)throw new RuntimeException('2A.1-A introduced later-slice schema: '.$f);
 echo "Phase 2A.1-A source contract passed\n";
