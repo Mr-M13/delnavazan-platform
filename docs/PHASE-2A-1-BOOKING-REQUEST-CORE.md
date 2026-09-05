@@ -1,0 +1,7 @@
+# Phase 2A.1-C — Booking Request Core
+
+Migration `006_booking_request_core` creates an intake-only aggregate: one private Booking Request, immutable initial contact snapshot, and ordered requested-time snapshots. Submission starts `submitted` / `unresolved`, records a server-generated `retention_due_at` exactly 180 days after creation, and never creates a Student, Teacher assignment, Lesson, payment, notification, or reservation.
+
+Public REST accepts only the approved contact, Instrument/course, requested-time, and privacy-acknowledgement allowlist. It returns only `success` and a non-authorizing opaque `REQ-*` reference; it never exposes an internal numeric ID. There is no public read, update, cancellation, claim, routing, offer, or identity endpoint.
+
+Requested times use IANA local-wall-clock conversion with DST gap/fold rejection and half-open occupied intervals. A valid selected Intro Course supplies authoritative duration/buffer; otherwise the immutable intake defaults are 30 instructional minutes plus 15 buffer minutes. Contact snapshots are never resolved by later email, mobile, or WhatsApp matching.

@@ -38,6 +38,7 @@ final class Menu {
 		if ($hook) add_action('load-' . $hook, [TeachingEligibilityController::class, 'handlePost']);
 		$hook = add_submenu_page('dzn-platform', 'Teacher availability', 'Teacher availability', 'dzn_manage_teacher_availability', 'dzn-teacher-availability', [TeacherAvailabilityController::class, 'screen']);
 		if ($hook) add_action('load-' . $hook, [TeacherAvailabilityController::class, 'handlePost']);
+		add_submenu_page('dzn-platform', 'Booking Requests', 'Booking Requests', 'dzn_view_booking_requests', 'dzn-booking-requests', [BookingRequestController::class, 'screen']);
         $hook = add_submenu_page('dzn-platform', 'Teacher onboarding', 'Teacher onboarding', 'dzn_manage_onboarding', 'dzn-onboarding', [OnboardingController::class, 'screen']);
         if ($hook) add_action('load-' . $hook, [OnboardingController::class, 'handlePost']);
     }
