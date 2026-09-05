@@ -1,6 +1,6 @@
 # Phase 2A.1-C — Booking Request Core
 
-Migration `006_booking_request_core` creates an intake-only aggregate: one private Booking Request, immutable initial contact snapshot, and ordered requested-time snapshots. Submission starts `submitted` / `unresolved`, records a server-generated `retention_due_at` exactly 180 days after creation, and never creates a Student, Teacher assignment, Lesson, payment, notification, or reservation.
+Migration `006_booking_request_core` creates an intake-only aggregate: one private Booking Request, immutable initial contact snapshot, and ordered requested-time snapshots. The mandatory contact snapshot records full name, email, mobile, country, city, timezone, communication language, and WhatsApp contact facts without establishing Student identity. Submission starts `submitted` / `unresolved`, records a server-generated `retention_due_at` exactly 24 months after creation, and never creates a Student, Teacher assignment, Lesson, payment, notification, or reservation.
 
 Public REST accepts only the approved contact, Instrument/course, requested-time, and privacy-acknowledgement allowlist. It returns only `success` and a non-authorizing opaque `REQ-*` reference; it never exposes an internal numeric ID. There is no public read, update, cancellation, claim, routing, offer, or identity endpoint.
 
