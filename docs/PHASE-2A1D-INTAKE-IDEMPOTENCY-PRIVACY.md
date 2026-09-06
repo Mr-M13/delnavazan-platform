@@ -17,7 +17,8 @@ create a Student. Review outcomes are protected by a dedicated capability and no
 
 Privacy erasure is separately capability-gated. Only submitted, unresolved, unconverted
 requests can be erased. It closes request workflow authority before clearing snapshot
-PII and contact digests, revokes live replay authority, closes open duplicate flags, and
+PII and contact digests, revokes live replay authority, removes every duplicate-review row
+involving the erased request (including candidate-side rows and their signal digests), and
 retains an audit tombstone plus non-identifying operational request facts. This phase has
 no automatic retention purge.
 
