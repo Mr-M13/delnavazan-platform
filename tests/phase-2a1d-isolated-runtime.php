@@ -1,0 +1,20 @@
+<?php
+/**
+ * Disposable WordPress/MySQL assertion. Run only with DZN_PHASE_2A1D_RUNTIME_TEST=isolated.
+ * Output is intentionally non-sensitive: no request references, keys, contact facts or SQL.
+ */
+if ( getenv('DZN_PHASE_2A1D_RUNTIME_TEST') !== 'isolated' || wp_get_environment_type() === 'production' ) { fwrite(STDERR,"Refusing non-isolated runtime\n"); exit(2); }
+use Delnavazan\Platform\Core\Application\BookingRequestSubmissionService;
+use Delnavazan\Platform\Core\Application\IdempotencyConflictException;
+use Delnavazan\Platform\Core\Application\BookingRequestPrivacyService;
+
+global $wpdb; $p=$wpdb->prefix.'dzn_'; $now=gmdate('Y-m-d H:i:s');
+foreach(array('booking_request_privacy_tombstones','booking_request_duplicate_flags','booking_request_submission_keys','booking_request_requested_times','booking_request_contact_snapshots','booking_requests','courses','instruments')as$table)$wpdb->query("DELETE FROM {$p}{$table}");
+$wpdb->insert($p.'instruments',array('uid'=>'RUNTIMEINSTRUMENT000000000','reference_code'=>'DZN-INSTR-RUNTIME','slug'=>'runtime-intake','name_fa'=>'Runtime','name_en'=>'Runtime','status'=>'active','created_at'=>$now,'updated_at'=>$now));$instrument=(int)$wpdb->insert_id;if(!$instrument)throw new RuntimeException('Synthetic instrument fixture failed');
+$wpdb->insert($p.'courses',array('uid'=>'RUNTIMECOURSE0000000000000','reference_code'=>'DZN-COURSE-RUNTIME','instrument_id'=>$instrument,'name_fa'=>'Runtime','name_en'=>'Runtime','course_type'=>'introductory','status'=>'active','default_duration_minutes'=>45,'default_buffer_minutes'=>10,'created_at'=>$now,'updated_at'=>$now));$course=(int)$wpdb->insert_id;if(!$course)throw new RuntimeException('Synthetic course fixture failed');
+$input=array('requested_instrument_id'=>$instrument,'selected_intro_course_id'=>$course,'full_name'=>'Synthetic Runtime','email'=>'phase2a1d-runtime@example.invalid','mobile'=>'+61400123456','country'=>'AU','city'=>'Brisbane','timezone'=>'Australia/Brisbane','communication_language'=>'en','whatsapp_same_as_mobile'=>true,'whatsapp_number'=>'','privacy_notice_accepted'=>true,'privacy_notice_version'=>'2026-09-05','requested_times'=>array(array('local_date'=>'2026-10-12','local_start_time'=>'09:00','timezone'=>'Australia/Brisbane')));
+$service=new BookingRequestSubmissionService();$key='runtime-idempotency-key-0000000000000001';$first=$service->submitPublic($input,$key);$second=$service->submitPublic($input,$key);$stored=$wpdb->get_row("SELECT key_digest,payload_digest FROM {$p}booking_request_submission_keys LIMIT 1");if(!$first['success']||$second['request_reference']!==$first['request_reference']||empty($second['replayed'])||(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}booking_requests")!==1||$stored->key_digest===$key||$stored->payload_digest===wp_json_encode($input))throw new RuntimeException('Idempotency replay or privacy failed');
+$conflict=$input;$conflict['requested_times'][0]['local_start_time']='10:00';try{$service->submitPublic($conflict,$key);throw new RuntimeException('Idempotency conflict accepted');}catch(IdempotencyConflictException){}
+$service->submitPublic($input,'runtime-idempotency-key-0000000000000002');if((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}booking_request_duplicate_flags")!==3)throw new RuntimeException('Exact duplicate signals missing');
+$request=(int)$wpdb->get_var("SELECT id FROM {$p}booking_requests ORDER BY id ASC LIMIT 1");(new BookingRequestPrivacyService())->erase($request,1,'runtime_test');$snapshot=$wpdb->get_row($wpdb->prepare("SELECT email,mobile,whatsapp_number,email_digest FROM {$p}booking_request_contact_snapshots WHERE booking_request_id=%d",$request));if($snapshot->email!==null||$snapshot->mobile!==null||$snapshot->whatsapp_number!==null||$snapshot->email_digest!==null)throw new RuntimeException('Privacy erasure retained contact data');if((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}booking_request_privacy_tombstones WHERE booking_request_id={$request}")!==1)throw new RuntimeException('Privacy tombstone missing');
+echo "Phase 2A.1-D isolated runtime passed\n";

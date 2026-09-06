@@ -15,10 +15,10 @@ final class BookingRequestValidationService {
             $this->assertScalarFields( $time, array( 'local_date', 'local_start_time', 'timezone' ) );
         }
         $instrument = Normalizer::id( $input['requested_instrument_id'] ?? null ); $course = Normalizer::id( $input['selected_intro_course_id'] ?? null, false );
-        $full = Normalizer::text( $input['full_name'] ?? null, 191, true ); $email = Normalizer::email( $input['email'] ?? null ); $mobile = Normalizer::phone( $input['mobile'] ?? null ); $country = Normalizer::country( $input['country'] ?? null ); $city = Normalizer::text( $input['city'] ?? null, 191, true ); $timezone = Normalizer::timezone( $input['timezone'] ?? null ); $language = Normalizer::one( $input['communication_language'] ?? null, array( 'fa', 'en' ), 'communication language' );
+        $full = Normalizer::text( $input['full_name'] ?? null, 191, true ); $email = Normalizer::email( $input['email'] ?? null ); $email = $email ? strtolower($email) : null; $mobile = $this->contactPhone( Normalizer::phone( $input['mobile'] ?? null ) ); $country = Normalizer::country( $input['country'] ?? null ); $city = Normalizer::text( $input['city'] ?? null, 191, true ); $timezone = Normalizer::timezone( $input['timezone'] ?? null ); $language = Normalizer::one( $input['communication_language'] ?? null, array( 'fa', 'en' ), 'communication language' );
         if ( ! $email || ! $this->phone( $mobile ) || ! $country || ! $city || ! $timezone ) throw new \InvalidArgumentException( 'Valid contact, country, city, and IANA timezone required' );
         $same = filter_var( $input['whatsapp_same_as_mobile'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE ); if ( $same === null ) throw new \InvalidArgumentException( 'WhatsApp mobile relationship required' );
-        $whatsapp = $same ? $mobile : Normalizer::phone( $input['whatsapp_number'] ?? null ); if ( ! $this->phone( $whatsapp ) ) throw new \InvalidArgumentException( 'Valid WhatsApp number required' );
+        $whatsapp = $same ? $mobile : $this->contactPhone( Normalizer::phone( $input['whatsapp_number'] ?? null ) ); if ( ! $this->phone( $whatsapp ) ) throw new \InvalidArgumentException( 'Valid WhatsApp number required' );
         if ( ($input['privacy_notice_accepted'] ?? null) !== true ) throw new \InvalidArgumentException( 'Privacy notice acknowledgement required' ); if ( isset( $input['privacy_notice_version'] ) && (string) $input['privacy_notice_version'] !== '2026-09-05' ) throw new \InvalidArgumentException( 'Unsupported privacy notice version' );
         return array( 'instrument_id' => $instrument, 'course_id' => $course, 'contact' => array( 'full_name' => $full, 'email' => $email, 'mobile' => $mobile, 'country' => $country, 'city' => $city, 'timezone' => $timezone, 'communication_language' => $language, 'whatsapp_same_as_mobile' => $same ? 1 : 0, 'whatsapp_number' => $whatsapp ), 'requested_times' => $times );
     }
@@ -40,4 +40,6 @@ final class BookingRequestValidationService {
         }
     }
     private function phone(?string $value): bool { return is_string( $value ) && preg_match( '/^\\+?[0-9][0-9 () .-]{5,31}$/', $value ) === 1; }
+    /** Contact-only canonical representation for exact duplicate signals; no fuzzy matching. */
+    private function contactPhone(?string $value): ?string { if($value===null)return null; $digits=preg_replace('/[^0-9+]/','',$value); return is_string($digits)?$digits:null; }
 }
