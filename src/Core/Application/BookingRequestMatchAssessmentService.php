@@ -29,7 +29,7 @@ final class BookingRequestMatchAssessmentService {
             $request = $this->validRequest( $this->repo->requestForUpdate( $requestId ) );
             $times = $this->repo->requestedTimes( $requestId );
             if ( ! $times ) throw new \RuntimeException( 'Booking Request has no requested times' );
-            [$course, $courseReason] = $this->resolveCourse( $request );
+            [$course, $unavailableReason] = $this->resolveCourse( $request );
             $coverage = $course ? $this->coverage( (int) $course->id, $times, $now ) : $this->emptyCoverage( $times );
             $hasCoverage = (bool) array_filter( $coverage, static fn( array $time ): bool => $time['covered'] );
 
@@ -37,7 +37,9 @@ final class BookingRequestMatchAssessmentService {
             // operation only after this row lock is released; re-read anyway
             // so future changes cannot accidentally turn this into authority.
             $this->validRequest( $this->repo->requestForUpdate( $requestId ) );
-            $reason = $hasCoverage ? 'coverage_found' : $courseReason;
+            // Catalogue validity and actual coverage are separate facts. A
+            // valid Course with zero eligible coverage is never "found".
+            $reason = $hasCoverage ? 'coverage_found' : ( $course ? 'no_current_coverage' : $unavailableReason );
             $this->repo->audit( $requestId, $actorId, 'booking_request.match_assessed', $reason, 'criteria=' . self::CRITERIA_VERSION . ';covered_preferences=' . count( array_filter( $coverage, static fn( array $time ): bool => $time['covered'] ) ), hash_hmac( 'sha256', 'booking_request_match_assessment:' . $requestId . ':' . Identifier::uid(), wp_salt( 'dzn_platform_audit' ) ), $now );
             if ( $hasCoverage ) {
                 $this->exceptions->resolveTrustedBookingRequestMatchAttention( $requestId, self::CRITERIA_VERSION, $actorId, $now );
@@ -57,18 +59,18 @@ final class BookingRequestMatchAssessmentService {
         return $request;
     }
 
-    /** @return array{0:?object,1:string} */
+    /** @return array{0:?object,1:?string} Null reason means valid current Course. */
     private function resolveCourse(object $request): array {
         $instrument = $this->repo->instrumentForUpdate( (int) $request->requested_instrument_id );
         if ( ! $this->active( $instrument ) ) return array( null, 'instrument_unavailable' );
         if ( $request->selected_intro_course_id !== null ) {
             $course = $this->repo->courseForUpdate( (int) $request->selected_intro_course_id );
-            return $this->validCourse( $course, (int) $instrument->id ) ? array( $course, 'coverage_found' ) : array( null, 'selected_course_unavailable' );
+            return $this->validCourse( $course, (int) $instrument->id ) ? array( $course, null ) : array( null, 'selected_course_unavailable' );
         }
         $default = $this->repo->defaultForUpdate( (int) $instrument->id );
         if ( ! $default || $default->status !== 'active' ) return array( null, 'default_intro_course_unavailable' );
         $course = $this->repo->courseForUpdate( (int) $default->course_id );
-        return $this->validCourse( $course, (int) $instrument->id ) ? array( $course, 'coverage_found' ) : array( null, 'default_intro_course_unavailable' );
+        return $this->validCourse( $course, (int) $instrument->id ) ? array( $course, null ) : array( null, 'default_intro_course_unavailable' );
     }
 
     private function active(?object $row): bool { return $row && $row->status === 'active' && $row->archived_at === null; }
