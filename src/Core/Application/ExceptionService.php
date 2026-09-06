@@ -9,8 +9,9 @@ final class ExceptionService {
         'core_integrity_failure', 'migration_failed', 'migration_lock_stale',
         'invalid_entity_relationship', 'duplicate_identity_candidate', 'schedule_conflict',
         'timezone_missing', 'reference_generation_failed', 'archive_conflict', 'unknown_system_error',
+        'booking_request_match_attention',
     ];
-    private const ENTITY_TYPES = ['teacher', 'student', 'instrument', 'course', 'enrolment', 'term', 'lesson', 'system'];
+    private const ENTITY_TYPES = ['teacher', 'student', 'instrument', 'course', 'enrolment', 'term', 'lesson', 'booking_request', 'system'];
 
     /** Admin-facing recording is authorized; internal callers use recordTrusted(). */
     public function record(array $input): int {
@@ -73,6 +74,22 @@ final class ExceptionService {
         $repository = new OperationalExceptionRepository();
         if (!$repository->find($normalizedId)) throw new \InvalidArgumentException('Exception does not exist');
         $repository->incrementRetry($normalizedId);
+    }
+
+    /** Trusted assessment path; it has no public or administrator transition surface. */
+    public function resolveTrustedBookingRequestMatchAttention(int $requestId, string $criteriaVersion, int $actor, string $now): void {
+        $requestId = Normalizer::id($requestId);
+        if ($actor < 1) throw new \RuntimeException('Assessment actor is unavailable');
+        $fingerprint = hash('sha256', implode("\n", ['booking_request_match_attention', 'booking_request', (string) $requestId, $criteriaVersion]));
+        $repository = new OperationalExceptionRepository();
+        $lock = $repository->acquireFingerprintLock($fingerprint);
+        try { $repository->resolveActiveFingerprint($fingerprint, $now, $actor); }
+        finally { $repository->releaseFingerprintLock($lock); }
+    }
+
+    /** Erasure wins over advisory state and leaves no active assessment attachment. */
+    public function removeTrustedBookingRequestMatchAttention(int $requestId): void {
+        (new OperationalExceptionRepository())->deleteBookingRequestMatchAttention(Normalizer::id($requestId));
     }
 
     public function transition(int $id, string $to, ?string $note = null): void {

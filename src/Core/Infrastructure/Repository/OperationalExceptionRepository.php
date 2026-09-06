@@ -15,6 +15,27 @@ final class OperationalExceptionRepository extends BaseRepository {
         ));
     }
 
+    /** Internal privacy cleanup removes the only assessment workflow attachment. */
+    public function deleteBookingRequestMatchAttention(int $requestId): void {
+        global $wpdb;
+        $result = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$this->table} WHERE entity_type='booking_request' AND entity_id=%d AND exception_type='booking_request_match_attention'",
+            $requestId
+        ));
+        if ($result === false) throw new \RuntimeException('Booking Request assessment exception cleanup failed');
+    }
+
+    public function resolveActiveFingerprint(string $fingerprint, string $now, int $actor): void {
+        global $wpdb;
+        $result = $wpdb->query($wpdb->prepare(
+            "UPDATE {$this->table} SET status='resolved', resolved_at=%s, resolved_by=%d, resolution_note=NULL WHERE fingerprint=%s AND status IN ('open','acknowledged')",
+            $now,
+            $actor,
+            $fingerprint
+        ));
+        if ($result === false) throw new \RuntimeException('Booking Request assessment exception resolution failed');
+    }
+
     public function recentByStatus(?string $status, int $limit = 50): array {
         global $wpdb;
         $limit = max(1, min($limit, 100));
