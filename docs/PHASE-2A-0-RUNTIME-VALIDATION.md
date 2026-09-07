@@ -99,3 +99,16 @@ transactions/locks, WP capability/nonce behavior, actual account provisioning,
 or browser/log rendering. Those facts remain BLOCKED pending the isolated
 WordPress + MySQL runtime described here. Provider delivery is deliberately out
 of scope: the test ends before any send.
+
+### Ready-Teacher fixture for later isolated gates
+
+`tests/phase-2a0-isolated-ready-teacher-fixture.php` is a WP-CLI-only,
+non-production fixture for later Platform runtime validation. With the same
+isolated marker and a `local` or `development` WordPress environment, it runs
+the real Core sequence: synthetic Teacher creation, invitation issue, internal
+delivery preparation, synthetic matching WordPress principal creation,
+existing-account claim, and `finalizeClaim()`. It keeps the invitation secret
+only in memory, asserts the active Teacher principal link and `active`/`ready`
+onboarding result, and uses normal offboarding during cleanup. It is excluded
+from deployable plugin packages and is not a public or administrator claim
+completion route.
