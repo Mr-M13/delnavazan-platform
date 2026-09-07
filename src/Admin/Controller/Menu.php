@@ -40,6 +40,8 @@ final class Menu {
 		if ($hook) add_action('load-' . $hook, [TeacherAvailabilityController::class, 'handlePost']);
 		$hook = add_submenu_page('dzn-platform', 'Booking Requests', 'Booking Requests', 'dzn_view_booking_requests', 'dzn-booking-requests', [BookingRequestController::class, 'screen']);
 		if ($hook) add_action('load-' . $hook, [BookingRequestController::class, 'handlePost']);
+		$hook = add_submenu_page('dzn-platform', 'Request coordination', 'Request coordination', 'dzn_manage_booking_request_coordination', 'dzn-booking-request-coordination', [CoordinationCaseController::class, 'screen']);
+		if ($hook) add_action('load-' . $hook, [CoordinationCaseController::class, 'handlePost']);
         $hook = add_submenu_page('dzn-platform', 'Teacher onboarding', 'Teacher onboarding', 'dzn_manage_onboarding', 'dzn-onboarding', [OnboardingController::class, 'screen']);
         if ($hook) add_action('load-' . $hook, [OnboardingController::class, 'handlePost']);
     }
