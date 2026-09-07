@@ -16,9 +16,9 @@ require dirname(__DIR__) . '/src/Core/Infrastructure/Migration/Migrator.php';
 $method = new ReflectionMethod('Delnavazan\\Platform\\Core\\Infrastructure\\Migration\\Migrator', 'ensure_capabilities');
 $method->setAccessible(true);
 
-// Absent marker installs the capability and records the marker.
+// Absent marker installs the current protected capability set and marker.
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || get_option('dzn_platform_capability_version') !== '2a2a') throw new RuntimeException('Absent capability marker was not installed');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || get_option('dzn_platform_capability_version') !== '2a2b') throw new RuntimeException('Absent capability marker was not installed');
 $adds = $phase2a2aAdmin->adds;
 // Current marker plus present capability is a harmless no-op.
 $method->invoke(null);
@@ -26,5 +26,5 @@ if ($phase2a2aAdmin->adds !== $adds) throw new RuntimeException('Current capabil
 // A damaged current marker cannot suppress reconciliation.
 unset($phase2a2aAdmin->caps['dzn_prepare_booking_request_matches']);
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches')) throw new RuntimeException('Missing current capability was not restored');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination')) throw new RuntimeException('Missing current capability was not restored');
 echo "Phase 2A.2-A capability lifecycle passed\n";

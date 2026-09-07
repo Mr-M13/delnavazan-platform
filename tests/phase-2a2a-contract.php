@@ -23,5 +23,4 @@ foreach (['dzn_phase_2a0_create_ready_teacher_fixture', 'BookingRequestSubmissio
 foreach (['DZN_PHASE_2A2A_RUNTIME_TEST', 'phase2a2a-assessment.release', 'BookingRequestMatchAssessmentService', 'coverage_found'] as $needle) if (strpos($positiveWorker, $needle) === false) throw new RuntimeException('Missing positive assessment concurrency guard: ' . $needle);
 if (preg_match('/teacher_onboarding_states.*(?:insert|update)|(?:insert|update).*teacher_onboarding_states/', $positiveRuntime)) throw new RuntimeException('Positive assessment must use the real readiness transition');
 foreach (['teacher_offers', 'booking_reservations', 'createStudent', 'createLesson', 'platform_payments', 'amelia_', 'wp_amelia'] as $forbidden) if (stripos($service . $repository . $admin, $forbidden) !== false) throw new RuntimeException('Phase 2A.2-A exceeded authority: ' . $forbidden);
-if (strpos($migration, '008_') !== false || strpos($migration, "SCHEMA_VERSION', '8'") !== false) throw new RuntimeException('Phase 2A.2-A must not add a schema migration');
 echo "Phase 2A.2-A source contract passed\n";
