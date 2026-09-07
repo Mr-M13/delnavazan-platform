@@ -10,6 +10,7 @@ $repository = file_get_contents( $root . '/src/Core/Infrastructure/Repository/Pr
 $admin = file_get_contents( $root . '/src/Admin/Controller/OnboardingController.php' );
 $runtime = file_get_contents( $root . '/tests/phase-2a0-isolated-delivery-assertion.php' );
 $negative = file_get_contents( $root . '/tests/phase-2a0-isolated-negative-claim-assertion.php' );
+$readyFixture = file_get_contents( $root . '/tests/phase-2a0-isolated-ready-teacher-fixture.php' );
 $runbook = file_get_contents( $root . '/docs/PHASE-2A-0-RUNTIME-VALIDATION.md' );
 $required = [
     '002_principal_invitation_foundation', '003_invitation_recipient_snapshot',
@@ -47,5 +48,7 @@ if ( strpos( $phase2a0Schema, 'booking_requests' ) !== false || strpos( $phase2a
 foreach ( ['DZN_PHASE_2A0_RUNTIME_TEST', "wp_get_environment_type() === 'production'", 'dzn_phase_2a0_isolated_runtime_marker', 'prepareDelivery', 'dzn_phase_2a0_assert_no_raw_secret_persistence', 'no invitation secret printed'] as $fragment ) if ( strpos( $runtime, $fragment ) === false ) throw new RuntimeException( 'Missing isolated runtime safety contract: ' . $fragment );
 foreach ( ['DZN_PHASE_2A0_NEGATIVE_CLAIM_MODE', 'WP_CLI', 'wp_get_environment_type() === \'production\'', 'dzn_phase_2a0_negative_no_raw_secret', 'dzn_phase_2a0_negative_rejected', 'unset( $secret', 'Negative-claim assertion passed', 'expired', 'revoked', 'superseded', 'double_claim'] as $fragment ) if ( strpos( $negative, $fragment ) === false ) throw new RuntimeException( 'Missing negative-claim runtime safety contract: ' . $fragment );
 if ( strpos( $negative, 'add_action(' ) !== false || strpos( $negative, 'register_rest_route' ) !== false ) throw new RuntimeException( 'Negative-claim helper must not expose an HTTP route' );
+foreach ( ['DZN_PHASE_2A0_RUNTIME_TEST', 'DZN_PHASE_2A0_RUNTIME_RUN_ID', 'dzn_phase_2a0_isolated_runtime_marker', "array( 'local', 'development' )", '@example.invalid', 'TeacherService', 'issue(', 'prepareDelivery(', 'beginExistingClaim(', 'finalizeClaim(', 'hasActiveTeacherAuthority', 'offboard(', 'wp_delete_user', 'no invitation secret printed'] as $fragment ) if ( strpos( $readyFixture, $fragment ) === false ) throw new RuntimeException( 'Missing ready-teacher fixture contract: ' . $fragment );
+foreach ( ['teacher_onboarding_states', 'teacher_principal_links'] as $forbidden ) if ( preg_match( '/\\$wpdb->(?:insert|update)\\([^\\n]*' . preg_quote( $forbidden, '/' ) . '/', $readyFixture ) ) throw new RuntimeException( 'Ready-teacher fixture must not write readiness directly' );
 foreach ( ['002 → 003', 'No beta data or accounts', 'raw invitation secret', 'existing authenticated WordPress account', 'recovery_required', 'terminal recipient anonymization', 'rollback', 'Cleanup'] as $fragment ) if ( strpos( $runbook, $fragment ) === false ) throw new RuntimeException( 'Missing runtime validation runbook coverage: ' . $fragment );
 echo "Phase 2A.0 source contract passed\n";
