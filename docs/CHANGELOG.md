@@ -5,7 +5,8 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## 0.1.0 — 2026-09-09
 
-Current merged main: `c041028b16b6cb6976453630480484bd7d1ddc0b`  
+Current merged main: `c041028b16b6cb6976453630480484bd7d1ddc0b`
+
 Schema 10 / migrations 001–010.
 
 ### Phase 2A.2-D — Proposal Foundation
