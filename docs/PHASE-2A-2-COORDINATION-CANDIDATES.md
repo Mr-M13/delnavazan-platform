@@ -13,8 +13,10 @@ The V1 subset is deliberately limited to `open`, `candidate_search`,
 means only that staff are waiting for further operational information; it is not
 Teacher Availability Assent and does not represent capacity or a commitment.
 
-Later vocabulary such as proposal, acceptance, conversion, and Teacher-assent
-states is intentionally absent from this schema and service.
+At the Phase 2A.2-B stopping point, later vocabulary such as proposal,
+acceptance, conversion, and Teacher-assent states was intentionally absent
+from this schema and service. Phase 2A.2-C adds its separate, bounded assent
+records without changing the advisory meaning of Cases or Candidates.
 
 ## Candidate Teacher Considerations
 
