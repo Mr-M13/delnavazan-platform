@@ -69,6 +69,10 @@ reference only. Retirement locks ancestry and identity without requiring a
 still-recordable source, so a closed Case, unsuitable Candidate, or ineligible
 Teacher cannot leave a recorded assent operationally authoritative.
 
+When a consequential operation also needs Course eligibility, it locks Teacher,
+then Course, then the Teacher/Course eligibility row. Eligibility writes use the
+same Teacher → Course order, avoiding a cross-service lock inversion.
+
 ## Privacy erasure
 
 Booking Request privacy erasure runs in the existing source transaction. It

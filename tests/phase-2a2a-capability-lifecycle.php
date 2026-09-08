@@ -8,17 +8,30 @@ final class Phase2A2ARole {
 }
 $phase2a2aOptions = array();
 $phase2a2aAdmin = new Phase2A2ARole();
+$phase2a2aRoles = array( 'administrator' => $phase2a2aAdmin );
 function get_option(string $key, mixed $default = false): mixed { global $phase2a2aOptions; return $phase2a2aOptions[$key] ?? $default; }
 function update_option(string $key, mixed $value, mixed $autoload = null): bool { global $phase2a2aOptions; $phase2a2aOptions[$key] = $value; return true; }
-function get_role(string $name): ?Phase2A2ARole { global $phase2a2aAdmin; return $name === 'administrator' ? $phase2a2aAdmin : null; }
-function add_role(string $name, string $display, array $caps): void {}
+function get_role(string $name): ?Phase2A2ARole { global $phase2a2aRoles; return $phase2a2aRoles[$name] ?? null; }
+function add_role(string $name, string $display, array $caps): ?Phase2A2ARole {
+    global $phase2a2aRoles;
+    if ($name === '' || isset($phase2a2aRoles[$name])) return null;
+    $role = new Phase2A2ARole();
+    foreach ($caps as $cap => $grant) {
+        if (is_int($cap)) { $role->add_cap((string)$grant); continue; }
+        if ($grant) $role->add_cap((string)$cap);
+    }
+    $phase2a2aRoles[$name] = $role;
+    return $role;
+}
 require dirname(__DIR__) . '/src/Core/Infrastructure/Migration/Migrator.php';
 $method = new ReflectionMethod('Delnavazan\\Platform\\Core\\Infrastructure\\Migration\\Migrator', 'ensure_capabilities');
 $method->setAccessible(true);
 
 // Absent marker installs the current protected capability set and marker.
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || get_option('dzn_platform_capability_version') !== '2a2b') throw new RuntimeException('Absent capability marker was not installed');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || get_option('dzn_platform_capability_version') !== '2a2c') throw new RuntimeException('Absent capability marker was not installed');
+$phase2a2aTeacher = get_role('dzn_teacher');
+if (!$phase2a2aTeacher || !$phase2a2aTeacher->has_cap('read') || !$phase2a2aTeacher->has_cap('dzn_record_own_availability_assent')) throw new RuntimeException('Teacher assent capability was not installed');
 $adds = $phase2a2aAdmin->adds;
 // Current marker plus present capability is a harmless no-op.
 $method->invoke(null);
@@ -26,5 +39,9 @@ if ($phase2a2aAdmin->adds !== $adds) throw new RuntimeException('Current capabil
 // A damaged current marker cannot suppress reconciliation.
 unset($phase2a2aAdmin->caps['dzn_prepare_booking_request_matches']);
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination')) throw new RuntimeException('Missing current capability was not restored');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent')) throw new RuntimeException('Missing current capability was not restored');
+// A damaged Teacher role must be repaired even when the lifecycle marker is current.
+unset($phase2a2aTeacher->caps['dzn_record_own_availability_assent']);
+$method->invoke(null);
+if (!$phase2a2aTeacher->has_cap('dzn_record_own_availability_assent')) throw new RuntimeException('Missing Teacher assent capability was not restored');
 echo "Phase 2A.2-A capability lifecycle passed\n";
