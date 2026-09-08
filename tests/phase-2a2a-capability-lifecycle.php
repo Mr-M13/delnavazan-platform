@@ -29,7 +29,7 @@ $method->setAccessible(true);
 
 // Absent marker installs the current protected capability set and marker.
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || !$phase2a2aAdmin->has_cap('dzn_issue_booking_request_proposals') || get_option('dzn_platform_capability_version') !== '2a2d') throw new RuntimeException('Absent capability marker was not installed');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || !$phase2a2aAdmin->has_cap('dzn_issue_booking_request_proposals') || !$phase2a2aAdmin->has_cap('dzn_record_booking_request_provisional_acceptance') || get_option('dzn_platform_capability_version') !== '2a2e') throw new RuntimeException('Absent capability marker was not installed');
 $phase2a2aTeacher = get_role('dzn_teacher');
 if (!$phase2a2aTeacher || !$phase2a2aTeacher->has_cap('read') || !$phase2a2aTeacher->has_cap('dzn_record_own_availability_assent')) throw new RuntimeException('Teacher assent capability was not installed');
 $adds = $phase2a2aAdmin->adds;
@@ -37,9 +37,9 @@ $adds = $phase2a2aAdmin->adds;
 $method->invoke(null);
 if ($phase2a2aAdmin->adds !== $adds) throw new RuntimeException('Current capability marker was not a harmless no-op');
 // A damaged current marker cannot suppress reconciliation.
-unset($phase2a2aAdmin->caps['dzn_prepare_booking_request_matches'], $phase2a2aAdmin->caps['dzn_issue_booking_request_proposals']);
+unset($phase2a2aAdmin->caps['dzn_prepare_booking_request_matches'], $phase2a2aAdmin->caps['dzn_issue_booking_request_proposals'], $phase2a2aAdmin->caps['dzn_record_booking_request_provisional_acceptance']);
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || !$phase2a2aAdmin->has_cap('dzn_issue_booking_request_proposals')) throw new RuntimeException('Missing current capability was not restored');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || !$phase2a2aAdmin->has_cap('dzn_issue_booking_request_proposals') || !$phase2a2aAdmin->has_cap('dzn_record_booking_request_provisional_acceptance')) throw new RuntimeException('Missing current capability was not restored');
 // A damaged Teacher role must be repaired even when the lifecycle marker is current.
 unset($phase2a2aTeacher->caps['dzn_record_own_availability_assent']);
 $method->invoke(null);

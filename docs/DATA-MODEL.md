@@ -1,5 +1,9 @@
 # Delnavazan Platform Conceptual Data Model
 
+## Proposal provisional acceptance evidence (Schema 11)
+
+`proposal_acceptance_events` is an InnoDB append-only evidence table. Each row binds the Booking Request and Coordination Case to exact copied Proposal Family, Option and immutable Version identifiers/fingerprint, with `event_kind=accepted_pending_conditions` and `accepting_subject_state=authority_unresolved`. It stores closed-channel, opaque evidence provenance and digest-only acceptance command idempotency. It holds no contact PII, Student identity, final-acceptance lifecycle, conversion or downstream operational authority.
+
 ## 1. Purpose
 
 This document defines canonical concepts and invariants. The approved Phase 1
