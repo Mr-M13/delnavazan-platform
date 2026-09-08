@@ -41,9 +41,9 @@ $b1 = $service->issueInitial( (int) $fixture['candidate_b'], (string) $fixture['
 dzn_2a2d_assert( $b1['family_id'] === $a1['family_id'] && $b1['option_id'] !== $a1['option_id'] && $b1['version_number'] === 1, 'Teacher-specific Option independence failed' );
 $a2 = $service->issueReplacement( $a1['option_id'], 1, (string) $fixture['fingerprint_a2'], dzn_2a2d_key( 'a2' ), 'material_facts_changed' );
 dzn_2a2d_assert( $a2['family_id'] === $a1['family_id'] && $a2['option_id'] === $a1['option_id'] && $a2['version_number'] === 2, 'A1 to A2 lineage failed' );
-dzn_2a2d_assert( $service->exact( $a1['family_uid'], $a1['option_uid'], 1 )?->id === $a1['version_id'], 'Exact A1 retrieval failed' );
-dzn_2a2d_assert( $service->exact( $a2['family_uid'], $a2['option_uid'], 2 )?->id === $a2['version_id'], 'Exact A2 retrieval failed' );
-dzn_2a2d_assert( $service->current( $b1['family_uid'], $b1['option_uid'] )?->id === $b1['version_id'], 'B1 was superseded by A2' );
+dzn_2a2d_assert( (int) $service->exact( $a1['family_uid'], $a1['option_uid'], 1 )?->id === $a1['version_id'], 'Exact A1 retrieval failed' );
+dzn_2a2d_assert( (int) $service->exact( $a2['family_uid'], $a2['option_uid'], 2 )?->id === $a2['version_id'], 'Exact A2 retrieval failed' );
+dzn_2a2d_assert( (int) $service->current( $b1['family_uid'], $b1['option_uid'] )?->id === $b1['version_id'], 'B1 was superseded by A2' );
 
 $staleRevision = false; try { $service->issueReplacement( $a1['option_id'], 1, (string) $fixture['fingerprint_a2'], dzn_2a2d_key( 'stale' ), 'operator_correction' ); } catch ( Throwable ) { $staleRevision = true; }
 dzn_2a2d_assert( $staleRevision, 'Stale expected Version was accepted' );
