@@ -2,6 +2,7 @@
 namespace Delnavazan\Platform\Core\Application;
 
 use Delnavazan\Platform\Core\Infrastructure\Repository\CoordinationCaseRepository;
+use Delnavazan\Platform\Core\Infrastructure\Repository\TeacherAvailabilityAssentRepository;
 use Delnavazan\Platform\Core\Support\Identifier;
 
 /**
@@ -42,6 +43,7 @@ final class CoordinationCaseService {
             if ( (int) $case->version !== $expectedVersion ) throw new \RuntimeException( 'Coordination Case changed concurrently' );
             if ( in_array( $case->state, self::CLOSED_CASE_STATES, true ) || ! $this->allowedCaseTransition( (string) $case->state, $state ) ) throw new \InvalidArgumentException( 'Coordination Case transition is not allowed' );
             $version = $this->repo->transitionCase( $case, $state, $reason, $actor, $now );
+            if ( in_array( $state, self::CLOSED_CASE_STATES, true ) ) ( new TeacherAvailabilityAssentRepository() )->invalidateRecordedForCaseRetirement( $caseId, $actor, $now, fn( string $scope ): string => $this->key( $scope ) );
             $this->repo->audit( 'coordination_case', $caseId, 'coordination_case.state_changed', $actor, $reason, 'from=' . $case->state . ';to=' . $state . ';version=' . $version, $this->key( 'case:' . $caseId . ':' . $version ), $now );
             $this->repo->commit(); return $version;
         } catch ( \Throwable $e ) { $this->repo->rollback(); throw $e; }
@@ -72,6 +74,7 @@ final class CoordinationCaseService {
             if ( in_array( $case->state, self::CLOSED_CASE_STATES, true ) || (int) $candidate->version !== $expectedVersion ) throw new \RuntimeException( 'Candidate Teacher changed concurrently' );
             if ( in_array( $candidate->status, self::CLOSED_CANDIDATE_STATUSES, true ) || ! $this->allowedCandidateTransition( (string) $candidate->status, $status ) ) throw new \InvalidArgumentException( 'Candidate Teacher transition is not allowed' );
             $version = $this->repo->transitionCandidate( $candidate, $status, $reason, $actor, $now );
+            if ( in_array( $status, self::CLOSED_CANDIDATE_STATUSES, true ) ) ( new TeacherAvailabilityAssentRepository() )->invalidateRecordedForCandidateRetirement( $candidateId, $actor, $now, fn( string $scope ): string => $this->key( $scope ) );
             $this->repo->audit( 'coordination_case_candidate', $candidateId, 'coordination_candidate.status_changed', $actor, $reason, 'from=' . $candidate->status . ';to=' . $status . ';version=' . $version, $this->key( 'candidate:' . $candidateId . ':' . $version ), $now );
             $this->repo->commit(); return $version;
         } catch ( \Throwable $e ) { $this->repo->rollback(); throw $e; }
