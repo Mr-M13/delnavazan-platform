@@ -5,6 +5,14 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Unreleased
 
+### Phase 2A.2-D — Proposal Foundation
+
+- Added Schema 10 / migration 010 for canonical Proposal Families, Teacher-specific Options, and immutable Versions.
+- Added Assent-authorised initial and replacement issuance with Proposal-scoped idempotency and guarded pointer advancement.
+- Added a dedicated protected coordination capability and internal issuance surface; no public endpoint or acceptance authority.
+- Added source, migration, isolated-runtime, revision-race, and Assent-invalidation-race test coverage.
+
+
 ### Phase 2A.0 — Principal invitation runtime-validation preparation
 
 - Added an isolated-only, reversible WordPress/MySQL validation matrix and a

@@ -526,3 +526,16 @@ choices include:
 3. Historical Amelia archive format, storage, access, and inspection procedure.
 4. Platform Phase 9 Finance physical tables and audited correction implementation.
 5. Later provider-specific integration schemas.
+
+
+## Phase 2A.2-D Proposal Foundation (Schema 10)
+
+The Proposal aggregate is a three-level authority history:
+
+- one canonical Proposal Family per Booking Request / Coordination Case groups alternatives but is not acceptable;
+- one Proposal Option per Family and Teacher-specific Candidate lineage is independently acceptable;
+- immutable Proposal Versions form a linear lineage within one Option, with only the Option current pointer changing.
+
+The Version freezes controlled identities, canonical arrangement facts, source Assent identity/version, limited evidence provenance, and issuance actor/time. It contains no Booking Request contact PII. A later Assent lifecycle change or privacy erasure does not rewrite issued history, but the existing Assent authority gate prevents new issuance.
+
+Schema 10 adds only `dzn_proposal_families`, `dzn_proposal_options`, and `dzn_proposal_versions`. It adds no acceptance, Accepted Service Arrangement, Student, Enrolment, Teacher Assignment, Lesson, payment, notification, calendar, or Amelia authority.

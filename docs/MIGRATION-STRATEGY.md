@@ -363,3 +363,10 @@ integration schemas.
 This strategy is documentation only. It does not authorize Platform Phase 1,
 production data setup, provider reconfiguration, Amelia writes, or any authority
 cutover.
+
+
+## Schema 10 — 010_proposal_foundation
+
+Migration 010 creates the three InnoDB Proposal tables after Schema 9. Verification checks all required columns, engine type, canonical Family/Option uniqueness, linear Version/supersession constraints, idempotency and material-fingerprint uniqueness, the guarded current pointer, and the absence of a mutable `updated_at` field on Proposal Version.
+
+The migration is recorded once in `dzn_platform_completed_migrations`; `maybe_upgrade()` verifies rather than re-applies it after the schema marker reaches 10. Capability version `2a2d` repairs the dedicated administrator capability `dzn_issue_booking_request_proposals` independently of table creation.
