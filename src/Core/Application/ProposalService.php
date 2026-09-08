@@ -91,7 +91,7 @@ final class ProposalService {
         $facts = $this->frozenFacts( $assent, $snapshot, $context );
         $versionFingerprint = ProposalIdempotency::versionFingerprint( $facts );
         if ( $current && hash_equals( (string) $current->version_fingerprint, $versionFingerprint ) ) {
-            throw new \InvalidArgumentException( 'Equivalent Proposal Version already exists' );
+            throw new \InvalidArgumentException( 'Proposal material facts are unchanged' );
         }
         if ( $this->repo->versionForOptionFingerprintForUpdate( (int) $option->id, $versionFingerprint ) ) throw new \InvalidArgumentException( 'Equivalent Proposal Version already exists' );
         if ( $operation === 'initial' && $current ) throw new \InvalidArgumentException( 'Initial Proposal Version already exists' );
