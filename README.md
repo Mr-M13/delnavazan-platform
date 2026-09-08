@@ -1,134 +1,46 @@
 # Delnavazan Platform
 
-Delnavazan Platform is the new architectural home for Delnavazan Core and the
-long-term program to replace Amelia without disrupting the live academy. It will
-provide stable identities for teachers and students, explicit enrolments and
-terms, and a canonical lesson lifecycle that operational modules can share.
+Delnavazan Platform is the incremental, internally controlled foundation for moving academy authority away from architectural dependence on Amelia without disrupting the live academy. It owns durable business identity and canonical state; external systems reference that state through explicit service boundaries.
 
-The platform is being created because Amelia currently owns booking, customer,
-employee, service, and appointment identity. That coupling makes attendance,
-notifications, finance, portals, and future scheduling harder to evolve safely.
-The replacement is an incremental authority migration, not a clean-slate rewrite.
-
-> **Safety warning:** Do not remove Amelia, write to Amelia tables, or modify
-> production integrations merely because this repository exists. Amelia must
-> remain installed and readable until the relevant cutover gates are met and a
-> separately authorised retirement plan is complete.
+> **Safety warning:** Source completion never authorises deployment, production changes, Amelia writes/removal, payment activity, external communication or authority cutover.
 
 ## Current status
 
-- Delnavazan remains a beta platform operating alongside the live academy.
-- Platform Phase 0 — Existing System Audit & Architecture is complete in this
-  documentation baseline.
-- Platform Phase 1 — Core Foundation & Canonical Data Model has not started and
-  requires explicit approval.
-- This repository is documentation-only until that approval. It intentionally
-  contains no PHP, plugin bootstrap, implementation directories, or database
-  migrations.
-- Hamnavaz Phase 3 is complete. Hamnavaz Phase 4 is intentionally paused while
-  the shared platform architecture is established.
-- After Core stabilisation, Hamnavaz Phase 4 will resume against the shared
-  architecture under its own separate approval.
+| Item | State |
+|---|---|
+| Repository main | `c041028b16b6cb6976453630480484bd7d1ddc0b` |
+| Platform / schema | 0.1.0 / 10 |
+| Migrations | 001–010 |
+| Completed coordination work | 2A.2-A through 2A.2-D |
+| Latest merged slice | Proposal Foundation — PR #13 |
+| Next work | 2A.2-E Acceptance Foundation reconnaissance only |
+
+Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
 ## Architectural direction
 
-The canonical business entities and reference data are:
+The canonical business concepts are Teacher, Student, Instrument, Course, Enrolment, Term and Lesson. Lesson is the later operational centre for attendance, scheduling, finance, notifications and provider integrations. Provider identifiers are mappings, not business identity.
 
-- Teacher
-- Student
-- Instrument
-- Course
-- Enrolment
-- Term
-- Lesson
+The current coordination path is deliberately narrower:
 
-Lesson is the operational centre for attendance, Google, notifications,
-scheduling, finance, and reporting. WordPress, Amelia, Google, Stripe, Meta, and
-Hamnavaz identifiers are external mappings to Core records rather than business
-identities.
+```text
+Booking Request → Coordination Case → Candidate Teacher → Availability Assent
+→ Proposal Family → Teacher-specific Option → immutable Proposal Version
+→ future acceptance → future arrangement/conversion authority
+```
 
-The defining principle is:
-
-> Delnavazan Core owns business identity and business state. Integrations
-> reference Core entities. Core entities do not derive their identity from
-> integrations.
-
-## Migration approach
-
-The migration is architecture-first and incremental:
-
-1. document boundaries, invariants, and exit criteria;
-2. establish a small Core foundation with versioned, retry-safe migrations;
-3. manually create and validate the small active catalogue and academy dataset;
-4. keep Amelia-dependent runtime behaviour in Delnavazan Enhancements while
-   replacement capabilities are built and verified;
-5. move authority one module and workflow at a time;
-6. retain rollback and required legacy evidence throughout;
-7. retire Amelia only after every exit gate is independently verified.
-
-The Platform will not build an automated Amelia importer, synchronizer, or
-parity engine. There is no big-bang cutover, and initial cutover never deletes
-Amelia tables.
-
-## Canonical Platform roadmap
-
-Platform phase numbers are independent from Hamnavaz phase numbers.
-
-0. **Existing System Audit & Architecture** — complete.
-1. **Core Foundation & Canonical Data Model**.
-2. **Core Data Setup & Cutover Preparation** — manually create and validate the
-   initial Instrument/Course catalogue, Teachers, active Students, Enrolments,
-   Terms, and required Lessons; no Amelia importer.
-3. **Attendance Migration**.
-4. **Direct Google Integration** — including Core-owned connect, refresh,
-   disconnect, and revoke lifecycle.
-5. **Notification Platform / WhatsApp Migration**.
-6. **Availability & Scheduling**.
-7. **Native Teacher & Student Portals**.
-8. **Stripe Payments & Term Automation**.
-9. **Finance / Teacher Reporting Migration**.
-10. **Amelia Cutover & Retirement**.
-
-The authority ledger, bounded cutovers, rollback gates, Amelia exit gates, and
-the strangler pattern apply across relevant phases. Idempotency remains a
-requirement for schema changes, events, and provider operations; controlled
-comparison remains replacement-validation evidence. These controls do not imply
-an Amelia importer or parity engine and do not replace this numbering. After
-Core stabilisation, Hamnavaz Phase 4 resumes against the shared architecture.
-
-## Relationship to existing repositories
-
-### Delnavazan Enhancements
-
-[`Mr-M13/delnavazan-enhancements`](https://github.com/Mr-M13/delnavazan-enhancements)
-is the current operational plugin. It contains proven attendance evidence,
-Google Meet reconciliation, WhatsApp workflows, teacher payment reporting,
-Amelia adapters, password handoff behaviour, and site enhancements. Those
-behaviours are migration inputs. They remain operational until authority moves
-through explicit cutovers.
-
-### Hamnavaz
-
-[`Mr-M13/delnavazan-expansion-hamnavaz`](https://github.com/Mr-M13/delnavazan-expansion-hamnavaz)
-owns the structured teacher directory and public profile lifecycle. A Core
-Teacher may have an optional Hamnavaz Profile, but Hamnavaz must remain usable
-for directory-only teachers who are not academy teachers. Directory verification,
-public presentation, and commercial profile fields do not become Core identity.
-
-## Canonical documents
-
-- [Architecture](docs/ARCHITECTURE.md)
-- [Phase 0 migration map](docs/PHASE-0-MIGRATION-MAP.md)
-- [Conceptual data model](docs/DATA-MODEL.md)
-- [Security architecture](docs/SECURITY.md)
-- [Module boundaries](docs/MODULE-BOUNDARIES.md)
-- [Migration strategy](docs/MIGRATION-STRATEGY.md)
-- [Phase 1 Core foundation specification](docs/PHASE-1-CORE-FOUNDATION.md)
-- [Approved product decisions](docs/PRODUCT-DECISIONS.md)
-- [Changelog](docs/CHANGELOG.md)
+Proposal is not acceptance. Acceptance is not conversion authority. Successful later conversion creates one Enrolment and does not create a Teacher Assignment; assignment is a separate effective-dated authority.
 
 ## Repository rule
 
-Until Platform Phase 1 is approved, changes here must be documentation only.
-No production code, schema, automation, public endpoint, integration write, or
-Amelia retirement action is authorised by this baseline.
+Platform development is incremental and bounded. New work requires an explicit phase contract, migrations are versioned/retry-safe, and business-critical changes require focused source/runtime/concurrency validation. Do not add new Amelia coupling, public authority, payment, notification, calendar or provider behaviour without explicit approval.
+
+## Canonical documents
+
+- [Core continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Module boundaries](docs/MODULE-BOUNDARIES.md)
+- [Security architecture](docs/SECURITY.md)
+- [Migration strategy](docs/MIGRATION-STRATEGY.md)
+- [Approved product decisions](docs/PRODUCT-DECISIONS.md)
+- [Changelog](docs/CHANGELOG.md)

@@ -2,10 +2,9 @@
 
 ## 1. Status and scope
 
-This is the canonical specification for Platform Phase 0 — Existing System
-Audit & Architecture. It defines direction, ownership, and migration constraints
-before implementation begins. It is not an implementation plan for a big-bang
-Amelia replacement and does not authorise Platform Phase 1.
+This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
+
+> **Current-state override:** Platform 0.1.0 is implemented through Schema 10 / migrations 001–010. Phase 2A.2-A through 2A.2-D are complete; Proposal Foundation merged in PR #13 at main `c041028b16b6cb6976453630480484bd7d1ddc0b`. Phase 2A.2-E Acceptance Foundation is reconnaissance only. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the authoritative current coordination/Proposal/Acceptance contract and exact delivery state.
 
 ## 2. Architectural goal
 
@@ -217,13 +216,8 @@ delete either identity.
 
 These are Platform phases and do not renumber Hamnavaz phases.
 
-1. **Phase 0 — Existing System Audit & Architecture:** completed audit,
-   architecture, migration map, module boundaries, security baseline, and
-   roadmap; complete with this documentation baseline.
-2. **Phase 1 — Core Foundation & Canonical Data Model:** plugin/lifecycle shell,
-   schema migration framework, canonical identifiers/entities, Lesson schedule
-   history, Operational Exceptions, generic extension/audit foundations, and
-   domain contracts; not started.
+1. **Phase 0 — Existing System Audit & Architecture:** completed audit, architecture, migration map, module boundaries, security baseline and roadmap.
+2. **Phase 1 / 2A foundations:** implementation is underway and merged through the Booking Request coordination, Candidate Teacher, Availability Assent and Proposal Foundation slices. The current exact state and next bounded phase are maintained in the continuity record; this historical roadmap must not be read as a claim that implementation has not begun.
 3. **Phase 2 — Core Data Setup & Cutover Preparation:** manually create and
    validate the initial Instrument/Course catalogue, Teachers, active Students,
    Enrolments, Terms, and required Lessons; prepare cutover controls without an
@@ -277,4 +271,4 @@ This architecture does not:
 - make Stripe, Google, Meta, WordPress, or Amelia a scheduling authority;
 - merge scheduling state, attendance outcome, notification delivery, and
   payability into one status field;
-- begin Platform Phase 1 implementation.
+- independently authorise later Platform implementation, deployment or authority cutover.

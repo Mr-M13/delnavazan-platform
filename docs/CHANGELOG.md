@@ -3,7 +3,10 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
-## Unreleased
+## 0.1.0 — 2026-09-09
+
+Current merged main: `c041028b16b6cb6976453630480484bd7d1ddc0b`  
+Schema 10 / migrations 001–010.
 
 ### Phase 2A.2-D — Proposal Foundation
 
@@ -11,7 +14,9 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 - Added Assent-authorised initial and replacement issuance with Proposal-scoped idempotency and guarded pointer advancement.
 - Added a dedicated protected coordination capability and internal issuance surface; no public endpoint or acceptance authority.
 - Added source, migration, isolated-runtime, revision-race, and Assent-invalidation-race test coverage.
+- Validated candidate `5b67442218baeba94b68d988f31f51e09ae1a58b` passed with non-blocking limitations and was merged through PR #13.
 
+## Historical development record
 
 ### Phase 2A.0 — Principal invitation runtime-validation preparation
 
