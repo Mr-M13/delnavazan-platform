@@ -29,7 +29,7 @@ $method->setAccessible(true);
 
 // Absent marker installs the current protected capability set and marker.
 $method->invoke(null);
-if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || get_option('dzn_platform_capability_version') !== '2a2c') throw new RuntimeException('Absent capability marker was not installed');
+if (!$phase2a2aAdmin->has_cap('dzn_prepare_booking_request_matches') || !$phase2a2aAdmin->has_cap('dzn_manage_booking_request_coordination') || !$phase2a2aAdmin->has_cap('dzn_manage_teacher_availability_assent') || !$phase2a2aAdmin->has_cap('dzn_issue_proposals') || get_option('dzn_platform_capability_version') !== '2a2d') throw new RuntimeException('Absent capability marker was not installed');
 $phase2a2aTeacher = get_role('dzn_teacher');
 if (!$phase2a2aTeacher || !$phase2a2aTeacher->has_cap('read') || !$phase2a2aTeacher->has_cap('dzn_record_own_availability_assent')) throw new RuntimeException('Teacher assent capability was not installed');
 $adds = $phase2a2aAdmin->adds;
