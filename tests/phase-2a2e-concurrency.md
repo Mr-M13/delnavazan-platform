@@ -17,6 +17,7 @@ Every entry needs `family_uid`, `option_uid`,
 `option_id`, `expected_version`, and `replacement_fingerprint`. `a1`/`a2`, etc.
 may supply different `channel` values. `x1` and `x2` must point at distinct
 Booking Requests and have different canonical acceptance payloads.
+They are dedicated X fixtures: no earlier race mutates either Proposal Version.
 
 For each mode, run the repository controller with exported values:
 
