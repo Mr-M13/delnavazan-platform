@@ -59,6 +59,10 @@ These distinctions are deliberate and must not be collapsed:
 
 Any Phase 2A.2-E work must preserve this graph and must not silently advance to conversion, assignment, scheduling, payment, notification, calendar or Amelia work.
 
+## Phase 2A.2-F candidate boundary
+
+The next candidate after merged 2A.2-E is Schema 12 / `012_student_identity_acceptance_authority`: human-reviewed Booking Request-to-Student resolution, minimal append-only capacity classification, provenanced Student principal links, guardian representative grants, and a read-only eligibility assessment. It must not auto-match Booking Request PII, create public identity flows, grant adult delegation, promote provisional acceptance, or create any final acceptance/conversion/arrangement/enrolment/Teacher/Term/Lesson/payment/notification/calendar/Amelia authority.
+
 ## 3. Completed Proposal Foundation — Phase 2A.2-D
 
 Schema 10 / `010_proposal_foundation` implements the minimum proposal lineage:
