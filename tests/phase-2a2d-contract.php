@@ -11,7 +11,8 @@ $privacy = file_get_contents( $root . '/src/Core/Application/BookingRequestPriva
 $plugin = file_get_contents( $root . '/delnavazan-platform.php' );
 $docs = file_get_contents( $root . '/docs/PHASE-2A-2D-PROPOSAL-FOUNDATION.md' );
 
-foreach ( array( "DZN_PLATFORM_SCHEMA_VERSION', '10", '010_proposal_foundation', 'proposal_families', 'proposal_options', 'proposal_versions', 'ENGINE=InnoDB', 'verify_proposal_schema', 'dzn_issue_booking_request_proposals' ) as $needle ) if ( strpos( $migration . $plugin, $needle ) === false ) throw new RuntimeException( 'Missing Proposal schema/capability: ' . $needle );
+if ( strpos( $plugin, "DZN_PLATFORM_SCHEMA_VERSION', '10" ) === false && strpos( $plugin, "DZN_PLATFORM_SCHEMA_VERSION', '11" ) === false ) throw new RuntimeException( 'Missing compatible Proposal schema marker' );
+foreach ( array( '010_proposal_foundation', 'proposal_families', 'proposal_options', 'proposal_versions', 'ENGINE=InnoDB', 'verify_proposal_schema', 'dzn_issue_booking_request_proposals' ) as $needle ) if ( strpos( $migration . $plugin, $needle ) === false ) throw new RuntimeException( 'Missing Proposal schema/capability: ' . $needle );
 foreach ( array(
     "UNIQUE KEY booking_request_id(booking_request_id)",
     "UNIQUE KEY coordination_case_id(coordination_case_id)",

@@ -4,6 +4,7 @@ namespace Delnavazan\Platform\Admin\Controller;
 use Delnavazan\Platform\Core\Application\CoordinationCaseService;
 use Delnavazan\Platform\Core\Application\TeacherAvailabilityAssentService;
 use Delnavazan\Platform\Core\Application\ProposalService;
+use Delnavazan\Platform\Core\Application\ProposalAcceptanceService;
 use Delnavazan\Platform\Core\Infrastructure\Repository\CoordinationCaseRepository;
 use Delnavazan\Platform\Core\Infrastructure\Repository\TeacherAvailabilityAssentRepository;
 use Delnavazan\Platform\Core\Infrastructure\Repository\ProposalRepository;
@@ -26,6 +27,7 @@ final class CoordinationCaseController {
             elseif ( $action === 'invalidate_teacher_assent' ) { $assent = self::id( $_POST['assent_id'] ?? null ); check_admin_referer( 'dzn_teacher_assent_state_' . $assent ); ( new TeacherAvailabilityAssentService() )->invalidate( $assent, self::id( $_POST['version'] ?? null ), self::string( $_POST['reason'] ?? null ) ); }
             elseif ( $action === 'issue_proposal_initial' ) { self::requireProposalCapability(); check_admin_referer( 'dzn_proposal_issue' ); ( new ProposalService() )->issueInitial( self::id( $_POST['candidate_id'] ?? null ), self::text( $_POST['arrangement_fingerprint'] ?? null ), self::text( $_POST['idempotency_key'] ?? null ) ); }
             elseif ( $action === 'issue_proposal_replacement' ) { self::requireProposalCapability(); check_admin_referer( 'dzn_proposal_issue' ); ( new ProposalService() )->issueReplacement( self::id( $_POST['option_id'] ?? null ), self::id( $_POST['expected_current_version'] ?? null ), self::text( $_POST['arrangement_fingerprint'] ?? null ), self::text( $_POST['idempotency_key'] ?? null ), self::string( $_POST['reason'] ?? null ) ); }
+            elseif ( $action === 'record_provisional_acceptance' ) { self::requireAcceptanceCapability(); check_admin_referer( 'dzn_provisional_acceptance' ); ( new ProposalAcceptanceService() )->record( self::text( $_POST['family_uid'] ?? null ), self::text( $_POST['option_uid'] ?? null ), self::id( $_POST['version_number'] ?? null ), self::text( $_POST['prospective_subject_ref'] ?? null ), self::string( $_POST['evidence_channel'] ?? null ), self::text( $_POST['evidence_at'] ?? null ), self::text( $_POST['idempotency_key'] ?? null ) ); }
             else throw new \InvalidArgumentException( 'Unsupported coordination action' );
             self::redirect( false );
         } catch ( \Throwable ) { self::redirect( true ); }
@@ -49,6 +51,7 @@ final class CoordinationCaseController {
         echo '</tbody></table>';
         if ( current_user_can( 'dzn_manage_teacher_availability_assent' ) ) self::assentControls( $case );
         if ( current_user_can( 'dzn_issue_booking_request_proposals' ) ) self::proposalControls( $case );
+        if ( current_user_can( 'dzn_record_booking_request_provisional_acceptance' ) ) self::provisionalAcceptanceControls();
     }
     private static function assentControls( object $case ): void {
         $repo = new TeacherAvailabilityAssentRepository();
@@ -70,7 +73,12 @@ final class CoordinationCaseController {
         foreach ( $rows as $row ) echo '<tr><td><code>' . esc_html( (string) $row->family_uid ) . '</code></td><td>#' . esc_html( (string) $row->option_id ) . ' / Teacher ' . esc_html( (string) $row->teacher_id ) . '<br><code>' . esc_html( (string) $row->option_uid ) . '</code></td><td>' . esc_html( (string) $row->version_number ) . '<br><code>' . esc_html( (string) $row->version_uid ) . '</code></td><td>' . ( (int) $row->current_version_id === (int) $row->version_id ? 'yes' : 'no' ) . '</td><td>' . esc_html( (string) $row->issuance_reason_code ) . '</td><td>' . esc_html( (string) $row->issued_at ) . '</td></tr>';
         echo '</tbody></table>';
     }
+    private static function provisionalAcceptanceControls(): void {
+        echo '<h3>Provisional acceptance evidence</h3><p>Records only immutable <code>accepted_pending_conditions</code> evidence for one exact Proposal Family, Teacher-specific Option and immutable Version. It does not establish learner identity, guardian authority, final acceptance, conversion, Enrolment, assignment, booking, payment, notification, calendar or Amelia authority.</p>';
+        echo '<form method="post">'; wp_nonce_field( 'dzn_provisional_acceptance' ); echo '<input type="hidden" name="dzn_coordination_action" value="record_provisional_acceptance"><p><label>Family UID <input name="family_uid" maxlength="26" required></label> <label>Option UID <input name="option_uid" maxlength="26" required></label> <label>Version number <input name="version_number" type="number" min="1" required></label></p><p><label>Prospective subject reference <input name="prospective_subject_ref" maxlength="64" required></label> <label>Evidence channel <select name="evidence_channel"><option value="email_reference">email reference</option><option value="message_reference">message reference</option><option value="phone">phone</option><option value="in_person">in person</option><option value="other_reference">other reference</option></select></label> <label>Evidence UTC <input name="evidence_at" placeholder="YYYY-MM-DD HH:MM:SS" required></label></p><p><label>Idempotency key <input name="idempotency_key" value="' . esc_attr( wp_generate_uuid4() ) . '" minlength="24" maxlength="255" required></label> <button class="button button-primary">Record provisional evidence</button></p></form>';
+    }
     private static function requireProposalCapability(): void { if ( ! current_user_can( 'dzn_issue_booking_request_proposals' ) ) throw new \RuntimeException( 'Unauthorized' ); }
+    private static function requireAcceptanceCapability(): void { if ( ! current_user_can( 'dzn_record_booking_request_provisional_acceptance' ) || ! current_user_can( self::CAPABILITY ) ) throw new \RuntimeException( 'Unauthorized' ); }
     private static function assentInput(): array { $fields = array( 'candidate_id','candidate_version','teacher_id','course_id','unresolved_course_spec','delivery_mode','location_scope','frequency_per_week','expected_duration_minutes','commencement_window_start','commencement_window_end','timezone','conditions_code','valid_until','review_by','attribution_basis','evidence_channel','evidence_at','uncertainty_code','supersede_assent_id','supersede_assent_version' ); $out = array(); foreach ( $fields as $field ) $out[$field] = self::text( $_POST[$field] ?? null ); return $out; }
     private static function string( mixed $value ): string { return is_string( $value ) ? sanitize_key( wp_unslash( $value ) ) : ''; }
     private static function text( mixed $value ): string { return is_string( $value ) ? trim( sanitize_text_field( wp_unslash( $value ) ) ) : ''; }

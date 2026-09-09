@@ -84,6 +84,7 @@ final class ProposalService {
         }
 
         $current = $this->repo->currentVersionForOption( $option );
+        do_action( 'dzn_phase_2a2e_proposal_locks_held' );
         if ( $current && (int) $current->proposal_family_id !== (int) $family->id ) throw new \RuntimeException( 'Proposal current-version pointer is inconsistent' );
         if ( $operation === 'initial' && $current && (int) $current->version_number !== 1 ) throw new \InvalidArgumentException( 'Proposal Option already has Version history' );
         if ( $operation === 'replacement' && ( ! $current || (int) $current->version_number !== $expectedCurrentNumber ) ) throw new \RuntimeException( 'Proposal Version changed concurrently' );
