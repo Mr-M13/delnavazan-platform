@@ -1,17 +1,18 @@
 # Changelog
 
-## Unreleased
-
-- Phase 2A.2-E adds Schema 11 migration `011_provisional_acceptance_evidence`: append-only `accepted_pending_conditions` evidence for exact Proposal Versions, explicitly not final acceptance or conversion authority.
-
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## 0.1.0 — 2026-09-09
 
-Current merged main: `c041028b16b6cb6976453630480484bd7d1ddc0b`
+Phase 2A.2-E merge main: `b1ad277b1ddbe0be49c024d6f39a1d68e6f584dd`
 
-Schema 10 / migrations 001–010.
+Schema 11 / migrations 001–011.
+
+### Phase 2A.2-E — Provisional Acceptance Evidence
+
+- Merged Schema 11 / migration `011_provisional_acceptance_evidence` from reviewed candidate `740a29dbe3fce081ba0fd19d6b6259cb4d293134` through PR #14.
+- Added append-only `accepted_pending_conditions` evidence with `authority_unresolved`; no final acceptance, Student/guardian authority, Accepted Service Arrangement, conversion or downstream operational authority.
 
 ### Phase 2A.2-D — Proposal Foundation
 

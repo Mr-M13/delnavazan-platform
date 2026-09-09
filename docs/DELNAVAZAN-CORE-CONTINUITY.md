@@ -8,15 +8,15 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Current main | `c041028b16b6cb6976453630480484bd7d1ddc0b` |
+| Platform merge main (Phase 2A.2-E) | `b1ad277b1ddbe0be49c024d6f39a1d68e6f584dd` |
 | Platform | 0.1.0 |
-| Schema | 10 |
-| Migrations | 001–010 |
-| Latest completed slice | Phase 2A.2-D — Proposal Foundation |
-| Phase 2A.2-D validated candidate | `5b67442218baeba94b68d988f31f51e09ae1a58b` |
-| Merge state | PR #13 merged into current main |
-| Next Platform slice | Phase 2A.2-E — Acceptance Foundation |
-| Current 2A.2-E state | Source/contract reconnaissance only; not implemented |
+| Schema | 11 |
+| Migrations | 001–011 |
+| Latest completed slice | Phase 2A.2-E — Provisional Acceptance Evidence |
+| Phase 2A.2-E approved candidate | `740a29dbe3fce081ba0fd19d6b6259cb4d293134` |
+| Merge state | PR #14 merged as `b1ad277b1ddbe0be49c024d6f39a1d68e6f584dd` |
+| Next Platform slice | Phase 2A.2-F — Student Identity & Acceptance Authority Foundation |
+| Current 2A.2-E state | **COMPLETE / MERGED** |
 
 The completed coordination chain is:
 
@@ -24,8 +24,9 @@ The completed coordination chain is:
 2. **2A.2-B** — Coordination Case and Candidate Teacher foundation.
 3. **2A.2-C** — Teacher Availability Assent.
 4. **2A.2-D** — Proposal Family, Teacher-specific Option and immutable Proposal Version.
+5. **2A.2-E** — Provisional Acceptance Evidence: immutable, exact Proposal-Version evidence only.
 
-No acceptance, arrangement, enrolment, teacher assignment, lesson, payment, notification, calendar or Amelia authority has been added by 2A.2-D.
+Schema 11 / `011_provisional_acceptance_evidence` records only `accepted_pending_conditions` with `authority_unresolved`. It creates no final acceptance, Student identity, guardian authority, Accepted Service Arrangement, conversion, Enrolment, Teacher Assignment, Lesson, payment, notification, calendar or Amelia authority.
 
 ## 2. Locked coordination domain contract
 
@@ -98,9 +99,9 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-Phase 2A.2-E is the Acceptance Foundation. Hamed is currently conducting bounded source/contract reconnaissance. Do not state or imply that 2A.2-E is implemented.
+Phase 2A.2-E — Provisional Acceptance Evidence is **COMPLETE / MERGED**: Schema 11 / `011_provisional_acceptance_evidence`, candidate `740a29dbe3fce081ba0fd19d6b6259cb4d293134`, merged in PR #14 as `b1ad277b1ddbe0be49c024d6f39a1d68e6f584dd`. It records only immutable `accepted_pending_conditions` evidence while accepting-subject authority remains `authority_unresolved`; it creates no final acceptance, Student or guardian authority, Accepted Service Arrangement, conversion, Enrolment, Teacher Assignment, Lesson, payment, notification, calendar or Amelia authority.
 
-A later implementation brief must explicitly define provisional/final acceptance, accepted arrangement, conversion readiness and conversion authority while preserving the locked separation in section 2. It must not create Enrolment conversion, Teacher Assignment, scheduling, capacity reservation, payment, notification, calendar or Amelia authority unless separately authorised.
+Next dependency: **Phase 2A.2-F — Student Identity & Acceptance Authority Foundation.** Its brief must preserve the locked separation in section 2 and must not create conversion, Teacher Assignment, scheduling, capacity reservation, payment, notification, calendar or Amelia authority unless separately authorised.
 
 ## 5. Persistent architectural boundaries
 
