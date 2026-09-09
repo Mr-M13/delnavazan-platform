@@ -12,7 +12,9 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 gate=$DZN_PHASE_2A2E_GATE_DIR
 [ -d "$gate" ] && [ -z "$(find "$gate" -mindepth 1 -maxdepth 1 -print -quit)" ] || { echo "Gate directory must exist and be empty." >&2; exit 1; }
 wp() { "$DZN_PHASE_2A2E_WP_CLI" --path="$DZN_PHASE_2A2E_WP_PATH" --user="$DZN_PHASE_2A2E_WP_USER" eval-file "$1"; }
+has_fixture() { "$DZN_PHASE_2A2E_WP_CLI" --path="$DZN_PHASE_2A2E_WP_PATH" --user="$DZN_PHASE_2A2E_WP_USER" eval 'exit(is_array(get_option("dzn_phase_2a2e_concurrency_fixture"))?0:1);'; }
 wait_gate() { file=$1; i=0; while [ ! -f "$gate/$file" ] && [ "$i" -lt 300 ]; do i=$((i+1)); sleep 0.1; done; [ -f "$gate/$file" ] || { echo "Timed out waiting for explicit gate $file" >&2; exit 1; }; }
+has_fixture || wp "$root/tests/phase-2a2e-concurrency-fixture.php"
 wp "$root/tests/phase-2a2e-concurrency-setup.php"
 case "$DZN_PHASE_2A2E_MODE" in
   a) first=a1:acceptance; second=a2:acceptance;; b) first=b1:acceptance; second=b2:acceptance;; x) first=x1:acceptance; second=x2:acceptance;;

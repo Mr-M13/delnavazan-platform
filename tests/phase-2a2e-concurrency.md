@@ -7,9 +7,11 @@ proof of overlap: the controller must observe the holder's `.locked` file before
 launching the contender, then observes the contender's `.started` file before
 creating `release`.
 
-Run `phase-2a2e-concurrency-fixture.php` first. It derives an array with
+The runner invokes `phase-2a2e-concurrency-fixture.php` automatically on a
+clean database. It derives an array with
 `synthetic_domain => 'phase-2a2e.invalid'` and one entry each for `a`, `b`, `c1`,
-`c2`, `d1`, `d2`, and `x` from the established Phase 2A.2-D disposable fixture.
+`c2`, `d1`, `d2`, and `x` through the committed ready-teacher, public-request,
+coordination, eligibility, Assent, and Proposal application paths.
 Every entry needs `family_uid`, `option_uid`,
 `version_number`, `prospective_subject_ref`, and `request_id`; C entries also need
 `option_id`, `expected_version`, and `replacement_fingerprint`. `a1`/`a2`, etc.
