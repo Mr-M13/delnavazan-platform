@@ -27,7 +27,7 @@ wait_gate "$first_name.locked"
 env DZN_PHASE_2A2E_WORKER="$second_name" DZN_PHASE_2A2E_ACTION="$second_action" "$DZN_PHASE_2A2E_WP_CLI" --path="$DZN_PHASE_2A2E_WP_PATH" --user="$DZN_PHASE_2A2E_WP_USER" eval-file "$root/tests/phase-2a2e-concurrency-worker.php" >"$gate/$second_name.out" 2>&1 & second_pid=$!
 wait_gate "$second_name.started"
 : > "$gate/release"; wait "$first_pid"; wait "$second_pid"
-case "$DZN_PHASE_2A2E_MODE" in a) grep -q 'outcome=success' "$gate/a1.out"; grep -q 'idempotent=1' "$gate/a2.out";; b|x) grep -q 'outcome=success' "$gate/${second_name}.out"; grep -q 'outcome=conflict' "$gate/${first_name}.out";; c1) grep -q 'outcome=issued' "$gate/c1.out"; grep -q 'outcome=rejected' "$gate/c2.out";; c2) grep -q 'outcome=success' "$gate/c1.out"; grep -q 'outcome=issued' "$gate/c2.out";; d1) grep -q 'outcome=erased' "$gate/d1.out"; grep -q 'outcome=rejected' "$gate/d2.out";; d2) grep -q 'outcome=success' "$gate/d1.out"; grep -q 'outcome=erased' "$gate/d2.out";; esac
+case "$DZN_PHASE_2A2E_MODE" in a) grep -q 'outcome=success' "$gate/a1.out"; grep -q 'idempotent=1' "$gate/a2.out";; b) grep -q 'outcome=success' "$gate/b1.out"; grep -q 'outcome=conflict' "$gate/b2.out";; x) grep -q 'outcome=success' "$gate/x2.out"; grep -q 'outcome=conflict' "$gate/x1.out";; c1) grep -q 'outcome=issued' "$gate/c1.out"; grep -q 'outcome=rejected' "$gate/c2.out";; c2) grep -q 'outcome=success' "$gate/c1.out"; grep -q 'outcome=issued' "$gate/c2.out";; d1) grep -q 'outcome=erased' "$gate/d1.out"; grep -q 'outcome=rejected' "$gate/d2.out";; d2) grep -q 'outcome=success' "$gate/d1.out"; grep -q 'outcome=erased' "$gate/d2.out";; esac
 wp "$root/tests/phase-2a2e-concurrency-verify.php"
 rm -f "$gate"/*
 wp "$root/tests/phase-2a2e-concurrency-cleanup.php"
