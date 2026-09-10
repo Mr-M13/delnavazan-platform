@@ -14,6 +14,7 @@ Schema 11 / migrations 001–011.
 - Added Schema 12 / migration `012_student_identity_acceptance_authority` on the Phase 2A.2-F candidate branch.
 - Added human-reviewed, append-only Booking Request identity resolution and Student capacity classification records, versioned Student principal-link provenance, and effective/revocable guardian representative grants.
 - Added protected internal administration and an informational authority-read service. No final acceptance, conversion, public workflow, calendar, payment, notification, or Amelia authority was added.
+- Added atomic Student-principal supersession, a common authority lock order, strict guardian intervals with append-preserving expiry, real Schema 11 → 12 migration evidence, and an executable deterministic race harness.
 
 ### Phase 2A.2-E — Provisional Acceptance Evidence
 

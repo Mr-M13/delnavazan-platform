@@ -14,10 +14,18 @@ Schema 12 / migration `012_student_identity_acceptance_authority` establishes bo
 
 - Capacity classifications are append-only `adult`, `minor`, or `unknown` records, with a Student current pointer.
 - `student_principal_links` is extended with versioned provenance and one-active-link constraints. `students.wordpress_user_id` is not used as authority.
+- Principal replacement is one atomic supersession transaction. The old current row becomes `superseded`, records actor/reason/time and `superseded_by_link_id`, while the provenanced replacement becomes active without a committed authority gap.
 - V1 can create only an effective, revocable `guardian_representative` grant scoped to `service_acceptance`. The table reserves vocabulary for a future `adult_delegate`, but no V1 path creates, uses, or returns it.
+- Guardian timestamps are strict UTC calendar values and the end must be later than the start. Elapsed grants confer no eligibility; a later authority mutation retires their active slot as `expired`, preserving the historical row and permitting a valid replacement without cron.
 - Adult-self eligibility requires a resolved non-erased request, active Student, current `adult` capacity classification, and a current provenanced Student-to-WordPress principal link.
 - Minor guardian eligibility requires the same resolved/active state, current `minor` capacity classification, and an effective exact guardian grant.
 - `StudentAcceptanceAuthorityReadService` is informational only; it returns eligibility/blocked states and no bearer credential or final acceptance power.
+
+## Concurrency and migration evidence
+
+Authority mutations lock the Student, involved WordPress users in ascending ID order, relevant principal links by ID, then relevant guardian grants by ID before mutation. The executable local harness covers resolution/erasure, capacity, principal and guardian establish/revoke/supersede races plus informational currentness reads using explicit post-lock gates.
+
+The migration test begins with representative Schema 11 active/revoked principal links and Phase 2A.2-E acceptance state, runs the normal Schema 11 → 12 upgrader, verifies exact backfill/index/foreign-key/capability behavior, and repeats the upgrader to prove idempotency.
 
 ## Deliberate exclusions
 
