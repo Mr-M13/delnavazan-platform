@@ -3,13 +3,30 @@
 Run only against a disposable local/development WordPress database containing
 synthetic `.invalid` data. The runner starts independent WP-CLI processes and
 uses application-service post-lock hooks. It observes `w1.locked`, launches the
-contender, observes `w2.started`, proves an InnoDB wait as `w2.blocked`, and
-only then creates `release`; sleeps are never accepted as overlap evidence.
+contender, records both workers' authoritative `SELECT CONNECTION_ID()` values,
+maps those connections through `performance_schema.threads`, and creates
+`w2.blocked` only when `data_lock_waits` identifies worker 2's thread as the
+requester and worker 1's thread as the blocker on the mode's expected table.
+Only then does the runner create `release`; sleeps are never accepted as
+overlap evidence.
 The disposable database user therefore needs read-only `SELECT` access to
-`performance_schema.data_lock_waits` and `performance_schema.data_locks`.
+`performance_schema.threads`, `performance_schema.data_lock_waits`, and
+`performance_schema.data_locks`.
 Informational eligibility reads do not lock: they complete and write
 `w2.observed` while the writer remains held, explicitly proving the permitted
 old committed snapshot before the final post-commit projection is checked.
+
+The expected lock roots are explicit: R1/R2 use `dzn_booking_requests`; R3,
+R4, R6, R7, R8 and R9 use `dzn_students` as their aggregate root; R5 and R10
+use the shared WordPress `users` principal row. The probe records connection
+IDs, mapped thread IDs, requester/blocker IDs, expected aggregate/table and
+the observed schema/table/index/lock details as JSON.
+
+An EXIT/HUP/INT/TERM cleanup trap releases the barrier, terminates and reaps
+remaining worker children, prints worker logs on failure, removes gate files,
+and deletes race-local state. It preserves the original failure status and
+also runs on the successful path, so an interrupted race is immediately
+rerunnable.
 
 All authority mutations use one lock order:
 

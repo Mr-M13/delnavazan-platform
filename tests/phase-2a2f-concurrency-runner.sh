@@ -20,6 +20,44 @@ gate=$DZN_PHASE_2A2F_GATE_DIR
 wp() {
   "$DZN_PHASE_2A2F_WP_CLI" --path="$DZN_PHASE_2A2F_WP_PATH" --user="$DZN_PHASE_2A2F_WP_USER" eval-file "$1"
 }
+first_pid=
+second_pid=
+cleanup_needed=1
+cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  set +e
+  [ -d "$gate" ] && : >"$gate/release"
+  for pid in "$first_pid" "$second_pid"; do
+    [ -n "$pid" ] || continue
+    kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null
+  done
+  for pid in "$first_pid" "$second_pid"; do
+    [ -n "$pid" ] && wait "$pid" 2>/dev/null
+  done
+  if [ "$status" -ne 0 ]; then
+    echo "Phase 2A.2-F runner failed with status $status; worker logs follow." >&2
+    for log in "$gate/w1.out" "$gate/w2.out"; do
+      if [ -f "$log" ]; then
+        echo "--- $(basename "$log") ---" >&2
+        cat "$log" >&2
+      fi
+    done
+  fi
+  find "$gate" -mindepth 1 -maxdepth 1 -type f -exec rm -f -- {} \;
+  cleanup_status=0
+  if [ "$cleanup_needed" -eq 1 ]; then
+    wp "$root/tests/phase-2a2f-concurrency-cleanup.php" || cleanup_status=$?
+  fi
+  if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then
+    status=$cleanup_status
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 wait_gate() {
   file=$1
   i=0
@@ -33,9 +71,11 @@ wait_gate() {
 wp "$root/tests/phase-2a2f-concurrency-setup.php"
 env DZN_PHASE_2A2F_WORKER=w1 "$DZN_PHASE_2A2F_WP_CLI" --path="$DZN_PHASE_2A2F_WP_PATH" --user="$DZN_PHASE_2A2F_WP_USER" eval-file "$root/tests/phase-2a2f-concurrency-worker.php" >"$gate/w1.out" 2>&1 &
 first_pid=$!
+wait_gate w1.connection
 wait_gate w1.locked
 env DZN_PHASE_2A2F_WORKER=w2 "$DZN_PHASE_2A2F_WP_CLI" --path="$DZN_PHASE_2A2F_WP_PATH" --user="$DZN_PHASE_2A2F_WP_USER" eval-file "$root/tests/phase-2a2f-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 second_pid=$!
+wait_gate w2.connection
 wait_gate w2.started
 case "$DZN_PHASE_2A2F_MODE" in
   r11*) wait_gate w2.observed ;;
@@ -43,7 +83,9 @@ case "$DZN_PHASE_2A2F_MODE" in
 esac
 : >"$gate/release"
 wait "$first_pid"
+first_pid=
 wait "$second_pid"
+second_pid=
 
 grep -q 'outcome=error' "$gate/w1.out" && { cat "$gate/w1.out"; exit 1; }
 grep -q 'outcome=error' "$gate/w2.out" && { cat "$gate/w2.out"; exit 1; }
@@ -64,9 +106,11 @@ esac
 wp "$root/tests/phase-2a2f-concurrency-verify.php"
 printf '%s\n' "holder=$(tr '\n' ' ' < "$gate/w1.out")"
 printf '%s\n' "contender=$(tr '\n' ' ' < "$gate/w2.out")"
+printf '%s\n' "connections=w1:$(tr -d '\n' < "$gate/w1.connection"),w2:$(tr -d '\n' < "$gate/w2.connection")"
 case "$DZN_PHASE_2A2F_MODE" in
   r11*) printf '%s\n' "gates=w1.locked,w2.started,w2.observed,release" ;;
-  *) printf '%s\n' "gates=w1.locked,w2.started,w2.blocked,release" ;;
+  *)
+    printf '%s\n' "attribution=$(tr -d '\n' < "$gate/w2.blocked")"
+    printf '%s\n' "gates=w1.connection,w1.locked,w2.connection,w2.started,w2.blocked,release"
+    ;;
 esac
-rm -f "$gate"/*
-wp "$root/tests/phase-2a2f-concurrency-cleanup.php"

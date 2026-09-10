@@ -15,6 +15,7 @@ use Delnavazan\Platform\Core\Application\StudentAcceptanceAuthorityReadService;
 use Delnavazan\Platform\Core\Application\StudentAcceptanceAuthorityService;
 use Delnavazan\Platform\Core\Application\StudentIdentityResolutionService;
 
+global $wpdb;
 $state = get_option('dzn_phase_2a2f_race_state');
 $name = (string) getenv('DZN_PHASE_2A2F_WORKER');
 $gate = (string) getenv('DZN_PHASE_2A2F_GATE_DIR');
@@ -26,7 +27,15 @@ if (!is_array($command) || empty($command['action'])) {
     throw new RuntimeException('Phase 2A.2-F worker command unavailable');
 }
 $action = (string) $command['action'];
+$connectionId = (int) $wpdb->get_var('SELECT CONNECTION_ID()');
+if ($connectionId < 1) {
+    throw new RuntimeException('Phase 2A.2-F worker database connection identity unavailable');
+}
+if (file_put_contents($gate . '/' . $name . '.connection', (string) $connectionId . "\n") === false) {
+    throw new RuntimeException('Phase 2A.2-F worker connection identity could not be recorded');
+}
 file_put_contents($gate . '/' . $name . '.started', getmypid() . "\n");
+echo 'connection_id=' . $connectionId . "\n";
 
 $hold = static function () use ($gate, $name): void {
     file_put_contents($gate . '/' . $name . '.locked', microtime(true) . "\n");
