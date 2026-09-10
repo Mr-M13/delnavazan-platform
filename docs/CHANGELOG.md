@@ -9,6 +9,13 @@ Phase 2A.2-E merge main: `b1ad277b1ddbe0be49c024d6f39a1d68e6f584dd`
 
 Schema 11 / migrations 001–011.
 
+### Phase 2A.2-F — Student Identity & Acceptance Authority Foundation
+
+- Added Schema 12 / migration `012_student_identity_acceptance_authority` on the Phase 2A.2-F candidate branch.
+- Added human-reviewed, append-only Booking Request identity resolution and Student capacity classification records, versioned Student principal-link provenance, and effective/revocable guardian representative grants.
+- Added protected internal administration and an informational authority-read service. No final acceptance, conversion, public workflow, calendar, payment, notification, or Amelia authority was added.
+- Added atomic Student-principal supersession, a common authority lock order, strict guardian intervals with append-preserving expiry, real Schema 11 → 12 migration evidence, and an executable deterministic race harness.
+
 ### Phase 2A.2-E — Provisional Acceptance Evidence
 
 - Merged Schema 11 / migration `011_provisional_acceptance_evidence` from reviewed candidate `740a29dbe3fce081ba0fd19d6b6259cb4d293134` through PR #14.

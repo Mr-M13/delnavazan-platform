@@ -531,6 +531,14 @@ choices include:
 4. Platform Phase 9 Finance physical tables and audited correction implementation.
 5. Later provider-specific integration schemas.
 
+## Phase 2A.2-F Student Identity & Acceptance Authority (Schema 12)
+
+`booking_request_identity_resolution_events` is append-only reviewed identity history. A Booking Request holds only its current event pointer and Student projection; event provenance is controlled metadata with an opaque evidence reference, not contact data or documents.
+
+`student_acceptance_capacity_classifications` is append-only `adult` / `minor` / `unknown` history with a Student current pointer. `student_principal_links` holds versioned, reviewed WordPress principal links; atomic supersession preserves old-to-new lineage through `superseded_by_link_id`, and the legacy `students.wordpress_user_id` field is not acceptance authority. `student_acceptance_authority_grants` records effective, revocable/supersedable `guardian_representative` authority scoped to `service_acceptance`. Elapsed grants are ineligible and are lazily retired from the active slot without deleting history. V1 creates no adult-delegate grant.
+
+These facts support an informational eligibility read only. They do not represent a final acceptance, accepted arrangement, conversion, enrolment, schedule, payment, notification, calendar, or Amelia record.
+
 
 ## Phase 2A.2-D Proposal Foundation (Schema 10)
 
