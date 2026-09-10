@@ -16,6 +16,7 @@
 | Latest completed slice | Phase 2A.2-F — Student Identity & Acceptance Authority Foundation |
 | Phase 2A.2-F approved candidate | `f7b8066ce6f45c6bee461cdb13cc2614283988bd` |
 | Merge state | PR #15 merged as `c578f137ed537276524a460a9bb4771ec6fbcc4c` |
+| Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
 | Next Platform action | Hamnavaz domain / Platform reconciliation before Phase 2A.2-G or final acceptance/conversion work |
 | Current 2A.2-F state | **COMPLETE / MERGED** |
 
@@ -65,12 +66,15 @@ Any subsequent work must preserve this graph and must not silently advance to co
 
 PR #15 merged approved candidate `f7b8066ce6f45c6bee461cdb13cc2614283988bd` as merge commit `c578f137ed537276524a460a9bb4771ec6fbcc4c`. Schema 12 / `012_student_identity_acceptance_authority` establishes:
 
-- human-reviewed, append-only Booking Request-to-Student identity resolution;
-- minimal append-only Student capacity classification;
-- versioned, provenanced Student-to-WordPress principal links with atomic supersession;
-- effective, revocable guardian representative grants with strict intervals and append-preserving expiry;
-- a common authority lock order and deterministic attributed concurrency evidence;
-- protected internal administration and an informational eligibility read service.
+- explicit human-reviewed, append-only Booking Request-to-Student identity resolution, with no automatic identity matching;
+- append-only `adult`, `minor` and `unknown` Student acceptance-capacity classifications;
+- authoritative, versioned and provenanced Student-to-WordPress principal links with atomic supersession lineage;
+- effective and revocable `guardian_representative` authority scoped to `service_acceptance`, with strict intervals and append-preserving lazy expiry;
+- derived adult-self authority; adult delegation remains unavailable in V1;
+- protected internal administration and an informational, non-bearer eligibility read service;
+- the Booking Request privacy-erasure boundary, including rejection of new authority after erasure;
+- a deterministic common authority lock order and attributed R1–R11 concurrency harness;
+- real Schema 11 → 12 migration and repeat-upgrade evidence.
 
 Deliberate exclusions remain: no automatic PII matching, public identity workflow, adult delegation, final acceptance, Accepted Service Arrangement, Booking Request conversion, Enrolment, Teacher Assignment, Term, Lesson, payment, notification, calendar or Amelia authority.
 
