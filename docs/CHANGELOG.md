@@ -130,3 +130,8 @@ Schema 12 / migrations 001–012. Build identity: `phase2a2f-student-identity-ac
   its review branch and awaiting controlled Phase 1F beta runtime validation.
 - Amelia remains installed, operational, authoritative, and readable.
 - Hamnavaz Phase 4 remains intentionally paused.
+# Phase 2A.2-G recovery candidate
+
+- Adds Schema 13 / migration 013 for immutable, PII-free Accepted Service Arrangements and sibling Proposal Option outcomes.
+- Adds lock-revalidated adult-self/minor-guardian final acceptance, HMAC idempotency, privacy-safe replay, and a protected internal admin form.
+- Freezes further Proposal issuance after a Family has a final arrangement. No deployment or downstream service conversion is included.

@@ -11,6 +11,7 @@ final class ProposalRepository {
 
     public function familyForRead( int $id ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_families WHERE id=%d", $id ) ); }
     public function familyForCaseForUpdate( int $caseId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_families WHERE coordination_case_id=%d FOR UPDATE", $caseId ) ); }
+    public function acceptedArrangementForFamilyForUpdate( int $familyId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT id FROM {$this->prefix}accepted_service_arrangements WHERE proposal_family_id=%d FOR UPDATE", $familyId ) ); }
     public function insertFamily( array $data ): int { return $this->insert( 'proposal_families', $data ); }
     public function assignFamilyReference( int $id, string $reference ): void { $this->assignReference( 'proposal_families', $id, $reference ); }
 
