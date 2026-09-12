@@ -25,12 +25,12 @@ foreach ( array(
     "UNIQUE KEY current_version_id(current_version_id)",
     "KEY exact_version(proposal_family_id,proposal_option_id,version_number)"
 ) as $needle ) if ( strpos( $migration, $needle ) === false ) throw new RuntimeException( 'Missing Proposal concurrency invariant: ' . $needle );
-foreach ( array( 'issueInitial', 'issueReplacement', 'consumeCurrentForFutureProposalIssuance', 'versionForCommandForUpdate', 'familyForCaseForUpdate', 'optionForFamilyCandidateForUpdate', 'currentVersionForOption', 'advanceOptionCurrent', 'Proposal Version changed concurrently', 'Equivalent Proposal Version already exists', 'Proposal material facts are unchanged', 'IdempotencyConflictException' ) as $needle ) if ( strpos( $service . $repository, $needle ) === false ) throw new RuntimeException( 'Missing Proposal service invariant: ' . $needle );
+foreach ( array( 'issueInitial', 'issueReplacement', 'consumeCurrentForFutureProposalIssuance', 'versionForCommand', 'familyForCaseForUpdate', 'optionForFamilyCandidateForUpdate', 'currentVersionForOption', 'advanceOptionCurrent', 'Proposal Version changed concurrently', 'Equivalent Proposal Version already exists', 'Proposal material facts are unchanged', 'IdempotencyConflictException' ) as $needle ) if ( strpos( $service . $repository, $needle ) === false ) throw new RuntimeException( 'Missing Proposal service invariant: ' . $needle );
 
 $lockedIssuance = strpos( $service, 'private function issueLocked' );
 $familyLock = strpos( $service, 'ensureFamily(', $lockedIssuance );
 $optionLock = strpos( $service, 'ensureOption(', $lockedIssuance );
-$versionLock = strpos( $service, 'versionForCommandForUpdate', $lockedIssuance );
+$versionLock = strpos( $service, 'versionForCommand', $lockedIssuance );
 if ( $lockedIssuance === false || $familyLock === false || $optionLock === false || $versionLock === false || $lockedIssuance > $familyLock || $familyLock > $optionLock || $optionLock > $versionLock ) throw new RuntimeException( 'Proposal lock order no longer follows Assent -> Family -> Option -> Version' );
 if ( substr_count( $service, 'consumeCurrentForFutureProposalIssuance' ) !== 2 ) throw new RuntimeException( 'Every issuance path must use authoritative Assent consumption' );
 if ( strpos( $service, '$this->assents->current(' ) !== false ) throw new RuntimeException( 'Proposal issuance bypasses Assent authority through current()' );

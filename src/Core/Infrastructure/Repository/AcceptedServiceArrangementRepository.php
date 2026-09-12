@@ -11,9 +11,23 @@ final class AcceptedServiceArrangementRepository {
     public function arrangementForFamily(int $familyId): ?object { global $wpdb; return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}accepted_service_arrangements WHERE proposal_family_id=%d", $familyId)); }
     public function arrangementById(int $id): ?object { global $wpdb; return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}accepted_service_arrangements WHERE id=%d", $id)); }
 
-    public function familyOptionsForUpdate(int $familyId): array { global $wpdb; return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d ORDER BY id ASC FOR UPDATE", $familyId)) ?: array(); }
-    public function currentVersionsForOptionsForUpdate(int $familyId): array { global $wpdb; return $wpdb->get_results($wpdb->prepare("SELECT v.* FROM {$this->prefix}proposal_options o INNER JOIN {$this->prefix}proposal_versions v ON v.id=o.current_version_id AND v.proposal_option_id=o.id AND v.proposal_family_id=o.proposal_family_id WHERE o.proposal_family_id=%d ORDER BY o.id ASC FOR UPDATE", $familyId)) ?: array(); }
-    public function provisionalForUidForUpdate(string $uid): ?object { global $wpdb; return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}proposal_acceptance_events WHERE uid=%s FOR UPDATE", $uid)); }
+    public function familyOptionsForUpdate(int $familyId): array {
+        global $wpdb;
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d ORDER BY id ASC", $familyId)) ?: array();
+        $rows = array(); foreach ($ids as $id) { $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}proposal_options WHERE id=%d FOR UPDATE", (int) $id)); if ($row) $rows[] = $row; }
+        return $rows;
+    }
+    public function currentVersionsForOptionsForUpdate(int $familyId): array {
+        global $wpdb;
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT v.id FROM {$this->prefix}proposal_options o INNER JOIN {$this->prefix}proposal_versions v ON v.id=o.current_version_id AND v.proposal_option_id=o.id AND v.proposal_family_id=o.proposal_family_id WHERE o.proposal_family_id=%d ORDER BY o.id ASC", $familyId)) ?: array();
+        $rows = array(); foreach ($ids as $id) { $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}proposal_versions WHERE id=%d FOR UPDATE", (int) $id)); if ($row) $rows[] = $row; }
+        return $rows;
+    }
+    public function provisionalForUidForUpdate(string $uid): ?object {
+        global $wpdb;
+        $id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->prefix}proposal_acceptance_events WHERE uid=%s", $uid));
+        return $id ? $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}proposal_acceptance_events WHERE id=%d FOR UPDATE", (int) $id)) : null;
+    }
 
     public function insertArrangement(array $data): int { return $this->insert('accepted_service_arrangements', $data, 'Accepted Service Arrangement persistence failed'); }
     public function assignArrangementReference(int $id, string $reference): void { global $wpdb; if ($wpdb->update($this->prefix . 'accepted_service_arrangements', array('reference_code' => $reference), array('id' => $id, 'reference_code' => null)) !== 1) throw new \RuntimeException('Accepted Service Arrangement reference assignment failed'); }

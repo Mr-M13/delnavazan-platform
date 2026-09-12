@@ -16,7 +16,7 @@ use Delnavazan\Platform\Core\Application\TeachingEligibilityService;
 global $wpdb;
 $p = $wpdb->prefix . 'dzn_';
 $mode = (string) getenv('DZN_PHASE_2A2G_MODE');
-if (!in_array($mode, array('a', 'o', 'p', 'e', 'c', 'pr', 'g', 'x'), true)) throw new RuntimeException('Unknown final-acceptance race');
+if (!in_array($mode, array('a', 'o', 'p', 'e', 'c', 'pr', 'g', 'x', 'u'), true)) throw new RuntimeException('Unknown final-acceptance race');
 if (is_array(get_option('dzn_phase_2a2g_race_state'))) throw new RuntimeException('Previous race state remains');
 $base = get_option('dzn_phase_2a2e_concurrency_fixture');
 $bootstrap = get_option('dzn_phase_2a2e_concurrency_bootstrap');
@@ -30,8 +30,8 @@ $actor = get_current_user_id();
 $at = gmdate('Y-m-d H:i:s');
 $suffix = $mode . '-' . substr(hash('sha256', wp_generate_uuid4()), 0, 12);
 
-$recordAssent = static function(int $candidateId, int $version, int $teacherId) use ($course): array {
-    return (new TeacherAvailabilityAssentService())->recordAdministratorAttestation(array(
+$recordAssent = static function(int $candidateId, int $version, int $teacherId, array $overrides = array()) use ($course): array {
+    return (new TeacherAvailabilityAssentService())->recordAdministratorAttestation(array_replace(array(
         'candidate_id' => $candidateId, 'candidate_version' => $version, 'teacher_id' => $teacherId,
         'course_id' => $course, 'delivery_mode' => 'online', 'location_scope' => 'not_applicable',
         'frequency_per_week' => 1, 'expected_duration_minutes' => 30,
@@ -40,9 +40,9 @@ $recordAssent = static function(int $candidateId, int $version, int $teacherId) 
         'valid_until' => gmdate('Y-m-d H:i:s', strtotime('+60 days')), 'timezone' => 'UTC',
         'conditions_code' => 'none', 'evidence_channel' => 'message_reference',
         'evidence_at' => gmdate('Y-m-d H:i:s', strtotime('-1 minute')), 'attribution_basis' => 'direct_teacher_statement',
-    ));
+    ), $overrides));
 };
-$make = static function(string $label, string $capacity = 'adult', bool $competingOption = false) use ($instrument, $course, $teacher, $actor, $at, $suffix, $wpdb, $p, $recordAssent): array {
+$make = static function(string $label, string $capacity = 'adult', bool $competingOption = false, bool $resolveIdentity = true) use ($instrument, $course, $teacher, $actor, $at, $suffix, $wpdb, $p, $recordAssent): array {
     $requestResult = (new BookingRequestSubmissionService())->submitPublic(array(
         'requested_instrument_id' => $instrument, 'selected_intro_course_id' => $course,
         'full_name' => 'Synthetic 2A2G ' . $label, 'email' => $label . '-' . $suffix . '@phase-2a2g.invalid',
@@ -75,9 +75,14 @@ $make = static function(string $label, string $capacity = 'adult', bool $competi
     $targets = array();
     foreach ($versions as $item) {
         $version = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}proposal_versions WHERE id=%d", $item['version_id']));
+        if (!$resolveIdentity) {
+            $targets[] = array('family_uid' => $item['family_uid'], 'option_uid' => $item['option_uid'], 'option_id' => (int) $item['option_id'], 'version_number' => (int) $item['version_number'], 'version_id' => (int) $item['version_id'], 'request_id' => $request, 'case_id' => (int) $case['case_id']);
+            continue;
+        }
         $provisional = (new ProposalAcceptanceService())->record($item['family_uid'], $item['option_uid'], (int) $item['version_number'], (string) $version->prospective_subject_ref, 'message_reference', $at, 'dzn-2a2g-provisional-' . $label . '-' . substr(hash('sha256', wp_generate_uuid4()), 0, 30));
         $targets[] = array('family_uid' => $item['family_uid'], 'option_uid' => $item['option_uid'], 'option_id' => (int) $item['option_id'], 'version_number' => (int) $item['version_number'], 'version_id' => (int) $item['version_id'], 'provisional_uid' => (string) $wpdb->get_var($wpdb->prepare("SELECT uid FROM {$p}proposal_acceptance_events WHERE id=%d", $provisional['event_id'])));
     }
+    if (!$resolveIdentity) return $targets;
     (new StudentIdentityResolutionService())->createAndResolve($request, array('display_name' => 'Synthetic 2A2G ' . $label), 'human_review', 'synthetic_fixture', $at, $actor);
     $student = (int) $wpdb->get_var($wpdb->prepare("SELECT student_id FROM {$p}booking_requests WHERE id=%d", $request));
     $accepting = wp_insert_user(array('user_login' => 'dzn-2a2g-' . $label . '-' . $suffix, 'user_pass' => wp_generate_password(32, true, true), 'user_email' => $label . '-' . $suffix . '@principal.phase-2a2g.invalid'));
@@ -97,5 +102,17 @@ $targets = $make($mode . '-one', $mode === 'g' ? 'minor' : 'adult', $mode === 'o
 $state['one'] = $targets[0];
 if ($mode === 'o') $state['two'] = $targets[1];
 if ($mode === 'x') $state['two'] = $make($mode . '-two', 'adult')[0];
+if ($mode === 'u') {
+    $proposal = $make($mode . '-proposal', 'adult', false, false)[0];
+    $version = $wpdb->get_row($wpdb->prepare("SELECT candidate_id,source_assent_id FROM {$p}proposal_versions WHERE id=%d", $proposal['version_id']));
+    $candidate = $wpdb->get_row($wpdb->prepare("SELECT teacher_id,version FROM {$p}coordination_case_candidates WHERE id=%d", $version->candidate_id));
+    $replacementAssent = $recordAssent((int) $version->candidate_id, (int) $candidate->version, (int) $candidate->teacher_id, array(
+        'commencement_window_start' => gmdate('Y-m-d H:i:s', strtotime('+15 days')),
+        'commencement_window_end' => gmdate('Y-m-d H:i:s', strtotime('+22 days')),
+        'supersede_assent_id' => (int) $version->source_assent_id,
+        'supersede_assent_version' => 1,
+    ));
+    $state['proposal'] = $proposal + array('replacement_fingerprint' => $replacementAssent['fingerprint']);
+}
 update_option('dzn_phase_2a2g_race_state', $state, false);
 echo "Phase 2A.2-G {$mode} setup passed\n";

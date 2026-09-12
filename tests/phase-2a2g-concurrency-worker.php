@@ -24,7 +24,10 @@ $hold = static function() use ($gate, $worker): void {
     for ($i = 0; $i < 600 && !file_exists($gate . '/release'); $i++) usleep(100000);
     if (!file_exists($gate . '/release')) throw new RuntimeException('Explicit release unavailable');
 };
-if ($worker === 'w1') add_action(in_array($mode, array('c', 'pr', 'g'), true) ? 'dzn_phase_2a2g_authority_locks_held' : 'dzn_phase_2a2g_proposal_locks_held', $hold);
+if ($worker === 'w1') {
+    $hook = $mode === 'u' ? 'dzn_phase_2a2g_family_finality_checked' : (in_array($mode, array('c', 'pr', 'g'), true) ? 'dzn_phase_2a2g_authority_locks_held' : 'dzn_phase_2a2g_proposal_locks_held');
+    add_action($hook, $hold);
+}
 $accept = static function(array $target, string $key, string $channel = 'message_reference'): array {
     return (new FinalAcceptanceService())->accept($target['request_id'], $target['case_id'], $target['family_uid'], $target['option_uid'], $target['version_number'], $target['provisional_uid'], $target['student_id'], $target['principal_id'], 'affirmed', $channel, $target['confirmed_at'], $key);
 };
@@ -35,7 +38,9 @@ try {
         $out = $accept($target, $key, $mode === 'x' && $worker === 'w2' ? 'phone' : 'message_reference');
         echo 'outcome=accepted id=' . (int) $out['arrangement_id'] . ' replay=' . ($out['idempotent'] ? '1' : '0') . "\n";
     } elseif ($action === 'proposal') {
-        (new ProposalService())->issueReplacement($state['one']['option_id'], $state['one']['version_number'], str_repeat('a', 64), 'dzn-2a2g-race-proposal-' . substr(hash('sha256', wp_generate_uuid4()), 0, 30), 'operator_correction');
+        $target = $mode === 'u' ? $state['proposal'] : $state['one'];
+        $fingerprint = $mode === 'u' ? $target['replacement_fingerprint'] : str_repeat('a', 64);
+        (new ProposalService())->issueReplacement($target['option_id'], $target['version_number'], $fingerprint, 'dzn-2a2g-race-proposal-' . substr(hash('sha256', wp_generate_uuid4()), 0, 30), 'operator_correction');
         echo "outcome=issued\n";
     } elseif ($action === 'erase') {
         (new BookingRequestPrivacyService())->erase($state['one']['request_id'], get_current_user_id(), 'runtime_test'); echo "outcome=erased\n";
@@ -49,3 +54,4 @@ try {
 } catch (IdempotencyConflictException) { echo "outcome=idempotency_conflict\n";
 } catch (ProposalFamilyAlreadyAcceptedException) { echo "outcome=family_conflict\n";
 } catch (Throwable $e) { echo 'outcome=rejected class=' . get_class($e) . ' message=' . $e->getMessage() . "\n"; }
+file_put_contents($gate . '/' . $worker . '.finished', microtime(true) . "\n");

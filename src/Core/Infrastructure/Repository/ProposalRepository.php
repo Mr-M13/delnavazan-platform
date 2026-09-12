@@ -10,23 +10,35 @@ final class ProposalRepository {
     public function __construct() { global $wpdb; $this->prefix = $wpdb->prefix . 'dzn_'; }
 
     public function familyForRead( int $id ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_families WHERE id=%d", $id ) ); }
-    public function familyForCaseForUpdate( int $caseId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_families WHERE coordination_case_id=%d FOR UPDATE", $caseId ) ); }
-    public function acceptedArrangementForFamilyForUpdate( int $familyId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT id FROM {$this->prefix}accepted_service_arrangements WHERE proposal_family_id=%d FOR UPDATE", $familyId ) ); }
+    public function familyForCaseForUpdate( int $caseId ): ?object {
+        global $wpdb;
+        $id = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$this->prefix}proposal_families WHERE coordination_case_id=%d", $caseId ) );
+        return $id ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_families WHERE id=%d FOR UPDATE", (int) $id ) ) : null;
+    }
+    /** The caller already owns the Proposal Family serialization lock. */
+    public function acceptedArrangementForFamily( int $familyId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT id FROM {$this->prefix}accepted_service_arrangements WHERE proposal_family_id=%d", $familyId ) ); }
     public function insertFamily( array $data ): int { return $this->insert( 'proposal_families', $data ); }
     public function assignFamilyReference( int $id, string $reference ): void { $this->assignReference( 'proposal_families', $id, $reference ); }
 
     /** Deliberately non-locking: replacement uses this only before the Assent lock graph. */
     public function optionForRead( int $id ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_options WHERE id=%d", $id ) ); }
-    public function optionForFamilyCandidateForUpdate( int $familyId, int $candidateId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d AND candidate_id=%d FOR UPDATE", $familyId, $candidateId ) ); }
-    public function optionForFamilyTeacherForUpdate( int $familyId, int $teacherId ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d AND teacher_id=%d FOR UPDATE", $familyId, $teacherId ) ); }
+    public function optionForFamilyCandidateForUpdate( int $familyId, int $candidateId ): ?object {
+        global $wpdb;
+        $id = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d AND candidate_id=%d", $familyId, $candidateId ) );
+        return $id ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_options WHERE id=%d FOR UPDATE", (int) $id ) ) : null;
+    }
+    public function optionForFamilyTeacherForUpdate( int $familyId, int $teacherId ): ?object {
+        global $wpdb;
+        $id = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$this->prefix}proposal_options WHERE proposal_family_id=%d AND teacher_id=%d", $familyId, $teacherId ) );
+        return $id ? $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_options WHERE id=%d FOR UPDATE", (int) $id ) ) : null;
+    }
     public function insertOption( array $data ): int { return $this->insert( 'proposal_options', $data ); }
     public function assignOptionReference( int $id, string $reference ): void { $this->assignReference( 'proposal_options', $id, $reference ); }
 
     public function versionForRead( int $id ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE id=%d", $id ) ); }
     public function versionForCommand( string $digest ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE command_key_digest=%s", $digest ) ); }
-    public function versionForCommandForUpdate( string $digest ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE command_key_digest=%s FOR UPDATE", $digest ) ); }
-    public function versionForOptionNumberForUpdate( int $optionId, int $number ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE proposal_option_id=%d AND version_number=%d FOR UPDATE", $optionId, $number ) ); }
-    public function versionForOptionFingerprintForUpdate( int $optionId, string $fingerprint ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE proposal_option_id=%d AND version_fingerprint=%s FOR UPDATE", $optionId, $fingerprint ) ); }
+    public function versionForOptionNumber( int $optionId, int $number ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE proposal_option_id=%d AND version_number=%d", $optionId, $number ) ); }
+    public function versionForOptionFingerprint( int $optionId, string $fingerprint ): ?object { global $wpdb; return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->prefix}proposal_versions WHERE proposal_option_id=%d AND version_fingerprint=%s", $optionId, $fingerprint ) ); }
 
     public function currentVersionForOption( object $option ): ?object {
         if ( $option->current_version_id === null ) return null;
