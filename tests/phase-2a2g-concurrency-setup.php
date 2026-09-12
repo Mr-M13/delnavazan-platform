@@ -16,7 +16,7 @@ use Delnavazan\Platform\Core\Application\TeachingEligibilityService;
 global $wpdb;
 $p = $wpdb->prefix . 'dzn_';
 $mode = (string) getenv('DZN_PHASE_2A2G_MODE');
-if (!in_array($mode, array('a', 'o', 'p', 'e', 'c', 'pr', 'g', 'x', 'u'), true)) throw new RuntimeException('Unknown final-acceptance race');
+if (!in_array($mode, array('a', 'o', 'p', 'e', 'c', 'pr', 'g', 'x', 'u', 'i', 'rp', 'rg'), true)) throw new RuntimeException('Unknown final-acceptance race');
 if (is_array(get_option('dzn_phase_2a2g_race_state'))) throw new RuntimeException('Previous race state remains');
 $base = get_option('dzn_phase_2a2e_concurrency_fixture');
 $bootstrap = get_option('dzn_phase_2a2e_concurrency_bootstrap');
@@ -98,10 +98,11 @@ $make = static function(string $label, string $capacity = 'adult', bool $competi
 };
 
 $state = array('mode' => $mode, 'holder' => 'w1', 'key' => 'dzn-2a2g-race-' . $mode . '-' . substr(hash('sha256', wp_generate_uuid4()), 0, 36));
-$targets = $make($mode . '-one', $mode === 'g' ? 'minor' : 'adult', $mode === 'o');
+$targets = $make($mode . '-one', in_array($mode, array('g', 'rg'), true) ? 'minor' : 'adult', $mode === 'o');
 $state['one'] = $targets[0];
 if ($mode === 'o') $state['two'] = $targets[1];
 if ($mode === 'x') $state['two'] = $make($mode . '-two', 'adult')[0];
+if ($mode === 'i') $state['two'] = $make($mode . '-two', 'adult')[0];
 if ($mode === 'u') {
     $proposal = $make($mode . '-proposal', 'adult', false, false)[0];
     $version = $wpdb->get_row($wpdb->prepare("SELECT candidate_id,source_assent_id FROM {$p}proposal_versions WHERE id=%d", $proposal['version_id']));

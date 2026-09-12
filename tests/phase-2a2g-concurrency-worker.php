@@ -25,7 +25,7 @@ $hold = static function() use ($gate, $worker): void {
     if (!file_exists($gate . '/release')) throw new RuntimeException('Explicit release unavailable');
 };
 if ($worker === 'w1') {
-    $hook = $mode === 'u' ? 'dzn_phase_2a2g_family_finality_checked' : (in_array($mode, array('c', 'pr', 'g'), true) ? 'dzn_phase_2a2g_authority_locks_held' : 'dzn_phase_2a2g_proposal_locks_held');
+    $hook = in_array($mode, array('rp', 'rg'), true) ? 'dzn_phase_2a2f_authority_locks_held' : ($mode === 'u' ? 'dzn_phase_2a2g_family_finality_checked' : (in_array($mode, array('c', 'pr', 'g', 'i'), true) ? 'dzn_phase_2a2g_authority_locks_held' : 'dzn_phase_2a2g_proposal_locks_held'));
     add_action($hook, $hold);
 }
 $accept = static function(array $target, string $key, string $channel = 'message_reference'): array {
@@ -33,8 +33,8 @@ $accept = static function(array $target, string $key, string $channel = 'message
 };
 try {
     if ($action === 'accept') {
-        $target = in_array($mode, array('o', 'x'), true) && $worker === 'w2' ? $state['two'] : $state['one'];
-        $key = in_array($mode, array('a', 'o'), true) && $worker === 'w2' ? $state['key'] . '-competitor' : $state['key'];
+        $target = in_array($mode, array('o', 'x', 'i'), true) && $worker === 'w2' ? $state['two'] : $state['one'];
+        $key = $mode === 'i' && $worker === 'w2' ? $state['key'] . '-independent' : (in_array($mode, array('a', 'o'), true) && $worker === 'w2' ? $state['key'] . '-competitor' : $state['key']);
         $out = $accept($target, $key, $mode === 'x' && $worker === 'w2' ? 'phone' : 'message_reference');
         echo 'outcome=accepted id=' . (int) $out['arrangement_id'] . ' replay=' . ($out['idempotent'] ? '1' : '0') . "\n";
     } elseif ($action === 'proposal') {

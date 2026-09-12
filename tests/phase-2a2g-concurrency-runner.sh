@@ -3,7 +3,7 @@
 set -eu
 : "${DZN_PHASE_2A2G_WP_CLI:?Set wp executable}" "${DZN_PHASE_2A2G_WP_PATH:?Set WordPress root}" "${DZN_PHASE_2A2G_WP_USER:?Set disposable administrator}" "${DZN_PHASE_2A2G_GATE_DIR:?Set empty shared gate directory}"
 [ "${DZN_PHASE_2A2G_RUNTIME_TEST:-}" = concurrency ] || { echo "Phase 2A.2-G runner refused." >&2; exit 1; }
-case "${DZN_PHASE_2A2G_MODE:-}" in a|o|p|e|c|pr|g|x|u);; *) echo "Unknown race." >&2; exit 1;; esac
+case "${DZN_PHASE_2A2G_MODE:-}" in a|o|p|e|c|pr|g|x|u|i|rp|rg);; *) echo "Unknown race." >&2; exit 1;; esac
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd);gate=$DZN_PHASE_2A2G_GATE_DIR
 [ -d "$gate" ] && [ -z "$(find "$gate" -mindepth 1 -maxdepth 1 -print -quit)" ] || { echo "Gate directory must be empty." >&2; exit 1; }
 wp(){ "$DZN_PHASE_2A2G_WP_CLI" --path="$DZN_PHASE_2A2G_WP_PATH" --user="$DZN_PHASE_2A2G_WP_USER" eval-file "$1"; }
@@ -18,6 +18,31 @@ if [ "$DZN_PHASE_2A2G_MODE" = u ]; then
   grep -q 'outcome=issued' "$gate/w1.out"; grep -q 'outcome=accepted' "$gate/w2.out"
   wp "$root/tests/phase-2a2g-concurrency-verify.php"
   printf 'race=u unrelated_completed_before_release=1 connections=w1:%s,w2:%s gates=w1.locked,w2.started,w2.finished,release holder="%s" contender="%s"\n' "$(tr -d '\n' <"$gate/w1.connection")" "$(tr -d '\n' <"$gate/w2.connection")" "$(tr '\n' ' ' <"$gate/w1.out")" "$(tr '\n' ' ' <"$gate/w2.out")"
+  rm -f "$gate"/*
+  exit 0
+fi
+if [ "$DZN_PHASE_2A2G_MODE" = i ]; then
+  env DZN_PHASE_2A2G_WORKER=w1 DZN_PHASE_2A2G_ACTION=accept "$DZN_PHASE_2A2G_WP_CLI" --path="$DZN_PHASE_2A2G_WP_PATH" --user="$DZN_PHASE_2A2G_WP_USER" eval-file "$root/tests/phase-2a2g-concurrency-worker.php" >"$gate/w1.out" 2>&1 & p1=$!
+  wait_gate w1.locked; wait_gate w1.connection
+  env DZN_PHASE_2A2G_WORKER=w2 DZN_PHASE_2A2G_ACTION=accept "$DZN_PHASE_2A2G_WP_CLI" --path="$DZN_PHASE_2A2G_WP_PATH" --user="$DZN_PHASE_2A2G_WP_USER" eval-file "$root/tests/phase-2a2g-concurrency-worker.php" >"$gate/w2.out" 2>&1 & p2=$!
+  wait_gate w2.started; wait_gate w2.connection; wait_gate w2.finished
+  : >"$gate/release"; wait "$p1"; wait "$p2"
+  grep -q 'outcome=accepted' "$gate/w1.out"; grep -q 'outcome=accepted' "$gate/w2.out"
+  wp "$root/tests/phase-2a2g-concurrency-verify.php"
+  printf 'race=i independent_completed_before_release=1 connections=w1:%s,w2:%s gates=w1.locked,w2.started,w2.finished,release holder="%s" contender="%s"\n' "$(tr -d '\n' <"$gate/w1.connection")" "$(tr -d '\n' <"$gate/w2.connection")" "$(tr '\n' ' ' <"$gate/w1.out")" "$(tr '\n' ' ' <"$gate/w2.out")"
+  rm -f "$gate"/*
+  exit 0
+fi
+if [ "$DZN_PHASE_2A2G_MODE" = rp ] || [ "$DZN_PHASE_2A2G_MODE" = rg ]; then
+  [ "$DZN_PHASE_2A2G_MODE" = rp ] && first=principal || first=guardian
+  env DZN_PHASE_2A2G_WORKER=w1 DZN_PHASE_2A2G_ACTION="$first" "$DZN_PHASE_2A2G_WP_CLI" --path="$DZN_PHASE_2A2G_WP_PATH" --user="$DZN_PHASE_2A2G_WP_USER" eval-file "$root/tests/phase-2a2g-concurrency-worker.php" >"$gate/w1.out" 2>&1 & p1=$!
+  wait_gate w1.locked; wait_gate w1.connection
+  env DZN_PHASE_2A2G_WORKER=w2 DZN_PHASE_2A2G_ACTION=accept "$DZN_PHASE_2A2G_WP_CLI" --path="$DZN_PHASE_2A2G_WP_PATH" --user="$DZN_PHASE_2A2G_WP_USER" eval-file "$root/tests/phase-2a2g-concurrency-worker.php" >"$gate/w2.out" 2>&1 & p2=$!
+  wait_gate w2.started; wait_gate w2.connection
+  : >"$gate/release"; wait "$p1"; wait "$p2"
+  grep -q "outcome=${first}_revoked" "$gate/w1.out"; grep -q 'outcome=rejected' "$gate/w2.out"
+  wp "$root/tests/phase-2a2g-concurrency-verify.php"
+  printf 'race=%s authority_committed_first=1 connections=w1:%s,w2:%s gates=w1.locked,w2.started,release holder="%s" contender="%s"\n' "$DZN_PHASE_2A2G_MODE" "$(tr -d '\n' <"$gate/w1.connection")" "$(tr -d '\n' <"$gate/w2.connection")" "$(tr '\n' ' ' <"$gate/w1.out")" "$(tr '\n' ' ' <"$gate/w2.out")"
   rm -f "$gate"/*
   exit 0
 fi
