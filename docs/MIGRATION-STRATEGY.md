@@ -370,3 +370,6 @@ cutover.
 Migration 010 creates the three InnoDB Proposal tables after Schema 9. Verification checks all required columns, engine type, canonical Family/Option uniqueness, linear Version/supersession constraints, idempotency and material-fingerprint uniqueness, the guarded current pointer, and the absence of a mutable `updated_at` field on Proposal Version.
 
 The migration is recorded once in `dzn_platform_completed_migrations`; `maybe_upgrade()` verifies rather than re-applies it after the schema marker reaches 10. Capability version `2a2d` repairs the dedicated administrator capability `dzn_issue_booking_request_proposals` independently of table creation.
+# Schema 13
+
+Migration `013_final_acceptance_arrangement_foundation` adds append-only `accepted_service_arrangements` and `proposal_option_outcome_events`. It is repeat-safe through the completed-migration ledger, verifies InnoDB, required immutable columns, and uniqueness for one arrangement per Proposal Family/Option and one outcome per Option, and repairs `dzn_finalize_service_arrangements` through capability marker `2a2g`.

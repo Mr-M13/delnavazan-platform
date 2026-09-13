@@ -272,3 +272,6 @@ This architecture does not:
 - merge scheduling state, attendance outcome, notification delivery, and
   payability into one status field;
 - independently authorise later Platform implementation, deployment or authority cutover.
+# Phase 2A.2-G authority boundary
+
+`FinalAcceptanceService` is the sole writer for final arrangements. It serializes on the Booking Request and Proposal Family lineage, then revalidates current Student identity, capacity, and adult-self or minor-guardian authority before atomically appending the arrangement and all sibling outcomes. `ProposalService` observes the same Family lock and rejects issuance after final acceptance. The existing Booking Request privacy erasure path shares the request lock, so erasure and acceptance have deterministic commit-order semantics.

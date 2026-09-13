@@ -551,3 +551,9 @@ The Proposal aggregate is a three-level authority history:
 The Version freezes controlled identities, canonical arrangement facts, source Assent identity/version, limited evidence provenance, and issuance actor/time. It contains no Booking Request contact PII. A later Assent lifecycle change or privacy erasure does not rewrite issued history, but the existing Assent authority gate prevents new issuance.
 
 Schema 10 adds only `dzn_proposal_families`, `dzn_proposal_options`, and `dzn_proposal_versions`. It adds no acceptance, Accepted Service Arrangement, Student, Enrolment, Teacher Assignment, Lesson, payment, notification, calendar, or Amelia authority.
+# Phase 2A.2-G additions
+
+- `accepted_service_arrangements`: one immutable, PII-free final record per Proposal Family and selected Option; binds the exact Booking Request, Case, Family, Option, Version, provisional event, Student, accepting principal, identity/capacity evidence, authority route, canonical material facts, confirmation evidence, and HMAC command digests.
+- `proposal_option_outcome_events`: one immutable terminal outcome per sibling Option, with exactly the selected Option recorded as `accepted` and the remaining siblings recorded as `closed_competing` in the same transaction.
+
+These records are authority evidence only. They do not create Enrolments, assignments, Lessons, bookings, payments, notifications, calendar entries, or Amelia records.

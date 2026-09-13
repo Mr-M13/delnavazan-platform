@@ -78,13 +78,15 @@ final class ProposalService {
         $option = $this->ensureOption( $family, $context, $actor );
         if ( $expectedOptionId !== null && (int) $option->id !== $expectedOptionId ) throw new \RuntimeException( 'Proposal Option ancestry changed concurrently' );
 
-        if ( $existingCommand = $this->repo->versionForCommandForUpdate( $keyDigest ) ) {
+        if ( $existingCommand = $this->repo->versionForCommand( $keyDigest ) ) {
             if ( ! hash_equals( (string) $existingCommand->command_payload_digest, $payloadDigest ) ) throw new IdempotencyConflictException( 'Idempotency conflict' );
             return $this->responseForVersion( $existingCommand, false, true );
         }
 
         $current = $this->repo->currentVersionForOption( $option );
         do_action( 'dzn_phase_2a2e_proposal_locks_held' );
+        if ( $this->repo->acceptedArrangementForFamily( (int) $family->id ) ) throw new ProposalFamilyAlreadyAcceptedException( 'Proposal Family already accepted' );
+        do_action( 'dzn_phase_2a2g_family_finality_checked' );
         if ( $current && (int) $current->proposal_family_id !== (int) $family->id ) throw new \RuntimeException( 'Proposal current-version pointer is inconsistent' );
         if ( $operation === 'initial' && $current && (int) $current->version_number !== 1 ) throw new \InvalidArgumentException( 'Proposal Option already has Version history' );
         if ( $operation === 'replacement' && ( ! $current || (int) $current->version_number !== $expectedCurrentNumber ) ) throw new \RuntimeException( 'Proposal Version changed concurrently' );
@@ -94,7 +96,7 @@ final class ProposalService {
         if ( $current && hash_equals( (string) $current->version_fingerprint, $versionFingerprint ) ) {
             throw new \InvalidArgumentException( 'Proposal material facts are unchanged' );
         }
-        if ( $this->repo->versionForOptionFingerprintForUpdate( (int) $option->id, $versionFingerprint ) ) throw new \InvalidArgumentException( 'Equivalent Proposal Version already exists' );
+        if ( $this->repo->versionForOptionFingerprint( (int) $option->id, $versionFingerprint ) ) throw new \InvalidArgumentException( 'Equivalent Proposal Version already exists' );
         if ( $operation === 'initial' && $current ) throw new \InvalidArgumentException( 'Initial Proposal Version already exists' );
 
         $number = $current ? (int) $current->version_number + 1 : 1;
@@ -182,7 +184,7 @@ final class ProposalService {
                 if ( ! $version ) throw new \RuntimeException( 'Proposal Version persistence verification failed' );
                 return $version;
             } catch ( \Throwable $e ) {
-                if ( $this->repo->versionForCommandForUpdate( $data['command_key_digest'] ) || $this->repo->versionForOptionNumberForUpdate( $data['proposal_option_id'], $data['version_number'] ) || $this->repo->versionForOptionFingerprintForUpdate( $data['proposal_option_id'], $data['version_fingerprint'] ) ) throw $e;
+                if ( $this->repo->versionForCommand( $data['command_key_digest'] ) || $this->repo->versionForOptionNumber( $data['proposal_option_id'], $data['version_number'] ) || $this->repo->versionForOptionFingerprint( $data['proposal_option_id'], $data['version_fingerprint'] ) ) throw $e;
                 if ( ! $this->repo->isDuplicate( $e ) || $attempt === 2 ) throw $e;
             }
         }
