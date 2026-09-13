@@ -3,6 +3,15 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-G — Final Acceptance + Accepted Service Arrangement Foundation — 2026-09-13
+
+- Merged reviewed candidate `701f62595327ba464d81299b1832ba7825eddc4e` from pre-G main `0607be0ce6f2dcd32dc60a4d8ff6c76d0f4012c8` as merge commit `3a33bafd5943b15b139bbe40cb198cbb201cc943`.
+- Added Schema 13 / migration `013_final_acceptance_arrangement_foundation` and build `phase2a2g-final-acceptance-arrangement-20260910.1`.
+- Added authority-revalidated final acceptance, immutable PII-safe Accepted Service Arrangements, atomic sibling Option outcomes, Proposal finality and digest-only idempotency.
+- Production authority-lock candidate `d96378d7f16a2ff1c90ec1fc99273361f3630808` passed source review; `701f62595327ba464d81299b1832ba7825eddc4e` added deterministic contention evidence and semantic contract hardening only.
+- Independent review result: **PASS — MERGE READY**. Deterministic authority contention evidence was accepted.
+- No deployment occurred. Conversion, Enrolment creation, Teacher Assignment, Term/Lesson generation, payment, notification, scheduling, calendar and Amelia authority remain excluded. Phase 2A.2-H Enrolment foundation is next.
+
 ## 0.1.0 — 2026-09-09
 
 Phase 2A.2-F merge main: `c578f137ed537276524a460a9bb4771ec6fbcc4c`
@@ -130,7 +139,7 @@ Schema 12 / migrations 001–012. Build identity: `phase2a2f-student-identity-ac
   its review branch and awaiting controlled Phase 1F beta runtime validation.
 - Amelia remains installed, operational, authoritative, and readable.
 - Hamnavaz Phase 4 remains intentionally paused.
-# Phase 2A.2-G recovery candidate
+## Phase 2A.2-G recovery candidate history
 
 - Adds Schema 13 / migration 013 for immutable, PII-free Accepted Service Arrangements and sibling Proposal Option outcomes.
 - Adds lock-revalidated adult-self/minor-guardian final acceptance, HMAC idempotency, privacy-safe replay, and a protected internal admin form.

@@ -1,6 +1,6 @@
 # Delnavazan Core — Living Project Continuity Record
 
-**Continuity snapshot:** 11 September 2026
+**Continuity snapshot:** 13 September 2026
 **Purpose:** Durable handover for a new CD/ChatGPT session or implementation agent. Source, migrations and locked domain contracts remain authoritative; this record supplies the current state, boundaries and next action without relying on chat history.
 
 ## 1. Current state
@@ -8,17 +8,19 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Platform merge main (Phase 2A.2-F) | `c578f137ed537276524a460a9bb4771ec6fbcc4c` |
+| Pre-Phase 2A.2-G main | `0607be0ce6f2dcd32dc60a4d8ff6c76d0f4012c8` |
+| Platform merge main (Phase 2A.2-G) | `3a33bafd5943b15b139bbe40cb198cbb201cc943` |
 | Platform | 0.1.0 |
-| Schema | 12 |
-| Migrations | 001–012 |
-| Build identity | `phase2a2f-student-identity-acceptance-authority-20260909.1` |
-| Latest completed slice | Phase 2A.2-F — Student Identity & Acceptance Authority Foundation |
-| Phase 2A.2-F approved candidate | `f7b8066ce6f45c6bee461cdb13cc2614283988bd` |
-| Merge state | PR #15 merged as `c578f137ed537276524a460a9bb4771ec6fbcc4c` |
+| Schema | 13 |
+| Migrations | 001–013; latest `013_final_acceptance_arrangement_foundation` |
+| Build identity | `phase2a2g-final-acceptance-arrangement-20260910.1` |
+| Latest completed slice | Phase 2A.2-G — Final Acceptance + Accepted Service Arrangement Foundation |
+| Phase 2A.2-G production source candidate | `d96378d7f16a2ff1c90ec1fc99273361f3630808` |
+| Phase 2A.2-G approved evidence candidate | `701f62595327ba464d81299b1832ba7825eddc4e` |
+| Merge state | Independently reviewed PASS; merged as `3a33bafd5943b15b139bbe40cb198cbb201cc943` |
 | Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
-| Next Platform action | Hamnavaz domain / Platform reconciliation before Phase 2A.2-G or final acceptance/conversion work |
-| Current 2A.2-F state | **COMPLETE / MERGED** |
+| Next Platform action | Phase 2A.2-H — Enrolment foundation, from the final authoritative post-G main only |
+| Current 2A.2-G state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** |
 
 The completed coordination chain is:
 
@@ -28,8 +30,9 @@ The completed coordination chain is:
 4. **2A.2-D** — Proposal Family, Teacher-specific Option and immutable Proposal Version.
 5. **2A.2-E** — Provisional Acceptance Evidence: immutable, exact Proposal-Version evidence only.
 6. **2A.2-F** — Student Identity & Acceptance Authority Foundation: reviewed identity resolution, Student capacity, provenanced principal links, guardian representative grants, and informational eligibility reads.
+7. **2A.2-G** — Final Acceptance + Accepted Service Arrangement Foundation: current authority revalidation, immutable accepted arrangement facts, sibling Option outcomes, and deterministic finality/idempotency evidence.
 
-Schema 12 / `012_student_identity_acceptance_authority` adds bounded internal identity and authority evidence. It does not promote provisional acceptance, perform final acceptance, create an Accepted Service Arrangement, convert a Booking Request, create an Enrolment, assign a Teacher, create Terms or Lessons, or establish payment, notification, calendar or Amelia authority.
+Schema 13 / `013_final_acceptance_arrangement_foundation` adds bounded final-acceptance and Accepted Service Arrangement authority. It does not convert a Booking Request, create an Enrolment, assign a Teacher, create Terms or Lessons, or establish payment, notification, calendar or Amelia authority.
 
 ## 2. Locked coordination domain contract
 
@@ -62,6 +65,22 @@ These distinctions are deliberate and must not be collapsed:
 
 Any subsequent work must preserve this graph and must not silently advance to conversion, assignment, scheduling, payment, notification, calendar or Amelia work.
 
+## Completed Final Acceptance + Accepted Service Arrangement Foundation — Phase 2A.2-G
+
+Starting from pre-G main `0607be0ce6f2dcd32dc60a4d8ff6c76d0f4012c8`, independently reviewed candidate `701f62595327ba464d81299b1832ba7825eddc4e` was merged as `3a33bafd5943b15b139bbe40cb198cbb201cc943`. Schema 13 / `013_final_acceptance_arrangement_foundation` establishes:
+
+- exact final acceptance of the current immutable Proposal Version against current Booking Request, Student identity, capacity and adult-self or guardian authority;
+- immutable, PII-safe Accepted Service Arrangement facts and atomic sibling Proposal Option outcomes;
+- HMAC-digested, replay-safe idempotency and one final arrangement per Proposal Family;
+- Proposal finality after acceptance, without conversion or operational authority;
+- protected internal administration only;
+- deterministic concurrency evidence for competing acceptance, Proposal replacement, privacy erasure, capacity and authority invalidation, shared idempotency keys and unrelated Families;
+- attributed principal-first and guardian-first contention on the concrete Student authority serialization row, with stale authority rejected after release.
+
+Production authority-lock source candidate `d96378d7f16a2ff1c90ec1fc99273361f3630808` passed independent source review. Candidate `701f62595327ba464d81299b1832ba7825eddc4e` added evidence and semantic contract hardening only. Final independent review result: **PASS — MERGE READY**.
+
+No deployment occurred. Deliberate exclusions remain: no Booking Request conversion, Enrolment creation, Teacher Assignment, Term, Lesson, payment, notification, scheduling, calendar or Amelia authority.
+
 ## Completed Student Identity & Acceptance Authority Foundation — Phase 2A.2-F
 
 PR #15 merged approved candidate `f7b8066ce6f45c6bee461cdb13cc2614283988bd` as merge commit `c578f137ed537276524a460a9bb4771ec6fbcc4c`. Schema 12 / `012_student_identity_acceptance_authority` establishes:
@@ -78,7 +97,7 @@ PR #15 merged approved candidate `f7b8066ce6f45c6bee461cdb13cc2614283988bd` as m
 
 Deliberate exclusions remain: no automatic PII matching, public identity workflow, adult delegation, final acceptance, Accepted Service Arrangement, Booking Request conversion, Enrolment, Teacher Assignment, Term, Lesson, payment, notification, calendar or Amelia authority.
 
-> **BEFORE PHASE 2A.2-G / FINAL ACCEPTANCE-CONVERSION WORK: HAMNAVAZ DOMAIN / PLATFORM RECONCILIATION REQUIRED.**
+> This prerequisite gate was resolved before Phase 2A.2-G implementation; the historical Phase 2A.2-F boundary remains recorded here.
 
 ## 3. Completed Proposal Foundation — Phase 2A.2-D
 
@@ -120,9 +139,9 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-Phase 2A.2-F is **COMPLETE / MERGED** at Schema 12 / migration `012_student_identity_acceptance_authority`, build `phase2a2f-student-identity-acceptance-authority-20260909.1`.
+Phase 2A.2-G is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** at Schema 13 / migration `013_final_acceptance_arrangement_foundation`, build `phase2a2g-final-acceptance-arrangement-20260910.1`.
 
-Next dependency: **Hamnavaz domain / Platform reconciliation.** This reconciliation is required before Phase 2A.2-G or any final acceptance/conversion work. It must preserve the locked separation in section 2 and does not itself authorise conversion, Teacher Assignment, scheduling, capacity reservation, payment, notification, calendar or Amelia work.
+Next authorised planning boundary: **Phase 2A.2-H — Enrolment foundation.** Implementation must start from the exact final authoritative post-G main SHA. This record does not itself authorise Phase H implementation, migration 014, canonical Enrolment creation, conversion readiness, conversion authority, Teacher Assignment, scheduling, payment, notification, calendar or Amelia work.
 
 ## 5. Persistent architectural boundaries
 
