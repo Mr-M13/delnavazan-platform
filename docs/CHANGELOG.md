@@ -3,6 +3,13 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-H — Canonical Enrolment Foundation — recovery candidate
+
+- Added Schema 14 / migration `014_canonical_enrolment_foundation` and build `phase2a2h-canonical-enrolment-foundation-20260913.1` from authoritative main `aa626e89c66a393977caf002355589990aec03df`.
+- Preserved Phase 1 Enrolments as explicit legacy history and added Student + Course canonical identity, immutable Accepted Service Arrangement provenance, applicable-row uniqueness, reserved lifecycle/lineage structure, and append-only lifecycle evidence.
+- Added protected six-outcome applicability inspection and closed generic admin creation, legacy archive/restore, and Phase 1 Term/Lesson/Teacher authority paths for canonical records.
+- This is an unmerged review candidate. It adds no conversion, Teacher Assignment, deployment or external-system authority.
+
 ## Phase 2A.2-G — Final Acceptance + Accepted Service Arrangement Foundation — 2026-09-13
 
 - Merged reviewed candidate `701f62595327ba464d81299b1832ba7825eddc4e` from pre-G main `0607be0ce6f2dcd32dc60a4d8ff6c76d0f4012c8` as merge commit `3a33bafd5943b15b139bbe40cb198cbb201cc943`.

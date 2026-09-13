@@ -141,7 +141,9 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 Phase 2A.2-G is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** at Schema 13 / migration `013_final_acceptance_arrangement_foundation`, build `phase2a2g-final-acceptance-arrangement-20260910.1`.
 
-Next authorised planning boundary: **Phase 2A.2-H — Enrolment foundation.** Implementation must start from the exact final authoritative post-G main SHA. This record does not itself authorise Phase H implementation, migration 014, canonical Enrolment creation, conversion readiness, conversion authority, Teacher Assignment, scheduling, payment, notification, calendar or Amelia work.
+Phase 2A.2-H recovery implementation is an **unmerged review candidate** based on authoritative post-G main `aa626e89c66a393977caf002355589990aec03df`. It proposes Schema 14 / migration `014_canonical_enrolment_foundation` and build `phase2a2h-canonical-enrolment-foundation-20260913.1`. The previously reported local-only candidate `94f646d01385b85616df1979ebf9a46d234b7ccc` was not recovered; no equivalence is claimed.
+
+The H candidate establishes only canonical Student + Course Enrolment storage, legacy preservation, conflict/applicability inspection and internal read/history protections. It does not create canonical Enrolments, conversion readiness, conversion authority, Teacher Assignment, Terms, Lessons, scheduling, payment, notification, calendar or Amelia authority. Main remains authoritative until independent review and merge.
 
 ## 5. Persistent architectural boundaries
 

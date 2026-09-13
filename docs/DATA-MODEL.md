@@ -174,6 +174,14 @@ commercial configuration are not Phase 1 Course fields.
 
 ## 8. Enrolment
 
+### Schema 14 canonical foundation
+
+Phase 1 rows retain their original Student–Teacher–Course meaning, exact legacy status, and historical Teacher value under `record_model=legacy_phase1`; no status is mapped into the canonical lifecycle.
+
+The new canonical structural identity is Student + Course under `record_model=canonical_student_course_v1`. Its inherited Phase 1 `status` column uses only the neutral sentinel `canonical`; `lifecycle_state` is the sole canonical lifecycle authority. Teacher is nullable context only. Canonical lifecycle is `authorised`, `current`, `paused`, then `closed`; applicable states carry `applicable_slot=1`, while closed history and legacy rows carry `NULL`. Accepted Service Arrangement provenance is required for a canonical row and unique. The database unique key on Student + Course + applicable slot is the final Phase H conflict boundary.
+
+Lifecycle evidence is append-only. A predecessor may reserve only `successor`, `return_after_closure`, `correction`, or `distinct_concurrent_service`; those meanings neither bypass conflict review nor create operational authority. Booking Request contact PII is not copied. Schema 14 provides no ordinary canonical creator, readiness decision, conversion, Teacher Assignment, Term or Lesson authority.
+
 ### Responsibility
 
 Represents the continuing relationship between one Student, one Teacher, and one

@@ -55,6 +55,13 @@ final class CoreReadService {
         return ['current' => $schedules->current($lessonId), 'history' => $schedules->history($lessonId)];
     }
 
+    public function enrolmentLifecycle(int $enrolmentId): array {
+        if (!current_user_can('dzn_manage_enrolments')) throw new \RuntimeException('Unauthorized');
+        $repository = new EnrolmentRepository();
+        if (!$repository->find($enrolmentId)) throw new \InvalidArgumentException('Enrolment does not exist');
+        return $repository->lifecycleHistory($enrolmentId);
+    }
+
     private function repository(string $entity): BaseRepository {
         if (!isset(self::ENTITIES[$entity])) throw new \InvalidArgumentException('Unsupported entity');
         [$class, $capability] = self::ENTITIES[$entity];
