@@ -1,6 +1,6 @@
 # Delnavazan Core — Living Project Continuity Record
 
-**Continuity snapshot:** 14 September 2026
+**Continuity snapshot:** 15 September 2026
 **Purpose:** Durable handover for a new CD/ChatGPT session or implementation agent. Source, migrations and locked domain contracts remain authoritative; this record supplies the current state, boundaries and next action without relying on chat history.
 
 ## 1. Current state
@@ -8,18 +8,18 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Pre-Phase 2A.2-H main | `aa626e89c66a393977caf002355589990aec03df` |
-| Platform merge main (Phase 2A.2-H) | `672e5334fe9f37fff5f872cf3fdad18af5ab50d5` |
+| Pre-Phase 2A.2-I main | `f855103c6449ad466ff267c7a9740b56c9ffed66` |
+| Platform merge main (Phase 2A.2-I) | `d0bfbe1b808e60e8bcffae0da6c16a4fda1dc928` |
 | Platform | 0.1.0 |
-| Schema | 14 |
-| Migrations | 001–014; latest `014_canonical_enrolment_foundation` |
-| Build identity | `phase2a2h-canonical-enrolment-foundation-20260913.1` |
-| Latest completed slice | Phase 2A.2-H — Canonical Enrolment Foundation |
-| Phase 2A.2-H approved candidate | `6ae121d0a96b8bd034663992f4ee5ee0812a9893` |
-| Merge state | Independently reviewed and re-reviewed PASS; merged as `672e5334fe9f37fff5f872cf3fdad18af5ab50d5` |
+| Schema | 15 |
+| Migrations | 001–015; latest `015_enrolment_conversion_authority` |
+| Build identity | `phase2a2i-enrolment-conversion-authority-20260914.1` |
+| Latest completed slice | Phase 2A.2-I — Enrolment Conversion Authority |
+| Phase 2A.2-I approved candidate | `4e40c5fa7665a8f96fcbf19def2cac719e7bc38b` |
+| Merge state | Final independent re-review PASS; merged as `d0bfbe1b808e60e8bcffae0da6c16a4fda1dc928` |
 | Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
-| Next Platform action | Conversion readiness, followed later by distinct explicit conversion authority; neither is part of Phase 2A.2-H |
-| Current 2A.2-H state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** |
+| Next Platform action | Teacher Assignment remains future work and requires a separate reviewed phase; it has not started |
+| Current 2A.2-I state | **COMPLETE / MERGED / CLOSED** |
 
 The completed coordination chain is:
 
@@ -31,8 +31,9 @@ The completed coordination chain is:
 6. **2A.2-F** — Student Identity & Acceptance Authority Foundation: reviewed identity resolution, Student capacity, provenanced principal links, guardian representative grants, and informational eligibility reads.
 7. **2A.2-G** — Final Acceptance + Accepted Service Arrangement Foundation: current authority revalidation, immutable accepted arrangement facts, sibling Option outcomes, and deterministic finality/idempotency evidence.
 8. **2A.2-H** — Canonical Enrolment Foundation: legacy-compatible Student + Course identity, reserved lifecycle/lineage, conflict inspection and protected history without creation or conversion authority.
+9. **2A.2-I** — Enrolment Conversion Authority: informational readiness, explicit capability-protected atomic/idempotent conversion, authoritative source revalidation and canonical lifecycle-origin evidence.
 
-Schema 14 / `014_canonical_enrolment_foundation` adds the canonical Enrolment storage and inspection foundation. It does not convert an Accepted Service Arrangement, create a canonical Enrolment, assign a Teacher, create Terms or Lessons, or establish payment, notification, calendar or Amelia authority.
+Schema 15 / `015_enrolment_conversion_authority` adds the explicit Accepted Service Arrangement → canonical Enrolment conversion boundary. It does not assign a Teacher, create Terms or Lessons, or establish payment, notification, communication, calendar or Amelia authority.
 
 ## 2. Locked coordination domain contract
 
@@ -63,7 +64,23 @@ These distinctions are deliberate and must not be collapsed:
 - A successful conversion creates exactly one Enrolment authorised by the accepted arrangement. It does not create Teacher Assignment.
 - Teacher Assignment is later, separate, effective-dated authority.
 
-Any subsequent work must preserve this graph and must not silently advance to conversion, assignment, scheduling, payment, notification, calendar or Amelia work.
+Any subsequent work must preserve this graph and must not silently advance to Teacher Assignment, scheduling, payment, notification, calendar or Amelia work.
+
+## Completed Enrolment Conversion Authority — Phase 2A.2-I
+
+Starting from pre-I main `f855103c6449ad466ff267c7a9740b56c9ffed66`, approved candidate `4e40c5fa7665a8f96fcbf19def2cac719e7bc38b` was merged as `d0bfbe1b808e60e8bcffae0da6c16a4fda1dc928`. Schema 15 / `015_enrolment_conversion_authority`, build `phase2a2i-enrolment-conversion-authority-20260914.1`, establishes:
+
+- informational, read-only conversion readiness distinct from explicit capability-protected conversion authority;
+- locked revalidation of the authoritative Accepted Service Arrangement source graph, including exact frozen identity-resolution and capacity-classification evidence;
+- retention of PII-free final arrangement authority after Booking Request privacy erasure, without reconstructing or copying erased contact data;
+- canonical Student + Course identity serialization through a concrete identity root, while the frozen Teacher remains historical/service context only;
+- atomic, digest-only idempotent conversion to exactly one canonical Enrolment beginning in `authorised` state;
+- contamination-safe replay and already-converted results that remain valid through legitimate later canonical lifecycle progression;
+- return-after-closure predecessor selection only from complete authoritative lifecycle history, with malformed or ambiguous evidence rejected.
+
+Final independent re-review result: **PASS — MERGE READY**. Phase 2A.2-I is **COMPLETE / MERGED / CLOSED**.
+
+Teacher Assignment remains future work and was not started. Conversion creates no Teacher Assignment, Term or Lesson authority and no payment, calendar, Amelia, notification or communication authority. No deployment occurred; Theme, NIU, Amelia, Hamnavaz, CRM and production were untouched.
 
 ## Completed Canonical Enrolment Foundation — Phase 2A.2-H
 
