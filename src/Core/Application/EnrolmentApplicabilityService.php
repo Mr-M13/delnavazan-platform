@@ -43,6 +43,7 @@ final class EnrolmentApplicabilityService {
 
         $rows = $enrolments->forStudentCourse($studentId, $courseId);
         $legacy = false;
+        $canonical = false;
         $applicable = 0;
         $closed = 0;
         foreach ($rows as $row) {
@@ -54,11 +55,12 @@ final class EnrolmentApplicabilityService {
             if ($row->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($row, $arrangements, $enrolments)) {
                 return self::DATA_INTEGRITY_CONFLICT;
             }
+            $canonical = true;
             if ($row->lifecycle_state === 'closed') $closed++; else $applicable++;
         }
 
+        if ($legacy && $canonical) return self::DATA_INTEGRITY_CONFLICT;
         if ($applicable > 1) return self::DATA_INTEGRITY_CONFLICT;
-        if ($legacy) return self::LEGACY_REVIEW_REQUIRED;
         if ($sourceRows) {
             $linked = $sourceRows[0];
             if ($linked->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($linked, $arrangements, $enrolments)) {
@@ -66,6 +68,7 @@ final class EnrolmentApplicabilityService {
             }
             return self::ALREADY_LINKED_SOURCE;
         }
+        if ($legacy) return self::LEGACY_REVIEW_REQUIRED;
         if ($applicable === 1) return self::CANONICAL_APPLICABLE;
         if ($closed > 0) return self::CANONICAL_CLOSED_HISTORY;
         return self::NONE;

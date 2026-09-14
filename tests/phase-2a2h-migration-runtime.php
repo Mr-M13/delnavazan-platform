@@ -5,8 +5,9 @@ if (getenv('DZN_PHASE_2A2H_RUNTIME_TEST') !== 'migration' || !defined('WP_CLI') 
 }
 if ((string) DZN_PLATFORM_SCHEMA_VERSION !== '14' || DZN_PLATFORM_BUILD_ID !== 'phase2a2h-canonical-enrolment-foundation-20260913.1') throw new RuntimeException('Exact Phase H candidate required');
 
-use Delnavazan\Platform\Core\Application\{ArchiveService, CatalogueService, EnrolmentApplicabilityService, EnrolmentService, StudentService, TermService};
+use Delnavazan\Platform\Core\Application\{ArchiveService, CatalogueService, EnrolmentApplicabilityService, EnrolmentService, LessonService, StudentService, TermService};
 use Delnavazan\Platform\Core\Infrastructure\Migration\Migrator;
+use Delnavazan\Platform\Core\Infrastructure\Repository\EnrolmentRepository;
 
 function dzn_2a2h_assert(bool $condition, string $message): void { if (!$condition) throw new RuntimeException($message); }
 global $wpdb; $p = $wpdb->prefix . 'dzn_'; $fixture = get_option('dzn_phase_2a2h_schema13_fixture');
@@ -35,6 +36,10 @@ function dzn_2a2h_enrolment(int $studentId, int $courseId, ?int $teacherId, stri
     $data = ['uid' => str_pad('HENR' . $sequence, 26, '0'), 'reference_code' => null, 'student_id' => $studentId, 'teacher_id' => $teacherId, 'course_id' => $courseId, 'status' => 'canonical', 'record_model' => 'canonical_student_course_v1', 'accepted_service_arrangement_id' => $arrangementId, 'lifecycle_state' => $state, 'applicable_slot' => $slot, 'predecessor_enrolment_id' => $predecessor, 'lineage_meaning' => $meaning, 'created_at' => $now, 'updated_at' => $now, 'created_by' => get_current_user_id(), 'updated_by' => get_current_user_id()];
     dzn_2a2h_assert($wpdb->insert($p . 'enrolments', $data) === 1, 'Synthetic canonical Enrolment insert failed: ' . $wpdb->last_error); return (int) $wpdb->insert_id;
 }
+function dzn_2a2h_legacy_bootstrap(int $studentId, int $teacherId, int $courseId, int $sequence, string $status = 'active'): int {
+    $now = gmdate('Y-m-d H:i:s');
+    return (new EnrolmentRepository())->insertLegacyBootstrap(['uid' => str_pad('HLGC' . $sequence, 26, '0'), 'reference_code' => null, 'student_id' => $studentId, 'teacher_id' => $teacherId, 'course_id' => $courseId, 'status' => $status, 'record_model' => 'legacy_phase1', 'created_at' => $now, 'updated_at' => $now, 'created_by' => get_current_user_id(), 'updated_by' => get_current_user_id()]);
+}
 function dzn_2a2h_duplicate(callable $operation): bool { global $wpdb; $wpdb->suppress_errors(true); $result = $operation(); $error = strtolower((string) $wpdb->last_error); $wpdb->suppress_errors(false); return $result === false && str_contains($error, 'duplicate'); }
 
 $instrumentId = (int) $fixture['instrument_id']; $teacherId = (int) $fixture['teacher_id']; $classification = new EnrolmentApplicabilityService();
@@ -43,22 +48,55 @@ dzn_2a2h_assert($classification->classify($noneStudent, $noneCourse) === 'none',
 dzn_2a2h_assert($classification->classify((int) $fixture['student_id'], (int) $fixture['course_id']) === 'legacy_review_required', 'legacy_review_required classification failed');
 
 $appStudent = dzn_2a2h_student('Synthetic H Applicable'); $appCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Applicable Course'); $appArrangement = dzn_2a2h_arrangement($appStudent, $appCourse, $teacherId, 1);
-$appEnrolment = dzn_2a2h_enrolment($appStudent, $appCourse, null, 'authorised', 1, $appArrangement, 1);
+$appEnrolment = dzn_2a2h_enrolment($appStudent, $appCourse, $teacherId, 'authorised', 1, $appArrangement, 1);
 dzn_2a2h_assert($classification->classify($appStudent, $appCourse) === 'canonical_applicable', 'canonical_applicable classification failed');
 dzn_2a2h_assert($classification->classify($appStudent, $appCourse, $appArrangement) === 'already_linked_source', 'already_linked_source classification failed');
 $genericCreationRejected = false; try { (new EnrolmentService())->create([]); } catch (RuntimeException $exception) { $genericCreationRejected = $exception->getMessage() === 'Generic Enrolment creation is disabled'; }
 dzn_2a2h_assert($genericCreationRejected, 'Generic Enrolment creation remained available');
 $termRejected = false; try { (new TermService())->create(['enrolment_id' => $appEnrolment]); } catch (InvalidArgumentException $exception) { $termRejected = str_contains($exception->getMessage(), 'canonical Enrolment grants no Term authority'); }
 dzn_2a2h_assert($termRejected, 'Canonical Enrolment granted Term authority');
+$lessonRejected = false; try { (new LessonService())->create(['student_id' => $appStudent, 'teacher_id' => $teacherId, 'course_id' => $appCourse, 'lesson_type' => 'introductory', 'status' => 'draft', 'enrolment_id' => $appEnrolment]); } catch (InvalidArgumentException $exception) { $lessonRejected = str_contains($exception->getMessage(), 'Canonical Enrolment grants no Lesson or Teacher Assignment authority'); }
+dzn_2a2h_assert($lessonRejected, 'Canonical Enrolment granted Lesson authority or failed for an unrelated prerequisite');
 $archiveRejected = false; try { (new ArchiveService())->archive('enrolment', $appEnrolment); } catch (InvalidArgumentException $exception) { $archiveRejected = str_contains($exception->getMessage(), 'not mutable through legacy archive'); }
 dzn_2a2h_assert($archiveRejected, 'Canonical Enrolment accepted legacy archive mutation');
+$repository = new EnrolmentRepository();
+$directArchiveRejected = false; try { $repository->archive($appEnrolment, gmdate('Y-m-d H:i:s'), get_current_user_id()); } catch (InvalidArgumentException $exception) { $directArchiveRejected = str_contains($exception->getMessage(), 'Legacy Enrolment archive/restore target required'); }
+dzn_2a2h_assert($directArchiveRejected, 'Direct repository archive mutated canonical Enrolment');
+$restoreStudent = dzn_2a2h_student('Synthetic H Restore Guard'); $restoreCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Restore Guard Course'); $restoreArrangement = dzn_2a2h_arrangement($restoreStudent, $restoreCourse, $teacherId, 6);
+$restoreCanonical = dzn_2a2h_enrolment($restoreStudent, $restoreCourse, null, 'closed', null, $restoreArrangement, 6); $restoreAt = gmdate('Y-m-d H:i:s');
+dzn_2a2h_assert($wpdb->update($p . 'enrolments', ['status' => 'archived', 'archived_at' => $restoreAt], ['id' => $restoreCanonical]) === 1, 'Canonical restore guard fixture preparation failed');
+$directRestoreRejected = false; try { $repository->restore($restoreCanonical, 'canonical', gmdate('Y-m-d H:i:s'), get_current_user_id()); } catch (InvalidArgumentException $exception) { $directRestoreRejected = str_contains($exception->getMessage(), 'Legacy Enrolment archive/restore target required'); }
+dzn_2a2h_assert($directRestoreRejected && $wpdb->get_var($wpdb->prepare("SELECT status FROM {$p}enrolments WHERE id=%d", $restoreCanonical)) === 'archived', 'Direct repository restore mutated canonical Enrolment');
+
+$legacyCompatibilityStudent = dzn_2a2h_student('Synthetic H Legacy Compatibility'); $legacyCompatibilityCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Legacy Compatibility Course');
+$actorId = get_current_user_id(); wp_set_current_user(0); $unauthorizedLegacyRejected = false;
+try { dzn_2a2h_legacy_bootstrap($legacyCompatibilityStudent, $teacherId, $legacyCompatibilityCourse, 10); } catch (RuntimeException $exception) { $unauthorizedLegacyRejected = $exception->getMessage() === 'Unauthorized'; } finally { wp_set_current_user($actorId); }
+dzn_2a2h_assert($unauthorizedLegacyRejected, 'Unauthorised legacy/bootstrap repository creation was accepted');
+$genericRepositoryRejected = false; try { $repository->insert(['record_model' => 'canonical_student_course_v1']); } catch (RuntimeException $exception) { $genericRepositoryRejected = $exception->getMessage() === 'Generic Enrolment repository insertion is disabled'; }
+dzn_2a2h_assert($genericRepositoryRejected, 'Generic canonical repository creation was accepted');
+$canonicalBootstrapRejected = false; try { $repository->insertLegacyBootstrap(['record_model' => 'canonical_student_course_v1']); } catch (InvalidArgumentException $exception) { $canonicalBootstrapRejected = $exception->getMessage() === 'Legacy Enrolment record model required'; }
+dzn_2a2h_assert($canonicalBootstrapRejected, 'Legacy/bootstrap seam accepted canonical creation');
+$legacyCompatibility = dzn_2a2h_legacy_bootstrap($legacyCompatibilityStudent, $teacherId, $legacyCompatibilityCourse, 10, 'paused');
+dzn_2a2h_assert($classification->classify($legacyCompatibilityStudent, $legacyCompatibilityCourse) === 'legacy_review_required', 'Controlled legacy/bootstrap compatibility insert failed');
+$repository->archive($legacyCompatibility, gmdate('Y-m-d H:i:s'), $actorId); $archivedLegacy = $repository->find($legacyCompatibility);
+dzn_2a2h_assert($archivedLegacy && $archivedLegacy->status === 'archived' && $archivedLegacy->archived_at !== null, 'Direct legacy repository archive failed');
+$repository->restore($legacyCompatibility, 'paused', gmdate('Y-m-d H:i:s'), $actorId); $restoredLegacy = $repository->find($legacyCompatibility);
+dzn_2a2h_assert($restoredLegacy && $restoredLegacy->status === 'paused' && $restoredLegacy->archived_at === null && (int) $restoredLegacy->teacher_id === $teacherId, 'Direct legacy repository restore failed');
+
+$mixedApplicableLegacy = dzn_2a2h_legacy_bootstrap($appStudent, $teacherId, $appCourse, 11);
+dzn_2a2h_assert($classification->classify($appStudent, $appCourse) === 'data_integrity_conflict', 'Mixed legacy + applicable canonical state was not rejected');
+dzn_2a2h_assert($classification->classify($appStudent, $appCourse, $appArrangement) === 'data_integrity_conflict', 'Legacy concealed represented canonical source conflict');
 
 $closedStudent = dzn_2a2h_student('Synthetic H Closed'); $closedCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Closed Course'); $closedArrangement = dzn_2a2h_arrangement($closedStudent, $closedCourse, $teacherId, 2);
 $closedEnrolment = dzn_2a2h_enrolment($closedStudent, $closedCourse, $teacherId, 'closed', null, $closedArrangement, 2);
 dzn_2a2h_assert($classification->classify($closedStudent, $closedCourse) === 'canonical_closed_history', 'canonical_closed_history classification failed');
-$successorArrangement = dzn_2a2h_arrangement($closedStudent, $closedCourse, $teacherId, 5);
-dzn_2a2h_enrolment($closedStudent, $closedCourse, null, 'current', 1, $successorArrangement, 5, $closedEnrolment, 'successor');
-dzn_2a2h_assert($classification->classify($closedStudent, $closedCourse) === 'canonical_applicable', 'Valid closed-history successor lineage failed');
+$mixedClosedLegacy = dzn_2a2h_legacy_bootstrap($closedStudent, $teacherId, $closedCourse, 12);
+dzn_2a2h_assert($classification->classify($closedStudent, $closedCourse) === 'data_integrity_conflict', 'Mixed legacy + closed canonical history was not rejected');
+
+$lineageStudent = dzn_2a2h_student('Synthetic H Lineage'); $lineageCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Lineage Course'); $lineageClosedArrangement = dzn_2a2h_arrangement($lineageStudent, $lineageCourse, $teacherId, 7);
+$lineageClosed = dzn_2a2h_enrolment($lineageStudent, $lineageCourse, null, 'closed', null, $lineageClosedArrangement, 7); $successorArrangement = dzn_2a2h_arrangement($lineageStudent, $lineageCourse, $teacherId, 8);
+dzn_2a2h_enrolment($lineageStudent, $lineageCourse, null, 'current', 1, $successorArrangement, 8, $lineageClosed, 'successor');
+dzn_2a2h_assert($classification->classify($lineageStudent, $lineageCourse) === 'canonical_applicable', 'Valid closed-history successor lineage failed');
 
 $badStudent = dzn_2a2h_student('Synthetic H Integrity'); $badCourse = dzn_2a2h_course($instrumentId, 'Synthetic H Integrity Course'); $now = gmdate('Y-m-d H:i:s');
 dzn_2a2h_assert($wpdb->insert($p . 'enrolments', ['uid' => str_pad('HBAD', 26, '0'), 'student_id' => $badStudent, 'teacher_id' => $teacherId, 'course_id' => $badCourse, 'status' => 'active', 'record_model' => 'legacy_phase1', 'lifecycle_state' => 'authorised', 'created_at' => $now, 'updated_at' => $now]) === 1, 'Contaminated fixture insert failed');
@@ -77,4 +115,4 @@ $before = ['legacy' => (array) $wpdb->get_row($wpdb->prepare("SELECT status,teac
 Migrator::maybe_upgrade();
 $after = ['legacy' => (array) $wpdb->get_row($wpdb->prepare("SELECT status,teacher_id,record_model,lifecycle_state,applicable_slot,accepted_service_arrangement_id FROM {$p}enrolments WHERE id=%d", $fixture['enrolment_id']), ARRAY_A), 'events' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}enrolment_lifecycle_events"), 'enrolments' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}enrolments")]; $done = (array) get_option('dzn_platform_completed_migrations', []);
 dzn_2a2h_assert($before === $after && count(array_keys($done, '014_canonical_enrolment_foundation', true)) === 1, 'Repeated upgrade changed history or duplicated ledger');
-echo "schema_13_to_14=pass\nlegacy_status_preserved={$legacy->status}\nlegacy_teacher_preserved={$legacy->teacher_id}\nclassifications=none,canonical_applicable,canonical_closed_history,legacy_review_required,already_linked_source,data_integrity_conflict\nlineage_validation=pass\ncross_target_source_rejection=pass\narrangement_uniqueness=pass\nstudent_course_applicable_uniqueness=pass\nunrelated_key_independence=pass\ngeneric_creation_rejection=pass\ncanonical_term_authority_rejection=pass\ncanonical_legacy_archive_rejection=pass\nrepeat_upgrade=pass\nPhase 2A.2-H migration runtime passed\n";
+echo "schema_13_to_14=pass\nlegacy_status_preserved={$legacy->status}\nlegacy_teacher_preserved={$legacy->teacher_id}\nclassifications=none,canonical_applicable,canonical_closed_history,legacy_review_required,already_linked_source,data_integrity_conflict\nmixed_applicable=data_integrity_conflict\nmixed_closed=data_integrity_conflict\nrepresented_mixed=data_integrity_conflict\nlineage_validation=pass\ncross_target_source_rejection=pass\narrangement_uniqueness=pass\nstudent_course_applicable_uniqueness=pass\nunrelated_key_independence=pass\ngeneric_creation_rejection=pass\nlegacy_bootstrap_compatibility=pass\ncanonical_term_authority_rejection=pass\ncanonical_lesson_authority_rejection=pass\ncanonical_service_archive_rejection=pass\ndirect_canonical_archive_rejection=pass\ndirect_canonical_restore_rejection=pass\nlegacy_archive_restore=pass\nrepeat_upgrade=pass\nPhase 2A.2-H migration runtime passed\n";

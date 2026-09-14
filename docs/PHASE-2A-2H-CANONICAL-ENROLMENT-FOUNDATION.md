@@ -20,3 +20,7 @@ The reserved lifecycle is `authorised → current → paused → closed`. `dzn_e
 ## Authority boundary
 
 Generic Enrolment creation is disabled and the admin Enrolment screen is read/history only. Canonical rows cannot use Phase 1 archive/restore or act as Phase 1 Term/Lesson/Teacher authority. A later reviewed phase must add readiness, then distinct conversion authority and idempotent atomic conversion. Teacher Assignment remains later and separate.
+
+The exact pre-H source had only one `EnrolmentRepository::insert()` consumer: the generic `EnrolmentService` deliberately closed by H. No migration or other production bootstrap depends on unrestricted insertion. A capability-protected `insertLegacyBootstrap()` compatibility seam accepts only explicit `legacy_phase1` records with complete legacy Student/Teacher/Course identity and no canonical provenance, lifecycle, applicability or lineage fields. Generic repository insertion and all canonical insertion remain closed.
+
+Repository-level archive and restore guards independently require `legacy_phase1`, failing closed for canonical, missing or unknown models even when `ArchiveService` is bypassed. Applicability treats any legacy/canonical coexistence as `data_integrity_conflict`; clean represented-source state takes precedence only after every relevant row has passed aggregate integrity validation.
