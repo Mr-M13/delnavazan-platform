@@ -45,6 +45,7 @@ $fixture['stale_readiness']=$make('stale-readiness',$course1);
 $fixture['replay_command_contaminated']=$make('replay-command-contaminated',$course1);
 $fixture['replay_teacher_contaminated']=$make('replay-teacher-contaminated',$course1);
 $fixture['replay_lifecycle_contaminated']=$make('replay-lifecycle-contaminated',$course1);
+$fixture['replay_progression_contaminated']=$make('replay-progression-contaminated',$course1);
 $fixture['already_contaminated']=$make('already-contaminated',$course1);
 $fixture['replay_source_contaminated']=$make('replay-source-contaminated',$course1);
 $fixture['conflict_predecessor']=$make('conflict-predecessor',$course2);$fixture['conflict_target']=$make('conflict-target',$course2,$fixture['conflict_predecessor']['student_id'],$fixture['conflict_predecessor']['principal_id']);

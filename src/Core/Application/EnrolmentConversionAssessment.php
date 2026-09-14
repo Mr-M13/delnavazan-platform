@@ -88,13 +88,9 @@ final class EnrolmentConversionAssessment {
     }
 
     private static function validCanonical(object $row, EnrolmentConversionRepository $repository,array$history): bool {
-        if ($row->status!=='canonical' || $row->archived_at!==null || !in_array((string)$row->lifecycle_state,array('authorised','current','paused','closed'),true)) return false;
-        $slot=in_array($row->lifecycle_state,array('authorised','current','paused'),true)?1:null;
-        if (($row->applicable_slot===null?null:(int)$row->applicable_slot)!==$slot || (int)($row->accepted_service_arrangement_id??0)<1) return false;
-        if (($row->predecessor_enrolment_id===null)!==($row->lineage_meaning===null)) return false;
-        if ($row->lineage_meaning!==null && !in_array((string)$row->lineage_meaning,array('successor','return_after_closure','correction','distinct_concurrent_service'),true)) return false;
+        if (!self::validCanonicalAggregate($row)) return false;
         $graph=$repository->sourceGraphForRead((int)$row->accepted_service_arrangement_id);$source=$graph['arrangement']??null;
-        if (!$graph||!self::validSourceGraph($graph)||!$source || (int)$source->student_id!==(int)$row->student_id || (int)$source->course_id!==(int)$row->course_id || (int)$source->teacher_id!==(int)$row->teacher_id || !self::validLifecycle($row,$history)) return false;
+        if (!$graph||!self::validSourceGraph($graph)||!$source || (int)$source->student_id!==(int)$row->student_id || (int)$source->course_id!==(int)$row->course_id || (int)$source->teacher_id!==(int)$row->teacher_id || !self::validLifecycle($row,$history,$source)) return false;
         $command=$repository->commandForSource((int)$source->id);if(!self::validCommand($command,(int)$source->id,(int)$row->id,EnrolmentConversionIdempotency::payloadDigest((int)$source->id)))return false;
         if ($row->predecessor_enrolment_id!==null) {
             $predecessor=$repository->enrolmentById((int)$row->predecessor_enrolment_id);
@@ -118,19 +114,34 @@ final class EnrolmentConversionAssessment {
     public static function validExistingResult(EnrolmentConversionRepository$repository,array$graph,object$enrolment,array$events,?object$command,string$payload):bool{
         if(!self::validSourceGraph($graph))return false;$a=$graph['arrangement'];
         if(!self::validCommand($command,(int)$a->id,(int)$enrolment->id,$payload))return false;
-        if($enrolment->record_model!=='canonical_student_course_v1'||$enrolment->status!=='canonical'||$enrolment->lifecycle_state!=='authorised'||(int)$enrolment->applicable_slot!==1||$enrolment->archived_at!==null)return false;
+        if(!self::validCanonicalAggregate($enrolment))return false;
         if((int)$enrolment->student_id!==(int)$a->student_id||(int)$enrolment->course_id!==(int)$a->course_id||(int)$enrolment->teacher_id!==(int)$a->teacher_id||(int)$enrolment->accepted_service_arrangement_id!==(int)$a->id)return false;
         if(($enrolment->predecessor_enrolment_id===null)!==($enrolment->lineage_meaning===null)||($enrolment->lineage_meaning!==null&&$enrolment->lineage_meaning!=='return_after_closure'))return false;
         if($enrolment->predecessor_enrolment_id!==null){$predecessor=$repository->enrolmentById((int)$enrolment->predecessor_enrolment_id);$predecessorEvents=$predecessor?$repository->lifecycleForEnrolment((int)$predecessor->id):array();if(!$predecessor||!self::validCanonical($predecessor,$repository,$predecessorEvents)||(int)$predecessor->student_id!==(int)$enrolment->student_id||(int)$predecessor->course_id!==(int)$enrolment->course_id)return false;}
-        if(count($events)!==1||!self::validLifecycle($enrolment,$events))return false;$first=$events[0];
-        return(int)$first->event_sequence===1&&$first->from_state===null&&$first->to_state==='authorised'&&$first->reason_code==='accepted_service_arrangement_conversion'&&$first->evidence_channel==='platform_conversion_command'&&self::same($first->lineage_meaning,$enrolment->lineage_meaning);
+        if(!self::validLifecycle($enrolment,$events,$a))return false;usort($events,static fn($left,$right)=>(int)$left->event_sequence<=>(int)$right->event_sequence);
+        return self::validInitialConversionEvidence($enrolment,$events[0],$a);
     }
 
-    private static function validLifecycle(object$row,array$events):bool{
+    private static function validCanonicalAggregate(object$row):bool{
+        if($row->record_model!=='canonical_student_course_v1'||$row->status!=='canonical'||$row->archived_at!==null||!in_array((string)$row->lifecycle_state,array('authorised','current','paused','closed'),true)||(int)($row->accepted_service_arrangement_id??0)<1)return false;
+        $slot=in_array((string)$row->lifecycle_state,array('authorised','current','paused'),true)?1:null;
+        if(($row->applicable_slot===null?null:(int)$row->applicable_slot)!==$slot)return false;
+        if(($row->predecessor_enrolment_id===null)!==($row->lineage_meaning===null))return false;
+        return$row->lineage_meaning===null||in_array((string)$row->lineage_meaning,array('successor','return_after_closure','correction','distinct_concurrent_service'),true);
+    }
+
+    private static function validLifecycle(object$row,array$events,?object$source=null):bool{
         if(!$events)return false;usort($events,static fn($a,$b)=>(int)$a->event_sequence<=>(int)$b->event_sequence);$states=array('authorised','current','paused','closed');$previous=null;$previousOccurred=null;
-        foreach($events as$index=>$event){$sequence=$index+1;if((int)$event->enrolment_id!==(int)$row->id||(int)$event->event_sequence!==$sequence||preg_match('/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/D',(string)$event->uid)!==1)return false;if($index===0){if($event->from_state!==null||$event->to_state!=='authorised'||$event->reason_code!=='accepted_service_arrangement_conversion'||$event->evidence_channel!=='platform_conversion_command'||!self::same($event->lineage_meaning,$row->lineage_meaning))return false;}elseif((string)$event->from_state!==$previous||$event->lineage_meaning!==null)return false;if(!in_array((string)$event->to_state,$states,true)||($event->from_state!==null&&!in_array((string)$event->from_state,$states,true)))return false;if(!self::utc($event->occurred_at)||!self::utc($event->recorded_at)||!self::utc($event->created_at)||(string)$event->recorded_at<(string)$event->occurred_at||(string)$event->created_at<(string)$event->recorded_at||($previousOccurred!==null&&(string)$event->occurred_at<$previousOccurred))return false;if(trim((string)$event->reason_code)===''||trim((string)$event->evidence_channel)===''||trim((string)$event->evidence_reference)===''||(int)$event->recorded_by<1||(int)$event->created_by<1||(int)$event->recorded_by!==(int)$event->created_by)return false;$previous=(string)$event->to_state;$previousOccurred=(string)$event->occurred_at;}
+        foreach($events as$index=>$event){$sequence=$index+1;if((int)$event->enrolment_id!==(int)$row->id||(int)$event->event_sequence!==$sequence)return false;if($index===0){if(!self::validInitialConversionEvidence($row,$event,$source))return false;}elseif((string)$event->from_state!==$previous||$event->lineage_meaning!==null)return false;if(!in_array((string)$event->to_state,$states,true)||($event->from_state!==null&&!in_array((string)$event->from_state,$states,true)))return false;if(!self::validLifecycleEventAudit($event)||($previousOccurred!==null&&(string)$event->occurred_at<$previousOccurred))return false;$previous=(string)$event->to_state;$previousOccurred=(string)$event->occurred_at;}
         return$previous===(string)$row->lifecycle_state;
     }
+
+    private static function validInitialConversionEvidence(object$row,object$event,?object$source=null):bool{
+        if((int)$event->enrolment_id!==(int)$row->id||(int)$event->event_sequence!==1||$event->from_state!==null||$event->to_state!=='authorised'||$event->reason_code!=='accepted_service_arrangement_conversion'||$event->evidence_channel!=='platform_conversion_command'||!self::same($event->lineage_meaning,$row->lineage_meaning)||!self::validLifecycleEventAudit($event))return false;
+        return$source===null||hash_equals(hash_hmac('sha256','enrolment-conversion:'.$source->uid,wp_salt('dzn_enrolment_conversion_evidence')),(string)$event->evidence_reference);
+    }
+
+    private static function validLifecycleEventAudit(object$event):bool{return preg_match('/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/D',(string)$event->uid)===1&&self::utc($event->occurred_at)&&self::utc($event->recorded_at)&&self::utc($event->created_at)&&(string)$event->recorded_at>=(string)$event->occurred_at&&(string)$event->created_at>=(string)$event->recorded_at&&trim((string)$event->reason_code)!==''&&trim((string)$event->evidence_channel)!==''&&trim((string)$event->evidence_reference)!==''&&(int)$event->recorded_by>0&&(int)$event->created_by>0&&(int)$event->recorded_by===(int)$event->created_by;}
 
     private static function validEvidence(object$row,string$decisionAt,string$decisionBy):bool{$previous=$row->supersedes_resolution_event_id??$row->supersedes_classification_id??null;return preg_match('/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/D',(string)$row->uid)===1&&trim((string)$row->verification_basis)!==''&&trim((string)$row->evidence_channel)!==''&&trim((string)$row->evidence_reference)!==''&&self::utc($row->evidence_at)&&self::utc($row->{$decisionAt})&&self::utc($row->created_at)&&(string)$row->evidence_at<=(string)$row->{$decisionAt}&&(string)$row->{$decisionAt}<=(string)$row->created_at&&(int)$row->{$decisionBy}>0&&(int)$row->created_by>0&&($previous===null||(int)$previous!==(int)$row->id);}
     private static function validCommand(?object$command,int$sourceId,int$enrolmentId,string$payload):bool{return$command&&preg_match('/^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/D',(string)$command->uid)===1&&preg_match('/^[a-f0-9]{64}$/D',(string)$command->command_key_digest)===1&&preg_match('/^[a-f0-9]{64}$/D',(string)$command->command_payload_digest)===1&&hash_equals((string)$command->command_payload_digest,$payload)&&(int)$command->accepted_service_arrangement_id===$sourceId&&(int)$command->enrolment_id===$enrolmentId&&self::utc($command->created_at)&&(int)$command->created_by>0;}
