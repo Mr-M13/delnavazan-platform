@@ -11,7 +11,7 @@ final class TeacherRepository extends BaseRepository {
         global $wpdb;
         $enrolments = $wpdb->prefix . 'dzn_enrolments';
         return (bool) $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$enrolments} WHERE teacher_id = %d AND archived_at IS NULL AND status NOT IN ('archived', 'completed', 'cancelled') LIMIT 1",
+            "SELECT id FROM {$enrolments} WHERE teacher_id = %d AND record_model = 'legacy_phase1' AND archived_at IS NULL AND status NOT IN ('archived', 'completed', 'cancelled') LIMIT 1",
             $teacherId
         ));
     }

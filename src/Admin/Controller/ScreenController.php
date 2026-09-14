@@ -7,7 +7,6 @@ use Delnavazan\Platform\Core\Application\{
     CatalogueService,
     CoreReadService,
     DiagnosticsService,
-    EnrolmentService,
     ExceptionService,
     LessonScheduleService,
     LessonService,
@@ -33,7 +32,6 @@ final class ScreenController {
         'student' => ['first_name', 'last_name', 'display_name', 'email', 'phone', 'whatsapp_phone', 'country_code', 'city', 'timezone', 'timezone_source', 'locale', 'calendar_preference', 'status'],
         'instrument' => ['slug', 'name_fa', 'name_en', 'status'],
         'course' => ['instrument_id', 'name_fa', 'name_en', 'course_type', 'status', 'default_duration_minutes', 'default_buffer_minutes'],
-        'enrolment' => ['student_id', 'teacher_id', 'course_id', 'status', 'preferred_weekday', 'preferred_local_time', 'schedule_timezone'],
         'term' => ['enrolment_id', 'sequence_number', 'status', 'lesson_allocation', 'replacement_allowance', 'payment_state'],
         'lesson' => ['student_id', 'teacher_id', 'course_id', 'lesson_type', 'status', 'enrolment_id', 'term_id', 'replacement_for_lesson_id'],
     ];
@@ -57,7 +55,11 @@ final class ScreenController {
         if (!isset(self::ENTITIES[$screen]) || !current_user_can(self::ENTITIES[$screen][1])) { self::forbidden(); return; }
         self::renderMessages(); $id = absint($_GET['id'] ?? 0);
         echo '<div class="wrap"><h1>Delnavazan ' . esc_html(self::ENTITIES[$screen][0]) . '</h1>';
-        if ($id) self::entityDetail($screen, $id); else { self::entityCreateForm($screen); self::entityList($screen); }
+        if ($id) self::entityDetail($screen, $id); else {
+            if ($screen !== 'enrolment') self::entityCreateForm($screen);
+            else echo '<p>Enrolments are read-only. Generic creation is disabled; canonical conversion authority is not part of this phase.</p>';
+            self::entityList($screen);
+        }
         echo '</div>';
     }
 
@@ -94,7 +96,6 @@ final class ScreenController {
                 'create_student' => (new StudentService())->create(self::createPayload('student', $post)),
                 'create_instrument' => (new CatalogueService())->instrument(self::createPayload('instrument', $post)),
                 'create_course' => (new CatalogueService())->course(self::createPayload('course', $post)),
-                'create_enrolment' => (new EnrolmentService())->create(self::createPayload('enrolment', $post)),
                 'create_term' => (new TermService())->create(self::createPayload('term', $post)),
                 'create_lesson' => (new LessonService())->create(self::createPayload('lesson', $post)),
                 'archive' => self::archive($post), 'restore' => self::restore($post),
@@ -158,7 +159,13 @@ final class ScreenController {
         $record = (new CoreReadService())->find($entity, $id);
         if (!$record) { echo '<p>Record not found.</p>'; return; }
         echo '<p><a href="' . esc_url(admin_url('admin.php?page=dzn-' . $entity)) . '">← Back to list</a></p><h2>Record #' . esc_html((string) $id) . '</h2>';
-        self::objectTable([$record], null); self::archiveActions($entity, $id, (string) $record->status);
+        self::objectTable([$record], null);
+        if ($entity !== 'enrolment' || ($record->record_model ?? 'legacy_phase1') === 'legacy_phase1') self::archiveActions($entity, $id, (string) $record->status);
+        if ($entity === 'enrolment') {
+            echo '<h2>Canonical lifecycle history</h2>';
+            $history = (new CoreReadService())->enrolmentLifecycle($id);
+            if ($history) self::objectTable($history, null); else echo '<p>No canonical lifecycle history.</p>';
+        }
         if ($entity === 'lesson') self::lessonSchedules($id);
     }
 
@@ -166,7 +173,7 @@ final class ScreenController {
         echo '<h2>Create</h2>'; self::formStart('create_' . $entity);
         match ($entity) {
             'teacher' => self::teacherFields(), 'student' => self::studentFields(), 'instrument' => self::instrumentFields(),
-            'course' => self::courseFields(), 'enrolment' => self::enrolmentFields(), 'term' => self::termFields(), 'lesson' => self::lessonFields(),
+            'course' => self::courseFields(), 'term' => self::termFields(), 'lesson' => self::lessonFields(),
         };
         submit_button('Create ' . self::ENTITIES[$entity][0]); echo '</form>';
     }
@@ -181,7 +188,6 @@ final class ScreenController {
 
     private static function instrumentFields(): void { self::input('slug', 'Slug', true); self::input('name_fa', 'Persian name'); self::input('name_en', 'English name'); self::select('status', 'Status', ['active', 'inactive'], 'active'); }
     private static function courseFields(): void { self::input('instrument_id', 'Instrument ID', true, 'number'); self::input('name_fa', 'Persian name', true); self::input('name_en', 'English name', true); self::select('course_type', 'Course type', ['standard', 'introductory'], 'standard'); self::select('status', 'Status', ['active', 'inactive'], 'active'); self::input('default_duration_minutes', 'Duration minutes', true, 'number', '30'); self::input('default_buffer_minutes', 'Buffer minutes', true, 'number', '15'); }
-    private static function enrolmentFields(): void { self::input('student_id', 'Student ID', true, 'number'); self::input('teacher_id', 'Teacher ID', true, 'number'); self::input('course_id', 'Course ID', true, 'number'); self::select('status', 'Status', ['draft', 'active', 'paused', 'ending', 'completed', 'cancelled'], 'active'); self::input('preferred_weekday', 'Preferred weekday (1–7)', false, 'number', '2'); self::input('preferred_local_time', 'Preferred local time (HH:MM:SS)', false, 'text', '18:00:00'); self::input('schedule_timezone', 'Schedule timezone', false, 'text', 'Australia/Brisbane'); }
     private static function termFields(): void { self::input('enrolment_id', 'Enrolment ID', true, 'number'); self::input('sequence_number', 'Sequence', true, 'number', '1'); self::select('status', 'Status', ['draft', 'awaiting_payment', 'active', 'completed', 'cancelled'], 'draft'); self::input('lesson_allocation', 'Lesson allocation', true, 'number', '12'); self::input('replacement_allowance', 'Replacement allowance', true, 'number', '2'); self::select('payment_state', 'Payment state', ['not_required', 'pending', 'paid', 'failed', 'refunded'], 'not_required'); }
     private static function lessonFields(): void { self::input('student_id', 'Student ID', true, 'number'); self::input('teacher_id', 'Teacher ID', true, 'number'); self::input('course_id', 'Course ID', true, 'number'); self::select('lesson_type', 'Lesson type', ['introductory', 'standard', 'replacement'], 'introductory'); self::select('status', 'Status', ['draft'], 'draft'); self::input('enrolment_id', 'Enrolment ID (optional only for introductory)', false, 'number'); self::input('term_id', 'Term ID (requires Enrolment)', false, 'number'); self::input('replacement_for_lesson_id', 'Original Lesson ID (replacement only)', false, 'number'); }
 

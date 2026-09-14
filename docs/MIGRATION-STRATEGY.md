@@ -373,3 +373,7 @@ The migration is recorded once in `dzn_platform_completed_migrations`; `maybe_up
 # Schema 13
 
 Migration `013_final_acceptance_arrangement_foundation` adds append-only `accepted_service_arrangements` and `proposal_option_outcome_events`. It is repeat-safe through the completed-migration ledger, verifies InnoDB, required immutable columns, and uniqueness for one arrangement per Proposal Family/Option and one outcome per Option, and repairs `dzn_finalize_service_arrangements` through capability marker `2a2g`.
+
+# Schema 14
+
+Migration `014_canonical_enrolment_foundation` additively classifies every existing Enrolment as `legacy_phase1`, preserves its exact status and historical Teacher value, makes Teacher context nullable for the future canonical model, and adds canonical provenance, lifecycle, applicability-slot and lineage columns. It adds uniqueness for Accepted Service Arrangement provenance and one applicable canonical Enrolment per Student + Course, plus append-only lifecycle-event storage. Verification runs before the ledger entry is recorded and on every current-schema load; repeated upgrade does not rewrite legacy rows.

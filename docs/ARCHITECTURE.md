@@ -275,3 +275,7 @@ This architecture does not:
 # Phase 2A.2-G authority boundary
 
 `FinalAcceptanceService` is the sole writer for final arrangements. It serializes on the Booking Request and Proposal Family lineage, then revalidates current Student identity, capacity, and adult-self or minor-guardian authority before atomically appending the arrangement and all sibling outcomes. `ProposalService` observes the same Family lock and rejects issuance after final acceptance. The existing Booking Request privacy erasure path shares the request lock, so erasure and acceptance have deterministic commit-order semantics.
+
+## Phase 2A.2-H canonical Enrolment boundary
+
+Schema 14 separates preserved `legacy_phase1` Enrolments from the future `canonical_student_course_v1` aggregate. Canonical structural identity is Student + Course; nullable Teacher context is not Teacher Assignment. Accepted Service Arrangement provenance, applicable-slot uniqueness, reserved lifecycle/lineage fields, append-only history and protected applicability reads are foundation data only. Generic creation is closed. Readiness, conversion authority/idempotency, lifecycle transitions, Teacher Assignment, Terms, Lessons and every external integration remain later boundaries.
