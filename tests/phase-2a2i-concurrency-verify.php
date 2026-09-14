@@ -4,7 +4,7 @@ global$wpdb;$p=$wpdb->prefix.'dzn_';$s=get_option('dzn_phase_2a2i_race_state');$
 $sourceIds=array_values(array_unique(array((int)$one['arrangement_id'],(int)$two['arrangement_id'])));$marks=implode(',',array_fill(0,count($sourceIds),'%d'));
 $events=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}enrolment_lifecycle_events e JOIN {$p}enrolments n ON n.id=e.enrolment_id WHERE n.accepted_service_arrangement_id IN ({$marks})",...$sourceIds));
 $commands=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}enrolment_conversion_commands WHERE accepted_service_arrangement_id IN ({$marks})",...$sourceIds));
-$orphans=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}enrolment_conversion_commands c LEFT JOIN {$p}enrolments n ON n.id=c.enrolment_id LEFT JOIN {$p}enrolment_lifecycle_events e ON e.enrolment_id=n.id AND e.event_sequence=1 WHERE n.id IS NULL OR e.id IS NULL");
+$orphans=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}enrolment_conversion_commands c LEFT JOIN {$p}enrolments n ON n.id=c.enrolment_id LEFT JOIN {$p}enrolment_lifecycle_events e ON e.enrolment_id=n.id AND e.event_sequence=1 WHERE c.accepted_service_arrangement_id IN ({$marks}) AND (n.id IS NULL OR e.id IS NULL)",...$sourceIds));
 if($orphans!==0)throw new RuntimeException('Partial conversion evidence survived');
 if($mode==='a'){if($linked($one)+$linked($two)!==1||$events!==1||$commands!==1||(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}enrolments WHERE student_id=%d AND course_id=%d AND applicable_slot=1",$one['student_id'],$one['course_id']))!==1)throw new RuntimeException('Race A final state invalid');}
 if($mode==='b'&&($linked($one)!==1||$events!==1||$commands!==1))throw new RuntimeException('Race B final state invalid');

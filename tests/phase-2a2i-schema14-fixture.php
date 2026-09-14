@@ -9,9 +9,10 @@ function dzn_2a2i_fixture_assert(bool$ok,string$message):void{if(!$ok)throw new 
 $catalogue=new CatalogueService();$instrument=$catalogue->instrument(array('slug'=>'phase-i-'.$suffix,'name_fa'=>'آزمون','name_en'=>'Synthetic Phase I','status'=>'active'));
 $course1=$catalogue->course(array('instrument_id'=>$instrument,'name_fa'=>'آزمون یک','name_en'=>'Synthetic I One','course_type'=>'introductory','status'=>'active','default_duration_minutes'=>30,'default_buffer_minutes'=>15));
 $course2=$catalogue->course(array('instrument_id'=>$instrument,'name_fa'=>'آزمون دو','name_en'=>'Synthetic I Two','course_type'=>'introductory','status'=>'active','default_duration_minutes'=>30,'default_buffer_minutes'=>15));
+$courseInactive=$catalogue->course(array('instrument_id'=>$instrument,'name_fa'=>'آزمون سه','name_en'=>'Synthetic I Inactive','course_type'=>'introductory','status'=>'active','default_duration_minutes'=>30,'default_buffer_minutes'=>15));
 $teacher=(new TeacherService())->create(array('display_name'=>'Synthetic Phase I Teacher','email'=>'teacher-'.$suffix.'@phase-2a2i.invalid'));
 $wpdb->insert($p.'teacher_onboarding_states',array('teacher_id'=>$teacher,'state'=>'active','readiness_state'=>'ready','version'=>1,'created_at'=>$at,'updated_at'=>$at,'created_by'=>$actor,'updated_by'=>$actor));
-foreach(array($course1,$course2)as$course)(new TeachingEligibilityService())->setEligibility(array('teacher_id'=>$teacher,'course_id'=>$course,'status'=>'active','reason_code'=>'synthetic_fixture'));
+foreach(array($course1,$course2,$courseInactive)as$course)(new TeachingEligibilityService())->setEligibility(array('teacher_id'=>$teacher,'course_id'=>$course,'status'=>'active','reason_code'=>'synthetic_fixture'));
 (new TeacherAcceptingStateService())->set(array('teacher_id'=>$teacher,'state'=>'accepting','reason_code'=>'synthetic_fixture'));
 (new TeacherAvailabilityService())->setProfile(array('teacher_id'=>$teacher,'timezone'=>'UTC','status'=>'active','reason_code'=>'synthetic_fixture'));
 
@@ -30,9 +31,24 @@ $fixture['legacy']=$make('legacy',$course2);$now=gmdate('Y-m-d H:i:s');(new Enro
 $fixture['inactive_student']=$make('inactive-student',$course2);$wpdb->update($p.'students',array('status'=>'inactive'),array('id'=>$fixture['inactive_student']['student_id']));
 $fixture['privacy']=$make('privacy',$course2);
 $fixture['atomic_enrolment']=$make('atomic-enrolment',$course2);$fixture['atomic_event']=$make('atomic-event',$course2);$fixture['atomic_command']=$make('atomic-command',$course2);
-$fixture['race_a1']=$make('race-a1',$course2);$fixture['race_a2']=$make('race-a2',$course2,$fixture['race_a1']['student_id'],$fixture['race_a1']['principal_id']);
+$fixture['race_a1']=$make('race-a1',$course2);(new StudentAcceptanceAuthorityService())->classify($fixture['race_a1']['student_id'],'adult','synthetic_fixture','synthetic_fixture',$at,$actor);$fixture['race_a2']=$make('race-a2',$course2,$fixture['race_a1']['student_id'],$fixture['race_a1']['principal_id']);
 $fixture['race_b']=$make('race-b',$course2);
 $fixture['unrelated_a']=$make('unrelated-a',$course1);$fixture['unrelated_b']=$make('unrelated-b',$course2);
-$fixture['same_student_course1']=$make('same-student-c1',$course1);$fixture['same_student_course2']=$make('same-student-c2',$course2,$fixture['same_student_course1']['student_id'],$fixture['same_student_course1']['principal_id']);
+$fixture['same_student_course1']=$make('same-student-c1',$course1);(new StudentAcceptanceAuthorityService())->classify($fixture['same_student_course1']['student_id'],'adult','synthetic_fixture','synthetic_fixture',$at,$actor);$fixture['same_student_course2']=$make('same-student-c2',$course2,$fixture['same_student_course1']['student_id'],$fixture['same_student_course1']['principal_id']);
 $fixture['privacy_first']=$make('privacy-first',$course1);$fixture['conversion_first']=$make('conversion-first',$course2);
+$fixture['inactive_course']=$make('inactive-course',$courseInactive);$wpdb->update($p.'courses',array('status'=>'inactive'),array('id'=>$courseInactive));
+$fixture['source_not_final']=$make('source-not-final',$course1);
+$fixture['malformed_source']=$make('malformed-source',$course1);
+$fixture['identity_contaminated']=$make('identity-contaminated',$course1);
+$fixture['capacity_contaminated']=$make('capacity-contaminated',$course1);
+$fixture['stale_readiness']=$make('stale-readiness',$course1);
+$fixture['replay_command_contaminated']=$make('replay-command-contaminated',$course1);
+$fixture['replay_teacher_contaminated']=$make('replay-teacher-contaminated',$course1);
+$fixture['replay_lifecycle_contaminated']=$make('replay-lifecycle-contaminated',$course1);
+$fixture['already_contaminated']=$make('already-contaminated',$course1);
+$fixture['replay_source_contaminated']=$make('replay-source-contaminated',$course1);
+$fixture['conflict_predecessor']=$make('conflict-predecessor',$course2);$fixture['conflict_target']=$make('conflict-target',$course2,$fixture['conflict_predecessor']['student_id'],$fixture['conflict_predecessor']['principal_id']);
+$fixture['mixed_predecessor']=$make('mixed-predecessor',$course2);$fixture['mixed_target']=$make('mixed-target',$course2,$fixture['mixed_predecessor']['student_id'],$fixture['mixed_predecessor']['principal_id']);
+foreach(array('start','gap','chain','invalid','state','timestamp')as$case){$fixture['history_'.$case.'_predecessor']=$make('history-'.$case.'-predecessor',$course1);$fixture['history_'.$case.'_target']=$make('history-'.$case.'-target',$course1,$fixture['history_'.$case.'_predecessor']['student_id'],$fixture['history_'.$case.'_predecessor']['principal_id']);}
+$fixture['tie_predecessor_one']=$make('tie-predecessor-one',$course2);$fixture['tie_predecessor_two']=$make('tie-predecessor-two',$course2,$fixture['tie_predecessor_one']['student_id'],$fixture['tie_predecessor_one']['principal_id']);$fixture['tie_target']=$make('tie-target',$course2,$fixture['tie_predecessor_one']['student_id'],$fixture['tie_predecessor_one']['principal_id']);
 update_option('dzn_phase_2a2i_fixture',$fixture,false);echo"Phase 2A.2-I Schema 14 fixture prepared sources=".count($fixture)."\n";

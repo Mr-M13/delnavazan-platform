@@ -24,7 +24,9 @@ final class EnrolmentConversionRepository {
         $provisional=$this->row('proposal_acceptance_events',(int)$a->provisional_acceptance_event_id,$lock);if(!$provisional)return null;
         global$wpdb;$outcomeId=$wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->prefix}proposal_option_outcome_events WHERE proposal_option_id=%d",(int)$a->proposal_option_id));$outcome=$outcomeId?$this->row('proposal_option_outcome_events',(int)$outcomeId,$lock):null;if(!$outcome)return null;
         $arrangement=$this->row('accepted_service_arrangements',(int)$a->id,$lock);if(!$arrangement)return null;
-        return compact('request','case','family','option','version','provisional','outcome','arrangement');
+        $identityResolution=$this->row('booking_request_identity_resolution_events',(int)$arrangement->identity_resolution_event_id,$lock);if(!$identityResolution)return null;
+        $capacityClassification=$this->row('student_acceptance_capacity_classifications',(int)$arrangement->capacity_classification_id,$lock);if(!$capacityClassification)return null;
+        return compact('request','case','family','option','version','provisional','outcome','arrangement','identityResolution','capacityClassification');
     }
 
     public function materializeAndLockIdentityRoot(int$studentId,int$courseId,int$actor,string$now):object{
@@ -37,6 +39,7 @@ final class EnrolmentConversionRepository {
     public function lifecycleEvents(array$enrolments,bool$lock):array{if(!$enrolments)return array();global$wpdb;$ids=array_map(static fn($r)=>(int)$r->id,$enrolments);$marks=implode(',',array_fill(0,count($ids),'%d'));$eventIds=array_map('intval',$wpdb->get_col($wpdb->prepare("SELECT id FROM {$this->prefix}enrolment_lifecycle_events WHERE enrolment_id IN ({$marks}) ORDER BY id ASC",...$ids))?:array());$rows=array();foreach($eventIds as$id){$row=$this->row('enrolment_lifecycle_events',$id,$lock);if($row)$rows[]=$row;}return$rows;}
     public function linkedEnrolment(int$sourceId):?object{global$wpdb;return$wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}enrolments WHERE accepted_service_arrangement_id=%d",$sourceId));}
     public function enrolmentById(int$id):?object{return$this->row('enrolments',$id,false);}
+    public function lifecycleForEnrolment(int$id):array{global$wpdb;return$wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->prefix}enrolment_lifecycle_events WHERE enrolment_id=%d ORDER BY event_sequence ASC,id ASC",$id))?:array();}
     public function insertCanonical(array$data):int{return$this->insert('enrolments',$data,'Canonical Enrolment persistence failed');}
     public function assignReference(int$id,string$reference):void{global$wpdb;if($wpdb->update($this->prefix.'enrolments',array('reference_code'=>$reference),array('id'=>$id,'reference_code'=>null))!==1)throw new \RuntimeException('Canonical Enrolment reference assignment failed');}
     public function insertLifecycleEvent(array$data):int{return$this->insert('enrolment_lifecycle_events',$data,'Enrolment lifecycle evidence persistence failed');}

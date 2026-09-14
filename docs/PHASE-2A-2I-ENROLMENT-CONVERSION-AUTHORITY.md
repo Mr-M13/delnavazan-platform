@@ -6,6 +6,8 @@ Schema 15 / migration `015_enrolment_conversion_authority` adds a capability-pro
 
 `EnrolmentConversionReadinessService` writes nothing and returns only `ready`, `already_converted`, `legacy_review_required`, `canonical_conflict`, `source_integrity_conflict`, `student_not_current`, `course_not_current`, `source_not_final`, or `data_integrity_conflict`. A readiness result is not bearer authority. `EnrolmentConversionService` independently reloads and revalidates the exact immutable source graph and complete Student + Course Enrolment aggregate under locks.
 
+The source graph includes the exact frozen Booking Request identity-resolution event and Student capacity-classification record referenced by the arrangement. Their aggregate identity, sequence, Student, prospective-subject relationship, classification and evidence structure must match the immutable final snapshot. Historical evidence need not remain current; principal/guardian authority is not re-authorised and privacy erasure remains non-blocking.
+
 Both boundaries require `dzn_convert_service_arrangements_to_enrolments`. No public REST route or administrator conversion UI is added.
 
 ## Conversion result
@@ -19,6 +21,8 @@ A successful conversion atomically writes exactly:
 The frozen Teacher is historical service context only. It is not Teacher Assignment, capacity, scheduling, Term, Lesson, payment, notification, calendar or Amelia authority.
 
 When clean closed history exists, the predecessor is selected by the most recent unambiguous authoritative closure event and the new row uses `return_after_closure`. It is never selected by maximum Enrolment ID. Ambiguous or malformed history fails as `data_integrity_conflict`.
+
+Every canonical lifecycle history is validated from contiguous sequence 1: null initial state, valid state chain, final-state agreement, lineage/provenance consistency and ordered UTC occurrence/recording timestamps. Replay and already-converted responses centrally revalidate the command, source, canonical Enrolment, frozen Teacher, lifecycle evidence and predecessor relationship; contaminated evidence never returns a successful identity.
 
 ## Persistence, idempotency and locking
 
