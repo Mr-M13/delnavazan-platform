@@ -3,12 +3,16 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
-## Phase 2A.2-H — Canonical Enrolment Foundation — recovery candidate
+## Phase 2A.2-H — Canonical Enrolment Foundation — 2026-09-14
 
-- Added Schema 14 / migration `014_canonical_enrolment_foundation` and build `phase2a2h-canonical-enrolment-foundation-20260913.1` from authoritative main `aa626e89c66a393977caf002355589990aec03df`.
+- Merged independently reviewed candidate `6ae121d0a96b8bd034663992f4ee5ee0812a9893` from authoritative pre-H main `aa626e89c66a393977caf002355589990aec03df` as merge commit `672e5334fe9f37fff5f872cf3fdad18af5ab50d5`.
+- Added Schema 14 / migration `014_canonical_enrolment_foundation` and build `phase2a2h-canonical-enrolment-foundation-20260913.1`.
 - Preserved Phase 1 Enrolments as explicit legacy history and added Student + Course canonical identity, immutable Accepted Service Arrangement provenance, applicable-row uniqueness, reserved lifecycle/lineage structure, and append-only lifecycle evidence.
-- Added protected six-outcome applicability inspection and closed generic admin creation, legacy archive/restore, and Phase 1 Term/Lesson/Teacher authority paths for canonical records.
-- This is an unmerged review candidate. It adds no conversion, Teacher Assignment, deployment or external-system authority.
+- Record models are `legacy_phase1` and `canonical_student_course_v1`; the reserved canonical lifecycle is `authorised → current → paused → closed`.
+- Added protected six-outcome applicability inspection, preserved constrained legacy/bootstrap compatibility, and closed generic/manual canonical creation, legacy archive/restore, and Phase 1 Term/Lesson/Teacher authority paths for canonical records.
+- Independent-review findings HIGH-1, HIGH-2, HIGH-3 and MEDIUM-1 were corrected; final independent re-review result: **PASS — MERGE READY**. Phase 2A.2-H is complete, independently reviewed and merged.
+- No Accepted Service Arrangement → Enrolment conversion, Teacher Assignment, canonical Term/Lesson authority, deployment or external-system authority was added. Conversion readiness and explicit conversion authority remain separate future work.
+- No deployment occurred; Theme, NIU, Amelia, Hamnavaz and production were untouched.
 
 ## Phase 2A.2-G — Final Acceptance + Accepted Service Arrangement Foundation — 2026-09-13
 
