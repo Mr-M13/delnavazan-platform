@@ -377,3 +377,7 @@ Migration `013_final_acceptance_arrangement_foundation` adds append-only `accept
 # Schema 14
 
 Migration `014_canonical_enrolment_foundation` additively classifies every existing Enrolment as `legacy_phase1`, preserves its exact status and historical Teacher value, makes Teacher context nullable for the future canonical model, and adds canonical provenance, lifecycle, applicability-slot and lineage columns. It adds uniqueness for Accepted Service Arrangement provenance and one applicable canonical Enrolment per Student + Course, plus append-only lifecycle-event storage. Verification runs before the ledger entry is recorded and on every current-schema load; repeated upgrade does not rewrite legacy rows.
+
+# Schema 15
+
+Migration `015_enrolment_conversion_authority` additively creates the InnoDB `enrolment_identity_roots` and `enrolment_conversion_commands` tables. Verification requires every semantic column, absence of mutable `updated_at`, and exact uniqueness for Student + Course identity, command UID/digest, source provenance and resulting Enrolment before ledger completion. Repeated upgrade verifies the schema and repairs capability `dzn_convert_service_arrangements_to_enrolments` through marker `2a2i` without rewriting domain rows.

@@ -279,3 +279,5 @@ This architecture does not:
 ## Phase 2A.2-H canonical Enrolment boundary
 
 Schema 14 separates preserved `legacy_phase1` Enrolments from the future `canonical_student_course_v1` aggregate. Canonical structural identity is Student + Course; nullable Teacher context is not Teacher Assignment. Accepted Service Arrangement provenance, applicable-slot uniqueness, reserved lifecycle/lineage fields, append-only history and protected applicability reads are foundation data only. Generic creation is closed. Readiness, conversion authority/idempotency, lifecycle transitions, Teacher Assignment, Terms, Lessons and every external integration remain later boundaries.
+
+The unmerged Schema 15 Phase 2A.2-I review candidate separates informational conversion readiness from the explicit atomic conversion command. Conversion revalidates the immutable final source graph under canonical lock order, serializes on a concrete Student + Course identity root, and records one authorised canonical Enrolment, its initial lifecycle event and immutable digest-only command evidence. It creates no Teacher Assignment or downstream operational authority.
