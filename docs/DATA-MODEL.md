@@ -182,6 +182,12 @@ The new canonical structural identity is Student + Course under `record_model=ca
 
 Lifecycle evidence is append-only. A predecessor may reserve only `successor`, `return_after_closure`, `correction`, or `distinct_concurrent_service`; those meanings neither bypass conflict review nor create operational authority. Booking Request contact PII is not copied. Schema 14 provides no ordinary canonical creator, readiness decision, conversion, Teacher Assignment, Term or Lesson authority.
 
+### Schema 15 conversion evidence
+
+The Phase 2A.2-I review candidate adds `enrolment_identity_roots` as a state-free concrete `(student_id, course_id)` serialization root and `enrolment_conversion_commands` as immutable conversion evidence. The command table uniquely binds a digest-only idempotency key to one canonical payload, Accepted Service Arrangement and resulting Enrolment; it has no mutable status or `updated_at`.
+
+Explicit conversion is the only ordinary canonical writer. It copies exact final arrangement Student/Course identity and frozen Teacher context, writes lifecycle state `authorised`, and appends the sequence-1 conversion event. A return after clean closure history links to the unambiguous most-recent closure-evidenced predecessor. No Booking Request contact PII or operational authority is added.
+
 ### Responsibility
 
 Represents the continuing relationship between one Student, one Teacher, and one

@@ -158,6 +158,10 @@ Phase 2A.2-H is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** at Schema 14 / mi
 
 The next Platform work begins after H. Conversion readiness and explicit conversion authority remain separate future increments: readiness is not authority, and authority is not successful conversion. No canonical Enrolment creation, Teacher Assignment, Term, Lesson, scheduling, payment, notification, calendar or Amelia authority may be inferred from the H foundation.
 
+### Phase 2A.2-I recovery candidate (unmerged)
+
+From authoritative main `f855103c6449ad466ff267c7a9740b56c9ffed66`, branch `phase-2a2i-enrolment-conversion-authority-recovery-2` prepares Schema 15 / `015_enrolment_conversion_authority`, build `phase2a2i-enrolment-conversion-authority-20260914.1`, for independent review. It adds non-bearer readiness, explicit atomic conversion, concrete Student + Course serialization, digest-only idempotency, initial lifecycle evidence and privacy-safe final-arrangement conversion. This candidate is not authoritative until independently reviewed and merged; no deployment or external-system change is implied.
+
 ## 5. Persistent architectural boundaries
 
 Delnavazan Platform is an incremental authority migration away from architectural dependence on Amelia. Core owns stable business identity and canonical state; integrations reference that state through explicit boundaries.
