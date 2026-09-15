@@ -24,6 +24,14 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
+## Schema 17 / migration 017 review candidate
+
+`017_canonical_term_foundation` additively classifies every existing Term as `legacy_phase1`, preserving exact Phase-1 status, payment, allocation, date, sequence and archive facts. It adds nullable canonical lifecycle/applicability fields, one-applicable-Term-per-Enrolment arbitration and an append-only InnoDB `term_lifecycle_events` table. It does not scan for or infer canonical Term authority and creates no canonical Term rows.
+
+The capability marker advances to `2a2k` only to retain and repair the existing administrator `dzn_manage_terms` read/legacy-management capability. No canonical creation capability is added. Migration verification checks the default record model, exact indexes, InnoDB history, digest shape, absence of a Term Teacher field and absence of mutable history.
+
+This is a storage/read foundation only. It introduces no ordinary canonical Term writer, lifecycle command, command-idempotency table, Lesson/consumption authority, scheduling, payment, renewal, notification, calendar, Amelia, Hamnavaz or CRM authority. Authoritative main remains Schema 16 until the candidate is independently reviewed and merged.
+
 ## Schema 16 / migration 016
 
 `016_teacher_assignment_foundation` adds the three Teacher Assignment tables without scanning or backfilling Enrolments. An Enrolment with zero Assignment remains valid after upgrade. Migration verification requires InnoDB, exact columns, digest shapes, append-only evidence tables, and the applicable-slot/sequence/lineage indexes. The capability marker advances to `2a2j` and repairs both administrator management and exact authenticated-Teacher acceptance capabilities on repeated startup.

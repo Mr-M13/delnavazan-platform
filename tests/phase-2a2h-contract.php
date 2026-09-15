@@ -15,8 +15,8 @@ $student = file_get_contents($root . '/src/Core/Infrastructure/Repository/Studen
 $course = file_get_contents($root . '/src/Core/Infrastructure/Repository/CourseRepository.php');
 $runtime = file_get_contents($root . '/tests/phase-2a2h-migration-runtime.php');
 
-if(!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '14'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '15'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '16'"))throw new RuntimeException('Missing compatible Phase H+ schema identity');
-if(!str_contains($plugin,'phase2a2h-canonical-enrolment-foundation-20260913.1')&&!str_contains($plugin,'phase2a2i-enrolment-conversion-authority-20260914.1')&&!str_contains($plugin,'phase2a2j-teacher-assignment-foundation-20260915.1'))throw new RuntimeException('Missing compatible Phase H+ build identity');
+if(!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '14'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '15'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '16'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '17'"))throw new RuntimeException('Missing compatible Phase H+ schema identity');
+if(!str_contains($plugin,'phase2a2h-canonical-enrolment-foundation-20260913.1')&&!str_contains($plugin,'phase2a2i-enrolment-conversion-authority-20260914.1')&&!str_contains($plugin,'phase2a2j-teacher-assignment-foundation-20260915.1')&&!str_contains($plugin,'phase2a2k-canonical-term-foundation-20260916.1'))throw new RuntimeException('Missing compatible Phase H+ build identity');
 foreach (['014_canonical_enrolment_foundation', 'install_canonical_enrolment_foundation', 'verify_canonical_enrolment_schema', 'record_model', 'legacy_phase1', 'accepted_service_arrangement_id', 'lifecycle_state', 'applicable_slot', 'predecessor_enrolment_id', 'lineage_meaning', 'enrolment_lifecycle_events', 'ENGINE=InnoDB'] as $fragment) {
     if (!str_contains($migration, $fragment)) throw new RuntimeException('Missing Phase H migration foundation: ' . $fragment);
 }

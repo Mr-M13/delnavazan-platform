@@ -17,9 +17,10 @@ $failureRuntime = file_get_contents($root . '/tests/phase-2a2j-failure-runtime.p
 $corruptionRuntime = file_get_contents($root . '/tests/phase-2a2j-corruption-runtime.php');
 $race = file_get_contents($root . '/tests/phase-2a2j-concurrency-runner.sh') . file_get_contents($root . '/tests/phase-2a2j-concurrency-setup.php') . file_get_contents($root . '/tests/phase-2a2j-concurrency-worker.php') . file_get_contents($root . '/tests/phase-2a2j-concurrency-wait.php') . file_get_contents($root . '/tests/phase-2a2j-concurrency-verify.php');
 
-foreach (array("DZN_PLATFORM_SCHEMA_VERSION', '16'", 'phase2a2j-teacher-assignment-foundation-20260915.1', '016_teacher_assignment_foundation', 'teacher_assignments', 'teacher_assignment_lifecycle_events', 'teacher_assignment_commands', 'verify_teacher_assignment_schema', 'dzn_manage_teacher_assignments') as $needle) {
+foreach (array('016_teacher_assignment_foundation', 'teacher_assignments', 'teacher_assignment_lifecycle_events', 'teacher_assignment_commands', 'verify_teacher_assignment_schema', 'dzn_manage_teacher_assignments') as $needle) {
     if (!str_contains($plugin . $migration, $needle)) throw new RuntimeException('Missing Phase J identity/schema/capability: ' . $needle);
 }
+if ((!str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '16'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '17'")) || (!str_contains($plugin, 'phase2a2j-teacher-assignment-foundation-20260915.1') && !str_contains($plugin, 'phase2a2k-canonical-term-foundation-20260916.1'))) throw new RuntimeException('Missing compatible Phase J+ identity');
 foreach (array('assignInitial', 'replace', 'end', 'cancel', 'initial_final_arrangement', 'replacement_agreement', 'retained_final_arrangement_and_assent', 'staff_attested_teacher_agreement', 'authenticated_teacher_acceptance') as $needle) {
     if (!str_contains($service, $needle)) throw new RuntimeException('Missing Teacher Assignment lifecycle/evidence behavior: ' . $needle);
 }

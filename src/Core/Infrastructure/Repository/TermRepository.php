@@ -1,16 +1,79 @@
 <?php
 namespace Delnavazan\Platform\Core\Infrastructure\Repository;
 
+/** Legacy compatibility plus read-only canonical Term foundation persistence. */
 final class TermRepository extends BaseRepository {
     public function __construct() {
         global $wpdb;
         $this->table = $wpdb->prefix . 'dzn_terms';
     }
 
+    /** Phase 1 downstream services may consume legacy Terms only. */
+    public function usable(int $id): ?object {
+        global $wpdb;
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$this->table} WHERE id=%d AND record_model='legacy_phase1' AND archived_at IS NULL AND status <> 'archived'",
+            $id
+        ));
+    }
+
+    /** Generic reads remain the legacy administrator surface. */
+    public function find(int $id): ?object {
+        global $wpdb;
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$this->table} WHERE id=%d AND record_model='legacy_phase1'",
+            $id
+        ));
+    }
+
+    public function recent(int $limit = 50): array {
+        global $wpdb;
+        $limit = max(1, min($limit, 100));
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->table} WHERE record_model='legacy_phase1' ORDER BY id DESC LIMIT %d",
+            $limit
+        )) ?: array();
+    }
+
+    public function findAny(int $id): ?object {
+        return parent::find($id);
+    }
+
+    /** Canonical insertion is reserved for a later explicit Term authority. */
+    public function insert(array $data): int {
+        throw new \RuntimeException('Generic Term repository insertion is disabled');
+    }
+
+    /** Explicit compatibility seam for the existing capability-protected legacy creator. */
+    public function insertLegacyBootstrap(array $data): int {
+        if (!current_user_can('dzn_manage_terms')) throw new \RuntimeException('Unauthorized');
+        if (($data['record_model'] ?? null) !== 'legacy_phase1') throw new \InvalidArgumentException('Legacy Term record model required');
+        foreach (array('lifecycle_state', 'applicable_slot') as $canonicalField) {
+            if (array_key_exists($canonicalField, $data)) throw new \InvalidArgumentException('Canonical Term fields are prohibited in legacy persistence');
+        }
+        if (!in_array($data['status'] ?? null, array('draft', 'awaiting_payment', 'active', 'completed', 'cancelled'), true)) {
+            throw new \InvalidArgumentException('Legacy Term status required');
+        }
+        if (!in_array($data['payment_state'] ?? null, array('not_required', 'pending', 'paid', 'failed', 'refunded'), true)) {
+            throw new \InvalidArgumentException('Legacy Term payment state required');
+        }
+        return parent::insert($data);
+    }
+
+    public function archive(int $id, string $now, ?int $actor): void {
+        $this->requireLegacyMutationTarget($id);
+        parent::archive($id, $now, $actor);
+    }
+
+    public function restore(int $id, string $status, string $now, ?int $actor): void {
+        $this->requireLegacyMutationTarget($id);
+        parent::restore($id, $status, $now, $actor);
+    }
+
     public function sequenceExists(int $enrolment, int $sequence): bool {
         global $wpdb;
         return (bool) $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$this->table} WHERE enrolment_id = %d AND sequence_number = %d",
+            "SELECT id FROM {$this->table} WHERE enrolment_id=%d AND sequence_number=%d",
             $enrolment,
             $sequence
         ));
@@ -19,18 +82,43 @@ final class TermRepository extends BaseRepository {
     public function belongsToUsableEnrolment(int $termId, int $enrolmentId): bool {
         global $wpdb;
         return (bool) $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$this->table} WHERE id = %d AND enrolment_id = %d AND archived_at IS NULL AND status <> 'archived'",
+            "SELECT id FROM {$this->table} WHERE id=%d AND enrolment_id=%d AND record_model='legacy_phase1' AND archived_at IS NULL AND status <> 'archived'",
             $termId,
             $enrolmentId
         ));
+    }
+
+    public function forEnrolment(int $enrolmentId): array {
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->table} WHERE enrolment_id=%d ORDER BY sequence_number ASC,id ASC",
+            $enrolmentId
+        )) ?: array();
+    }
+
+    public function lifecycleHistory(int $termId): array {
+        global $wpdb;
+        $events = $wpdb->prefix . 'dzn_term_lifecycle_events';
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$events} WHERE term_id=%d ORDER BY event_sequence ASC,id ASC",
+            $termId
+        )) ?: array();
     }
 
     public function hasOperationalLessons(int $termId): bool {
         global $wpdb;
         $lessons = $wpdb->prefix . 'dzn_lessons';
         return (bool) $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$lessons} WHERE term_id = %d AND archived_at IS NULL AND status NOT IN ('archived', 'completed', 'cancelled') LIMIT 1",
+            "SELECT id FROM {$lessons} WHERE term_id=%d AND archived_at IS NULL AND status NOT IN ('archived','completed','cancelled') LIMIT 1",
             $termId
         ));
+    }
+
+    private function requireLegacyMutationTarget(int $id): object {
+        $row = $this->findAny($id);
+        if (!$row || ($row->record_model ?? null) !== 'legacy_phase1') {
+            throw new \InvalidArgumentException('Legacy Term archive/restore target required');
+        }
+        return $row;
     }
 }
