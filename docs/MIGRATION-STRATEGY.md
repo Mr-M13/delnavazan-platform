@@ -24,6 +24,12 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
+## Schema 16 / migration 016
+
+`016_teacher_assignment_foundation` adds the three Teacher Assignment tables without scanning or backfilling Enrolments. An Enrolment with zero Assignment remains valid after upgrade. Migration verification requires InnoDB, exact columns, digest shapes, append-only evidence tables, and the applicable-slot/sequence/lineage indexes. The capability marker advances to `2a2j` and repairs both administrator management and exact authenticated-Teacher acceptance capabilities on repeated startup.
+
+The migration is storage-only: it does not infer Assignment authority from `enrolments.teacher_id`, availability, eligibility, proposal history, or current time. It performs no downstream cutover and changes no Term, Lesson, scheduling, capacity, payment, notification, calendar, Amelia, Hamnavaz, or CRM authority. The disposable runtime reconstructs a Schema 15 state, executes 015 → 016, verifies repeat safety/capability repair, and then exercises the Assignment application boundary.
+
 ## 3. Migration dimensions
 
 Each capability moves through independent dimensions:

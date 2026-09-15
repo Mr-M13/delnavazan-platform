@@ -4,7 +4,13 @@
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override:** Platform 0.1.0 is implemented through Schema 10 / migrations 001–010. Phase 2A.2-A through 2A.2-D are complete; Proposal Foundation merged in PR #13 at main `c041028b16b6cb6976453630480484bd7d1ddc0b`. Phase 2A.2-E Acceptance Foundation is reconnaissance only. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the authoritative current coordination/Proposal/Acceptance contract and exact delivery state.
+> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-I / Schema 15. Phase 2A.2-J is a Schema 16 Teacher Assignment implementation candidate awaiting independent review. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+
+### Phase 2A.2-J architectural seam
+
+Teacher Assignment is separate from canonical Enrolment identity and lifecycle. `enrolments.teacher_id` remains Accepted Service Arrangement history; current Teacher authority comes only from the privacy-minimised Assignment read seam. Zero Assignment is valid, migration performs no backfill, and Assignment creation is confined to applicable canonical Enrolments. Initial authority follows exact final-arrangement Teacher provenance; replacement authority requires new Assignment-specific authenticated-Teacher evidence or authorised staff attestation. Assignment lifecycle cannot create or mutate Terms, Lessons, schedules, capacity, payments, notifications, calendars, Amelia, Hamnavaz, or CRM state.
+
+Teacher Assignment commands serialize on the canonical Enrolment, use ascending shared Teacher locks to coordinate with exclusive archival/offboarding, and then lock concrete Assignment rows. Duplicate arbitration recognizes only named aggregate indexes and returns convergence only after complete operation-specific authority, lineage, lifecycle, evidence, and command validation; otherwise it fails closed.
 
 ## 2. Architectural goal
 

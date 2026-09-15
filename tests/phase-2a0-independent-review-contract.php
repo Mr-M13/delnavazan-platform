@@ -29,10 +29,11 @@ foreach ( [
 	"t.status='active' AND t.archived_at IS NULL",
 	"o.readiness_state='ready'",
 ] as $fragment ) if ( strpos( $repository, $fragment ) === false ) throw new RuntimeException( 'Missing effective Teacher authority contract: ' . $fragment );
-foreach ( [ 'hasActivePrincipalAuthority', 'hasOperationalEnrolments($id) || $repository->hasActivePrincipalAuthority($id)' ] as $fragment ) if ( strpos( $teacher . $archive, $fragment ) === false ) throw new RuntimeException( 'Missing archive/offboarding coordination contract: ' . $fragment );
+foreach ( [ 'hasActivePrincipalAuthority', 'hasApplicableTeacherAssignments', '$repository->hasOperationalEnrolments($id)', '$repository->hasApplicableTeacherAssignments($id)', '$repository->hasActivePrincipalAuthority($id)' ] as $fragment ) if ( strpos( $teacher . $archive, $fragment ) === false ) throw new RuntimeException( 'Missing archive/offboarding coordination contract: ' . $fragment );
 
 foreach ( [
-	'self::verify_current_schema(); return;',
+		'self::verify_current_schema();',
+		'self::ensure_capabilities(); return;',
 	'private static function verify_current_schema(): void',
 	"'001_initial_core_schema', '002_principal_invitation_foundation', '003_invitation_recipient_snapshot'",
 	"array('teacher_invitation_generations','invitation_generation',true)",

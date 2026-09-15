@@ -11,14 +11,14 @@
 | Pre-Phase 2A.2-I main | `f855103c6449ad466ff267c7a9740b56c9ffed66` |
 | Platform merge main (Phase 2A.2-I) | `d0bfbe1b808e60e8bcffae0da6c16a4fda1dc928` |
 | Platform | 0.1.0 |
-| Schema | 15 |
-| Migrations | 001–015; latest `015_enrolment_conversion_authority` |
-| Build identity | `phase2a2i-enrolment-conversion-authority-20260914.1` |
-| Latest completed slice | Phase 2A.2-I — Enrolment Conversion Authority |
+| Schema candidate | 16 |
+| Migrations candidate | 001–016; latest `016_teacher_assignment_foundation` |
+| Build identity candidate | `phase2a2j-teacher-assignment-foundation-20260915.1` |
+| Latest completed slice | Phase 2A.2-I — Enrolment Conversion Authority; Phase J is an unmerged candidate |
 | Phase 2A.2-I approved candidate | `4e40c5fa7665a8f96fcbf19def2cac719e7bc38b` |
 | Merge state | Final independent re-review PASS; merged as `d0bfbe1b808e60e8bcffae0da6c16a4fda1dc928` |
 | Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
-| Next Platform action | Teacher Assignment remains future work and requires a separate reviewed phase; it has not started |
+| Next Platform action | Independent review of `phase-2a2j-teacher-assignment-foundation`; do not merge or deploy from this handoff |
 | Current 2A.2-I state | **COMPLETE / MERGED / CLOSED** |
 
 The completed coordination chain is:
@@ -32,8 +32,19 @@ The completed coordination chain is:
 7. **2A.2-G** — Final Acceptance + Accepted Service Arrangement Foundation: current authority revalidation, immutable accepted arrangement facts, sibling Option outcomes, and deterministic finality/idempotency evidence.
 8. **2A.2-H** — Canonical Enrolment Foundation: legacy-compatible Student + Course identity, reserved lifecycle/lineage, conflict inspection and protected history without creation or conversion authority.
 9. **2A.2-I** — Enrolment Conversion Authority: informational readiness, explicit capability-protected atomic/idempotent conversion, authoritative source revalidation and canonical lifecycle-origin evidence.
+10. **2A.2-J candidate** — Teacher Assignment Foundation: separate current-Teacher authority, retained initial provenance, assignment-specific replacement evidence, atomic lifecycle and protected reads/offboarding.
 
-Schema 15 / `015_enrolment_conversion_authority` adds the explicit Accepted Service Arrangement → canonical Enrolment conversion boundary. It does not assign a Teacher, create Terms or Lessons, or establish payment, notification, communication, calendar or Amelia authority.
+Main remains authoritative at Schema 15 / Phase I. The unmerged Schema 16 candidate adds Teacher Assignment without creating Terms or Lessons or establishing scheduling, capacity, payment, notification, communication, calendar or Amelia authority.
+
+## Phase 2A.2-J implementation candidate — Teacher Assignment Foundation
+
+The candidate branch starts from authoritative main `7bd4430737f460fdb995bbe05dea272b55641294`. Its exact candidate SHA is reported after commit because a commit cannot contain its own identity. It establishes a first-class Assignment aggregate and explicitly preserves `enrolments.teacher_id` as historical Accepted Service Arrangement context.
+
+Zero Assignment is valid and migration 016 performs no backfill. Initial Assignment is limited to canonical Enrolments in `authorised`, `current`, or `paused` and must use the exact retained final-arrangement Teacher. Historical Availability Assent provenance remains usable even after time passes or the source record later transitions. A different Teacher requires new assignment-specific authenticated-Teacher acceptance or authorised staff attestation; availability, eligibility, proposal history, the historical Enrolment Teacher, and administrator preference do not substitute.
+
+Replacement atomically terminates the predecessor and creates its successor; no future replacement can be staged. Expected-current identity arbitrates stale commands, nullable-slot uniqueness is final database arbitration, and same-key replay/different-key identical-authority behavior is explicit. Lifecycle evidence is append-only and command/evidence references are digest-only. The protected read seam returns only stable identifiers, sequence, state, and assigned time.
+
+Assignment commands lock Enrolment → Teachers with shared locks in ascending ID order → concrete Assignments under `READ COMMITTED`. Teacher archival takes an exclusive Teacher lock and rechecks applicable Assignment state transactionally. J-5 keeps principal/onboarding offboarding independent: it does not archive the Teacher, invalidate existing Assignment authority, or prevent retained-provenance initial and authorised staff-attested replacement authority, but it prevents authenticated-Teacher replacement after principal authority is revoked. Review correction round 1 restricts duplicate arbitration to named indexes plus complete operation-specific authority proof; terminal failures cannot converge from a merely current Assignment. Exhaustive failure/corruption and twenty-mode bidirectional process-concurrency coverage, including six real principal-offboarding races, is committed. The candidate has no Enrolment lifecycle, Term, Lesson, schedule, capacity, payment, notification, calendar, Amelia, Hamnavaz, CRM, Theme, NIU, or production authority.
 
 ## 2. Locked coordination domain contract
 

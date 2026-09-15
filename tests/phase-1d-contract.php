@@ -31,7 +31,7 @@ $migration = file_get_contents("{$root}/src/Core/Infrastructure/Migration/Migrat
 if (str_contains($migration, 'UNIQUE KEY fingerprint')) throw new RuntimeException('Phase 1D must not globally unique-index fingerprints');
 
 $baseRepository = file_get_contents("{$root}/src/Core/Infrastructure/Repository/BaseRepository.php");
-phase_1d_require_fragments($baseRepository, ['DESCRIBE {$this->table}', "in_array('updated_by'", "in_array('updated_at'"], 'archive audit');
+phase_1d_require_fragments($baseRepository, ['DESCRIBE {$this->table}', "hasColumn('updated_by')", "hasColumn('updated_at')"], 'archive audit');
 
 $archive = file_get_contents("{$root}/src/Core/Application/ArchiveService.php");
 phase_1d_require_fragments($archive, [
