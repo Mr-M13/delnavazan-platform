@@ -16,6 +16,15 @@ final class TeacherRepository extends BaseRepository {
         ));
     }
 
+    public function hasApplicableTeacherAssignments(int $teacherId): bool {
+        global $wpdb;
+        $assignments = $wpdb->prefix . 'dzn_teacher_assignments';
+        return (bool) $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$assignments} WHERE teacher_id = %d AND applicable_slot = 1 LIMIT 1",
+            $teacherId
+        ));
+    }
+
     /** Archival is blocked until Teacher-domain authority is explicitly offboarded. */
     public function hasActivePrincipalAuthority(int $teacherId): bool {
         global $wpdb;
@@ -24,5 +33,21 @@ final class TeacherRepository extends BaseRepository {
             "SELECT id FROM {$links} WHERE teacher_id = %d AND status = 'active' LIMIT 1",
             $teacherId
         ));
+    }
+
+    /** Serialize offboarding against Assignment creation/replacement on this Teacher. */
+    public function archive(int $id, string $now, ?int $actor): void {
+        global $wpdb;
+        $this->begin();
+        try {
+            $teacher = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table} WHERE id=%d FOR UPDATE", $id));
+            if (!$teacher || $teacher->archived_at !== null || $teacher->status === 'archived') throw new \InvalidArgumentException('Record is not archivable');
+            if ($this->hasApplicableTeacherAssignments($id)) throw new \InvalidArgumentException('Archive conflict: applicable Teacher Assignment exists');
+            parent::archive($id, $now, $actor);
+            $this->commit();
+        } catch (\Throwable $exception) {
+            $this->rollback();
+            throw $exception;
+        }
     }
 }

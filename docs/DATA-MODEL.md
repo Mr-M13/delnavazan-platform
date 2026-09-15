@@ -1,5 +1,13 @@
 # Delnavazan Platform Conceptual Data Model
 
+## Teacher Assignment foundation (Schema 16)
+
+`teacher_assignments` is the first-class current-Teacher authority for a canonical Enrolment. It is not `enrolments.teacher_id`, which remains historical final-arrangement context. Zero rows is valid and migration 016 does not backfill. One nullable-slot unique key on `(enrolment_id, applicable_slot)` permits history while enforcing at most one applicable row. Ordered predecessor lineage prohibits a staged future replacement.
+
+`teacher_assignment_lifecycle_events` retains append-only initial, replacement, end, and cancellation evidence. The initial event references retained Accepted Service Arrangement and Availability Assent provenance. A replacement records only assignment-specific evidence route/basis/channel, a digest of the opaque reference, and timestamps/actors; it copies no names, contact data, messages, addresses, provider data, or erased PII. `teacher_assignment_commands` retains immutable command-domain, operation, result IDs, and digest-only key/payload evidence.
+
+Applicable Assignment state is `assigned`; terminal states are `replaced`, `ended`, and `cancelled`. Replacement terminates the predecessor and creates the successor atomically. It does not alter the Enrolment's `authorised`, `current`, `paused`, or `closed` lifecycle.
+
 ## Proposal provisional acceptance evidence (Schema 11)
 
 `proposal_acceptance_events` is an InnoDB append-only evidence table. Each row binds the Booking Request and Coordination Case to exact copied Proposal Family, Option and immutable Version identifiers/fingerprint, with `event_kind=accepted_pending_conditions` and `accepting_subject_state=authority_unresolved`. It stores closed-channel, opaque evidence provenance and digest-only acceptance command idempotency. It holds no contact PII, Student identity, final-acceptance lifecycle, conversion or downstream operational authority.
