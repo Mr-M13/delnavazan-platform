@@ -41,8 +41,13 @@ $make = function(string $label, int $course) use ($instrument, $teachers, $actor
     return array('request_id' => $request, 'arrangement_id' => (int) $accepted['arrangement_id'], 'enrolment_id' => (int) $converted['enrolment_id'], 'student_id' => $student, 'course_id' => $course, 'teacher_id' => $teachers[0]);
 };
 $sources = array($make('one', $courses[0]), $make('two', $courses[1]));
-$teacherUser = wp_insert_user(array('user_login' => 'dzn-j-teacher-' . $suffix, 'user_pass' => wp_generate_password(32, true, true), 'user_email' => 'teacher-principal-' . $suffix . '@phase-2a2j.invalid', 'role' => 'dzn_teacher'));
-if (is_wp_error($teacherUser)) throw new RuntimeException('Synthetic Teacher principal creation failed');
-$wpdb->insert($p . 'teacher_principal_links', array('teacher_id' => $teachers[2], 'wordpress_user_id' => (int) $teacherUser, 'status' => 'active', 'linked_at' => $at, 'linked_by' => $actor));
-update_option('dzn_phase_2a2j_fixture', compact('sources', 'teachers', 'teacherUser', 'actor'), false);
+$teacherUsers = array();
+foreach ($teachers as $index => $teacherId) {
+    $teacherPrincipal = wp_insert_user(array('user_login' => 'dzn-j-teacher-' . $index . '-' . $suffix, 'user_pass' => wp_generate_password(32, true, true), 'user_email' => 'teacher-principal-' . $index . '-' . $suffix . '@phase-2a2j.invalid', 'role' => 'dzn_teacher'));
+    if (is_wp_error($teacherPrincipal)) throw new RuntimeException('Synthetic Teacher principal creation failed');
+    if ($wpdb->insert($p . 'teacher_principal_links', array('teacher_id' => $teacherId, 'wordpress_user_id' => (int) $teacherPrincipal, 'status' => 'active', 'linked_at' => $at, 'linked_by' => $actor)) !== 1) throw new RuntimeException('Synthetic Teacher principal link creation failed: ' . $wpdb->last_error);
+    $teacherUsers[] = (int) $teacherPrincipal;
+}
+$teacherUser = $teacherUsers[2];
+update_option('dzn_phase_2a2j_fixture', compact('sources', 'teachers', 'teacherUsers', 'teacherUser', 'actor'), false);
 echo "Phase 2A.2-J fixture prepared\n";

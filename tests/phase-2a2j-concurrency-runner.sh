@@ -2,7 +2,7 @@
 set -eu
 : "${DZN_PHASE_2A2J_WP_CLI:?}" "${DZN_PHASE_2A2J_WP_PATH:?}" "${DZN_PHASE_2A2J_WP_USER:?}" "${DZN_PHASE_2A2J_GATE_DIR:?}"
 [ "${DZN_PHASE_2A2J_RUNTIME_TEST:-}" = concurrency ] || exit 1
-case "${DZN_PHASE_2A2J_MODE:-}" in a_same_teacher_keys|c_replace_end|d1_replace_diff|d2_replace_same|e_initial_archive|e_replace_archive|e_archive_initial|e_archive_replace|f_initial_close|f_replace_close|f_close_initial|f_close_replace|u1_unrelated_roots|u2_shared_teacher);; *) exit 1;; esac
+case "${DZN_PHASE_2A2J_MODE:-}" in a_same_teacher_keys|c_replace_end|d1_replace_diff|d2_replace_same|e_initial_archive|e_replace_archive|e_archive_initial|e_archive_replace|f_initial_close|f_replace_close|f_close_initial|f_close_replace|o1_initial_offboard|o2_offboard_initial|o3_staff_replace_offboard|o4_offboard_staff_replace|o5_authenticated_replace_offboard|o6_offboard_authenticated_replace|u1_unrelated_roots|u2_shared_teacher);; *) exit 1;; esac
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd); gate=$DZN_PHASE_2A2J_GATE_DIR
 [ -d "$gate" ] && [ -z "$(find "$gate" -mindepth 1 -maxdepth 1 -print -quit)" ] || exit 1
 wp(){ "$DZN_PHASE_2A2J_WP_CLI" --path="$DZN_PHASE_2A2J_WP_PATH" --user="$DZN_PHASE_2A2J_WP_USER" eval-file "$1"; }
@@ -23,6 +23,9 @@ case "$DZN_PHASE_2A2J_MODE" in
   e_archive_initial|e_archive_replace) grep -q 'outcome=archived' "$gate/w1.out"; grep -q 'outcome=teacher_not_current' "$gate/w2.out";;
   f_initial_close|f_replace_close) grep -q 'outcome=created' "$gate/w1.out"; grep -q 'outcome=closed' "$gate/w2.out";;
   f_close_initial|f_close_replace) grep -q 'outcome=closed' "$gate/w1.out"; grep -q 'outcome=enrolment_not_applicable' "$gate/w2.out";;
+  o1_initial_offboard|o3_staff_replace_offboard|o5_authenticated_replace_offboard) grep -q 'outcome=created' "$gate/w1.out"; grep -q 'outcome=offboarded' "$gate/w2.out";;
+  o2_offboard_initial|o4_offboard_staff_replace) grep -q 'outcome=offboarded' "$gate/w1.out"; grep -q 'outcome=created' "$gate/w2.out";;
+  o6_offboard_authenticated_replace) grep -q 'outcome=offboarded' "$gate/w1.out"; grep -q 'outcome=Unauthorized' "$gate/w2.out";;
   u1_unrelated_roots) grep -q 'outcome=root_locked' "$gate/w1.out"; grep -q 'outcome=root_locked' "$gate/w2.out";;
   u2_shared_teacher) grep -q 'outcome=created' "$gate/w1.out"; grep -q 'outcome=created' "$gate/w2.out";;
 esac
