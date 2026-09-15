@@ -44,7 +44,7 @@ Zero Assignment is valid and migration 016 performs no backfill. Initial Assignm
 
 Replacement atomically terminates the predecessor and creates its successor; no future replacement can be staged. Expected-current identity arbitrates stale commands, nullable-slot uniqueness is final database arbitration, and same-key replay/different-key identical-authority behavior is explicit. Lifecycle evidence is append-only and command/evidence references are digest-only. The protected read seam returns only stable identifiers, sequence, state, and assigned time.
 
-Assignment commands lock Enrolment → Teachers in ascending ID order → concrete Assignments under `READ COMMITTED`. Teacher archival takes the Teacher lock and rechecks applicable Assignment state transactionally. The candidate has no Enrolment lifecycle, Term, Lesson, schedule, capacity, payment, notification, calendar, Amelia, Hamnavaz, CRM, Theme, NIU, or production authority.
+Assignment commands lock Enrolment → Teachers with shared locks in ascending ID order → concrete Assignments under `READ COMMITTED`. Teacher archival takes an exclusive Teacher lock and rechecks applicable Assignment state transactionally. Review correction round 1 restricts duplicate arbitration to named indexes plus complete operation-specific authority proof; terminal failures cannot converge from a merely current Assignment. Exhaustive failure/corruption and fourteen-mode bidirectional process-concurrency coverage is committed. The candidate has no Enrolment lifecycle, Term, Lesson, schedule, capacity, payment, notification, calendar, Amelia, Hamnavaz, CRM, Theme, NIU, or production authority.
 
 ## 2. Locked coordination domain contract
 

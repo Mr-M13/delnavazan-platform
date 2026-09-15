@@ -21,7 +21,7 @@ final class TeacherAssignmentService {
             if (!$source || !TeacherAssignmentAssessment::validInitialSource($source)) throw new \InvalidArgumentException('source_integrity_conflict');
             $enrolment = $source['enrolment'];
             if (!TeacherAssignmentAssessment::applicableEnrolment($enrolment)) throw new \InvalidArgumentException('enrolment_not_applicable');
-            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, 'initial', $enrolmentId);
+            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, 'initial', $enrolmentId, null, array('authority' => 'retained_final_arrangement'));
             $teacherId = (int) $source['arrangement']->teacher_id;
             $teachers = $this->repository->lockTeachers(array($teacherId));
             $assignments = $this->repository->assignmentsForEnrolment($enrolmentId, true);
@@ -29,7 +29,7 @@ final class TeacherAssignmentService {
             if (!TeacherAssignmentAssessment::validHistory($this->repository, $enrolmentId, $assignments)) throw new \InvalidArgumentException('data_integrity_conflict');
             if ($assignments) {
                 $initial = $assignments[0];
-                if ($initial->assignment_origin === 'initial_final_arrangement' && (int) $initial->teacher_id === $teacherId && (int) $initial->source_accepted_service_arrangement_id === (int) $source['arrangement']->id) {
+                if ($this->completeResult('initial', $enrolmentId, null, array('authority' => 'retained_final_arrangement'), $initial, false)) {
                     return $this->existing($initial, 'initial');
                 }
                 throw new \InvalidArgumentException('initial_assignment_already_recorded');
@@ -38,6 +38,7 @@ final class TeacherAssignmentService {
 
             $now = gmdate('Y-m-d H:i:s');
             $assignmentId = $this->createAssignment($enrolmentId, $teacherId, 1, null, 'initial_final_arrangement', (int) $source['arrangement']->id, $now, $actor);
+            do_action('dzn_phase_2a2j_after_initial_assignment_insert');
             $reference = (string) $source['arrangement']->uid . ':' . (string) $source['version']->source_assent_uid . ':' . (string) $source['version']->source_assent_version;
             $this->repository->insertEvent($this->event(
                 $assignmentId, 1, 'initial_assigned', null, 'assigned', null,
@@ -59,7 +60,7 @@ final class TeacherAssignmentService {
         return $this->execute('replace', $enrolmentId, $newTeacherId, $normalized['payload'], $idempotencyKey, function(string $key, string $payload) use ($enrolmentId, $newTeacherId, $normalized, $actor): array {
             $enrolment = $this->repository->enrolment($enrolmentId, true);
             if (!TeacherAssignmentAssessment::applicableEnrolment($enrolment)) throw new \InvalidArgumentException('enrolment_not_applicable');
-            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, 'replace', $enrolmentId);
+            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, 'replace', $enrolmentId, $newTeacherId, $normalized['payload']);
             $hint = $this->repository->currentForEnrolment($enrolmentId, false);
             $teacherIds = array($newTeacherId);
             if ($hint) $teacherIds[] = (int) $hint->teacher_id;
@@ -69,7 +70,10 @@ final class TeacherAssignmentService {
             if (!TeacherAssignmentAssessment::validHistory($this->repository, $enrolmentId, $assignments)) throw new \InvalidArgumentException('data_integrity_conflict');
             $current = $this->repository->currentForEnrolment($enrolmentId, true);
             if (!$current) throw new \InvalidArgumentException('assignment_missing');
-            if ((int) $current->teacher_id === $newTeacherId) return $this->existing($current, 'replace');
+            if ((int) $current->teacher_id === $newTeacherId) {
+                if ($this->completeResult('replace', $enrolmentId, $newTeacherId, $normalized['payload'], $current, false)) return $this->existing($current, 'replace');
+                throw new \InvalidArgumentException('assignment_changed');
+            }
             if ((int) $current->id !== $normalized['expected_assignment_id']) throw new \InvalidArgumentException('assignment_changed');
             if (!TeacherAssignmentAssessment::currentTeacher($teachers[$newTeacherId] ?? null)) throw new \InvalidArgumentException('teacher_not_current');
             $this->authorizeReplacementEvidence($normalized['route'], $newTeacherId);
@@ -77,18 +81,22 @@ final class TeacherAssignmentService {
             $now = gmdate('Y-m-d H:i:s');
             $eventSequence = count($this->repository->events((int) $current->id)) + 1;
             $this->repository->terminate($current, 'replaced', $now, $actor);
+            do_action('dzn_phase_2a2j_after_predecessor_mutation');
             $this->repository->insertEvent($this->event(
                 (int) $current->id, $eventSequence, 'replaced', 'assigned', 'replaced', null,
                 $normalized['route'], $normalized['basis'], $normalized['channel'], $normalized['digest'], $normalized['evidence_at'],
                 null, null, null, $now, $actor
             ));
+            do_action('dzn_phase_2a2j_after_predecessor_lifecycle_event_insert');
             do_action('dzn_phase_2a2j_after_predecessor_terminated');
             $assignmentId = $this->createAssignment($enrolmentId, $newTeacherId, count($assignments) + 1, (int) $current->id, 'replacement_agreement', null, $now, $actor);
+            do_action('dzn_phase_2a2j_after_successor_assignment_insert');
             $this->repository->insertEvent($this->event(
                 $assignmentId, 1, 'replacement_assigned', null, 'assigned', (int) $current->id,
                 $normalized['route'], $normalized['basis'], $normalized['channel'], $normalized['digest'], $normalized['evidence_at'],
                 null, null, null, $now, $actor
             ));
+            do_action('dzn_phase_2a2j_after_successor_lifecycle_event_insert');
             do_action('dzn_phase_2a2j_after_replacement_insert');
             $this->recordCommand($key, $payload, 'replace', $enrolmentId, $newTeacherId, $assignmentId, $now, $actor);
             return $this->created($assignmentId, 'replace', (int) $current->id);
@@ -110,7 +118,7 @@ final class TeacherAssignmentService {
         return $this->execute($operation, $enrolmentId, null, $normalized['payload'], $idempotencyKey, function(string $key, string $payload) use ($operation, $state, $enrolmentId, $normalized, $actor): array {
             $enrolment = $this->repository->enrolment($enrolmentId, true);
             if (!$enrolment || $enrolment->record_model !== 'canonical_student_course_v1') throw new \InvalidArgumentException('canonical_enrolment_required');
-            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, $operation, $enrolmentId);
+            if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, $operation, $enrolmentId, null, $normalized['payload']);
             $hint = $this->repository->currentForEnrolment($enrolmentId, false);
             if ($hint) $this->repository->lockTeachers(array((int) $hint->teacher_id));
             $assignments = $this->repository->assignmentsForEnrolment($enrolmentId, true);
@@ -119,13 +127,14 @@ final class TeacherAssignmentService {
             $current = $this->repository->currentForEnrolment($enrolmentId, true);
             if (!$current) {
                 $latest = $assignments ? end($assignments) : null;
-                if ($latest && $latest->state === $state) return $this->existing($latest, $operation);
+                if ($latest && $this->completeResult($operation, $enrolmentId, null, $normalized['payload'], $latest, false)) return $this->existing($latest, $operation);
                 throw new \InvalidArgumentException('assignment_missing');
             }
             if ((int) $current->id !== $normalized['expected_assignment_id']) throw new \InvalidArgumentException('assignment_changed');
             $now = gmdate('Y-m-d H:i:s');
             $sequence = count($this->repository->events((int) $current->id)) + 1;
             $this->repository->terminate($current, $state, $now, $actor);
+            do_action('dzn_phase_2a2j_after_terminal_mutation', $operation);
             $this->repository->insertEvent($this->event(
                 (int) $current->id, $sequence, $state, 'assigned', $state, null,
                 'authorised_staff', 'authorised_staff_decision', $normalized['channel'], $normalized['digest'], $normalized['evidence_at'],
@@ -141,11 +150,11 @@ final class TeacherAssignmentService {
         if ($enrolmentId < 1) throw new \InvalidArgumentException('Enrolment identity required');
         $key = TeacherAssignmentIdempotency::keyDigest($rawKey);
         $payload = TeacherAssignmentIdempotency::payloadDigest($operation, $enrolmentId, $teacherId, $payloadFacts);
-        if ($command = $this->repository->commandForDigest($key)) return $this->replay($command, $payload, $operation, $enrolmentId);
+        if ($command = $this->repository->commandForDigest($key)) return $this->replay($command, $payload, $operation, $enrolmentId, $teacherId, $payloadFacts);
         $this->repository->begin();
         try {
             if ($command = $this->repository->commandForDigest($key)) {
-                $result = $this->replay($command, $payload, $operation, $enrolmentId);
+                $result = $this->replay($command, $payload, $operation, $enrolmentId, $teacherId, $payloadFacts);
                 $this->repository->commit();
                 return $result;
             }
@@ -154,10 +163,18 @@ final class TeacherAssignmentService {
             return $result;
         } catch (\Throwable $e) {
             $this->repository->rollback();
-            if ($this->repository->isDuplicate($e)) {
-                if ($winner = $this->repository->commandForDigest($key)) return $this->replay($winner, $payload, $operation, $enrolmentId);
-                $current = $this->repository->currentForEnrolment($enrolmentId);
-                if ($current && ($teacherId === null || (int) $current->teacher_id === $teacherId)) return $this->existing($current, $operation);
+            $constraint = $this->repository->duplicateConstraint($e);
+            if ($constraint === null) throw $e;
+            if ($winner = $this->repository->commandForDigest($key)) {
+                return $this->replay($winner, $payload, $operation, $enrolmentId, $teacherId, $payloadFacts);
+            }
+            if ($operation === 'initial' && in_array($constraint, array('enrolment_sequence', 'enrolment_applicable', 'source_arrangement'), true)) {
+                $assignment = $this->repository->currentForEnrolment($enrolmentId);
+                if ($assignment && $this->completeResult($operation, $enrolmentId, $teacherId, $payloadFacts, $assignment, false)) return $this->existing($assignment, $operation);
+            }
+            if ($operation === 'replace' && in_array($constraint, array('enrolment_sequence', 'enrolment_applicable', 'predecessor_assignment_id'), true)) {
+                $assignment = $this->repository->currentForEnrolment($enrolmentId);
+                if ($assignment && $this->completeResult($operation, $enrolmentId, $teacherId, $payloadFacts, $assignment, false)) return $this->existing($assignment, $operation);
             }
             throw $e;
         }
@@ -198,17 +215,69 @@ final class TeacherAssignmentService {
         do_action('dzn_phase_2a2j_after_command_insert', $operation);
     }
 
-    private function replay(object $command, string $payload, string $operation, int $enrolmentId): array {
+    private function replay(object $command, string $payload, string $operation, int $enrolmentId, ?int $teacherId, array $payloadFacts): array {
         if (!hash_equals((string) $command->command_payload_digest, $payload)) throw new IdempotencyConflictException('Idempotency conflict');
         if ($command->command_domain !== 'teacher_assignment_v1' || $command->operation !== $operation || (int) $command->enrolment_id !== $enrolmentId) {
             throw new \RuntimeException('Contaminated Teacher Assignment result');
         }
         $assignment = $this->repository->assignment((int) $command->result_assignment_id);
         $history = $assignment ? $this->repository->assignmentsForEnrolment($enrolmentId, false) : array();
-        if (!$assignment || (int) $assignment->enrolment_id !== $enrolmentId || (int) $assignment->teacher_id !== (int) $command->teacher_id || !TeacherAssignmentAssessment::validHistory($this->repository, $enrolmentId, $history)) {
+        if (!$assignment || (int) $assignment->enrolment_id !== $enrolmentId || (int) $assignment->teacher_id !== (int) $command->teacher_id || ($teacherId !== null && (int) $command->teacher_id !== $teacherId) || !TeacherAssignmentAssessment::validHistory($this->repository, $enrolmentId, $history) || !$this->completeResult($operation, $enrolmentId, $teacherId, $payloadFacts, $assignment, true)) {
             throw new \RuntimeException('Contaminated Teacher Assignment result');
         }
         return array('assignment_id' => (int) $assignment->id, 'operation' => $operation, 'created' => false, 'idempotent' => true, 'already_applied' => false);
+    }
+
+    /** Prove the whole requested authority; never infer success from a duplicate error. */
+    private function completeResult(string $operation, int $enrolmentId, ?int $teacherId, array $facts, object $assignment, bool $replay): bool {
+        $history = $this->repository->assignmentsForEnrolment($enrolmentId, false);
+        if (!TeacherAssignmentAssessment::validHistory($this->repository, $enrolmentId, $history)) return false;
+        if ((int) $assignment->enrolment_id !== $enrolmentId) return false;
+        $events = $this->repository->events((int) $assignment->id);
+        if ($operation === 'initial') {
+            $source = $this->repository->initialSource($enrolmentId, false);
+            return $source && TeacherAssignmentAssessment::validInitialSource($source)
+                && (int) $assignment->assignment_sequence === 1
+                && $assignment->assignment_origin === 'initial_final_arrangement'
+                && (int) $assignment->teacher_id === (int) $source['arrangement']->teacher_id
+                && (int) $assignment->source_accepted_service_arrangement_id === (int) $source['arrangement']->id
+                && ($replay || ($assignment->state === 'assigned' && (int) $assignment->applicable_slot === 1));
+        }
+        if ($operation === 'replace') {
+            $origin = $events[0] ?? null;
+            return $teacherId !== null
+                && (int) $assignment->teacher_id === $teacherId
+                && $assignment->assignment_origin === 'replacement_agreement'
+                && (int) $assignment->predecessor_assignment_id === (int) ($facts['expected_assignment_id'] ?? 0)
+                && (int) $assignment->assignment_sequence > 1
+                && $origin
+                && $this->matchingEvidence($origin, $facts, true)
+                && ($replay || ($assignment->state === 'assigned' && (int) $assignment->applicable_slot === 1));
+        }
+        if (in_array($operation, array('end', 'cancel'), true)) {
+            $terminal = $events ? end($events) : null;
+            $state = $operation === 'end' ? 'ended' : 'cancelled';
+            return (int) $assignment->id === (int) ($facts['expected_assignment_id'] ?? 0)
+                && $assignment->state === $state
+                && $terminal
+                && $terminal->event_kind === $state
+                && $terminal->to_state === $state
+                && $this->matchingEvidence($terminal, $facts, false);
+        }
+        return false;
+    }
+
+    private function matchingEvidence(object $event, array $facts, bool $replacement): bool {
+        if ((string) $event->evidence_reference_digest !== (string) ($facts['evidence_reference_digest'] ?? '')
+            || (string) $event->evidence_at !== (string) ($facts['evidence_at'] ?? '')
+            || (string) $event->evidence_channel !== (string) ($facts['channel'] ?? '')) return false;
+        if ($replacement) {
+            return (string) $event->evidence_route === (string) ($facts['route'] ?? '')
+                && (string) $event->evidence_basis === (string) ($facts['basis'] ?? '');
+        }
+        return $event->evidence_route === 'authorised_staff'
+            && $event->evidence_basis === 'authorised_staff_decision'
+            && (string) $event->reason_code === (string) ($facts['reason_code'] ?? '');
     }
 
     private function normalizeReplacementAgreement(int $teacherId, array $agreement): array {

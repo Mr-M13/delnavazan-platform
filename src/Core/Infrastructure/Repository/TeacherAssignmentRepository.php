@@ -23,13 +23,14 @@ final class TeacherAssignmentRepository {
     public function enrolment(int $id, bool $lock = false): ?object { return $this->row('enrolments', $id, $lock); }
     public function teacher(int $id, bool $lock = false): ?object { return $this->row('teachers', $id, $lock); }
 
-    /** Enrolment first, then Teacher identities in ascending id order. */
+    /** Enrolment first, then shared Teacher locks in ascending id order. */
     public function lockTeachers(array $ids): array {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn(int $id): bool => $id > 0)));
         sort($ids, SORT_NUMERIC);
         $rows = array();
         foreach ($ids as $id) {
-            $row = $this->teacher($id, true);
+            global $wpdb;
+            $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->prefix}teachers WHERE id=%d LOCK IN SHARE MODE", $id));
             if ($row) $rows[$id] = $row;
         }
         return $rows;
@@ -113,9 +114,17 @@ final class TeacherAssignmentRepository {
         if ($changed !== 1) throw new \RuntimeException('Teacher Assignment changed concurrently');
     }
 
-    public function isDuplicate(\Throwable $e): bool {
-        global $wpdb;
-        return str_contains(strtolower($e->getMessage() . ' ' . $wpdb->last_error), 'duplicate');
+    /** Return only an explicitly recognised unique index from this aggregate. */
+    public function duplicateConstraint(\Throwable $e): ?string {
+        if (!preg_match("/Duplicate entry .* for key ['`](?:[^'`.]+\\.)?([^'`]+)['`]/i", $e->getMessage(), $matches)) return null;
+        $constraint = strtolower((string) $matches[1]);
+        return in_array($constraint, array(
+            'command_key_digest',
+            'enrolment_sequence',
+            'enrolment_applicable',
+            'predecessor_assignment_id',
+            'source_arrangement',
+        ), true) ? $constraint : null;
     }
 
     private function row(string $table, int $id, bool $lock): ?object {

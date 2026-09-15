@@ -7,7 +7,7 @@ $w1 = $connection('w1'); $w2 = $connection('w2'); if ($w1 === $w2) throw new Run
 $threads = $wpdb->get_results($wpdb->prepare("SELECT THREAD_ID,PROCESSLIST_ID FROM performance_schema.threads WHERE TYPE='FOREGROUND' AND PROCESSLIST_ID IN (%d,%d)", $w1, $w2));
 $mapped = array(); foreach ($threads ?: array() as $thread) $mapped[(int) $thread->PROCESSLIST_ID] = (int) $thread->THREAD_ID;
 if (empty($mapped[$w1]) || empty($mapped[$w2])) throw new RuntimeException('Performance Schema thread mapping unavailable');
-$database = (string) $wpdb->get_var('SELECT DATABASE()'); $table = $wpdb->prefix . 'dzn_enrolments';
+$database = (string) $wpdb->get_var('SELECT DATABASE()'); $state = get_option('dzn_phase_2a2j_race_state'); $table = $wpdb->prefix . (in_array($state['mode'] ?? '', array('e_initial_archive','e_replace_archive','e_archive_initial','e_archive_replace'), true) ? 'dzn_teachers' : 'dzn_enrolments');
 $sql = "SELECT l.OBJECT_SCHEMA,l.OBJECT_NAME,l.INDEX_NAME,l.LOCK_TYPE,l.LOCK_MODE,l.LOCK_DATA FROM performance_schema.data_lock_waits w INNER JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID WHERE w.REQUESTING_THREAD_ID=%d AND w.BLOCKING_THREAD_ID=%d AND l.OBJECT_SCHEMA=%s AND l.OBJECT_NAME=%s AND l.INDEX_NAME='PRIMARY' LIMIT 1";
 for ($attempt = 0; $attempt < 600; $attempt++) {
     $wait = $wpdb->get_row($wpdb->prepare($sql, $mapped[$w2], $mapped[$w1], $database, $table));

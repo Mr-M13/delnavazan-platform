@@ -10,6 +10,8 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 
 Teacher Assignment is separate from canonical Enrolment identity and lifecycle. `enrolments.teacher_id` remains Accepted Service Arrangement history; current Teacher authority comes only from the privacy-minimised Assignment read seam. Zero Assignment is valid, migration performs no backfill, and Assignment creation is confined to applicable canonical Enrolments. Initial authority follows exact final-arrangement Teacher provenance; replacement authority requires new Assignment-specific authenticated-Teacher evidence or authorised staff attestation. Assignment lifecycle cannot create or mutate Terms, Lessons, schedules, capacity, payments, notifications, calendars, Amelia, Hamnavaz, or CRM state.
 
+Teacher Assignment commands serialize on the canonical Enrolment, use ascending shared Teacher locks to coordinate with exclusive archival/offboarding, and then lock concrete Assignment rows. Duplicate arbitration recognizes only named aggregate indexes and returns convergence only after complete operation-specific authority, lineage, lifecycle, evidence, and command validation; otherwise it fails closed.
+
 ## 2. Architectural goal
 
 Delnavazan needs one durable business model that can support the academy without

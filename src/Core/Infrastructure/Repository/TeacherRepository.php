@@ -42,6 +42,7 @@ final class TeacherRepository extends BaseRepository {
         try {
             $teacher = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table} WHERE id=%d FOR UPDATE", $id));
             if (!$teacher || $teacher->archived_at !== null || $teacher->status === 'archived') throw new \InvalidArgumentException('Record is not archivable');
+            do_action('dzn_phase_2a2j_teacher_archive_lock_held', $id);
             if ($this->hasApplicableTeacherAssignments($id)) throw new \InvalidArgumentException('Archive conflict: applicable Teacher Assignment exists');
             parent::archive($id, $now, $actor);
             $this->commit();

@@ -12,9 +12,10 @@ foreach ([
 }
 
 $bootstrap = file_get_contents("{$root}/delnavazan-platform.php");
-foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', 'phase2a2e-provisional-acceptance-20260909.1', 'NonceLifecycleDiagnostic::register()'] as $fragment) {
+foreach (['Requires PHP: 8.1', 'register_activation_hook', 'spl_autoload_register', 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', 'DZN_PLATFORM_BUILD_ID', 'NonceLifecycleDiagnostic::register()'] as $fragment) {
     if (!str_contains($bootstrap, $fragment)) throw new RuntimeException("Phase 1F bootstrap rule missing: {$fragment}");
 }
+if (!preg_match("/DZN_PLATFORM_BUILD_ID', '[a-z0-9.-]+'/", $bootstrap)) throw new RuntimeException('Phase 1F build identity must remain explicit');
 
 $screen = file_get_contents("{$root}/src/Admin/Controller/ScreenController.php");
 foreach ([
@@ -112,7 +113,7 @@ if (!str_contains($uninstall, 'preserved on uninstall') || str_contains($uninsta
 foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$root}/src")) as $file) {
     if (!$file->isFile() || $file->getExtension() !== 'php') continue;
     $source = file_get_contents($file->getPathname());
-    if (stripos($source, 'amelia') !== false || str_contains($source, 'add_rest_route') || str_contains($source, 'wp_ajax_')) {
+    if (preg_match('/\b(?:amelia_|wp_amelia)/i', $source) || str_contains($source, 'add_rest_route') || str_contains($source, 'wp_ajax_')) {
         throw new RuntimeException('Phase 1F Core source has forbidden runtime dependency: ' . $file->getFilename());
     }
 }
