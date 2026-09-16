@@ -8,20 +8,19 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Pre-Phase 2A.2-K main | `cf222d20e4ab0d08c992e7ec38bcece8b7625d9e` |
-| Platform merge main (Phase 2A.2-K) | `25e213c69d7f299c9ed5330eed7cd9ba4051c022` |
-| Phase 2A.2-K post-closeout main | `fab24b105b6a6ce7e382e399795b7af8b6eab349` |
+| Pre-Phase 2A.2-L main | `788bf0989f4365607ba41322471e50fca75a5e81` |
+| Phase 2A.2-L approved candidate | `26beab6147df545fed70949f06b83d83042184cd`; tree `b283c319b9a3af3267cf43ad9591e30d93085986` |
+| Phase 2A.2-L implementation merge | `36e1d6b754079efcf6fdff02ed2a029099071455`; tree `b283c319b9a3af3267cf43ad9591e30d93085986` |
 | Platform | 0.1.0 |
-| Schema | 17 |
-| Migrations | 001–017; latest `017_canonical_term_foundation` |
-| Build identity | `phase2a2k-canonical-term-foundation-20260916.1` |
-| Latest completed slice | Phase 2A.2-K — Canonical Term Foundation |
-| Phase 2A.2-K approved candidate | `a6491ccc1cf624be205d1ea022421a5f7903eb2b`; tree `9a59062c2a6aa10c95e88e4d24909c6e770dd27d` |
-| Merge state | Independent review PASS; merged as `25e213c69d7f299c9ed5330eed7cd9ba4051c022` |
-| Continuity-normalisation baseline | `fab24b105b6a6ce7e382e399795b7af8b6eab349`; the resulting documentation commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None; Phase 2A.2-K is merged and closed |
-| Next Platform action | Phase L requires separate authorisation; no canonical Term mutation authority is implied by Phase K |
-| Current 2A.2-K state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
+| Schema | 18 |
+| Migrations | 001–018; latest `018_canonical_term_authority` |
+| Build identity | `phase2a2l-canonical-term-authority-20260916.1` |
+| Latest completed slice | Phase 2A.2-L — Canonical Term Creation & Lifecycle Authority |
+| Merge state | Independent review PASS; exact approved tree merged as `36e1d6b754079efcf6fdff02ed2a029099071455` |
+| Closeout baseline | `36e1d6b754079efcf6fdff02ed2a029099071455`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
+| Active Platform candidate | None; Phase 2A.2-L is merged and closed |
+| Next Platform action | Requires separate authorisation; no Phase M implementation has started |
+| Current 2A.2-L state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:
 
@@ -36,8 +35,17 @@ The completed coordination chain is:
 9. **2A.2-I** — Enrolment Conversion Authority: informational readiness, explicit capability-protected atomic/idempotent conversion, authoritative source revalidation and canonical lifecycle-origin evidence.
 10. **2A.2-J** — Teacher Assignment Foundation: separate current-Teacher authority, retained initial provenance, assignment-specific replacement evidence, atomic lifecycle and protected reads/offboarding.
 11. **2A.2-K** — Canonical Term Foundation: legacy-compatible Enrolment + sequence identity, canonical lifecycle/applicability storage, append-only history and protected reads without creation or lifecycle mutation authority.
+12. **2A.2-L** — Canonical Term Creation & Lifecycle Authority: explicit capability-protected creation, bounded transitions, durable idempotency and Enrolment-first concurrency control.
 
-Main is authoritative at Schema 17 / Phase K. Canonical Term foundation creates no Term or Lesson mutation authority and establishes no Teacher, scheduling, capacity, payment, notification, communication, calendar or Amelia authority.
+Main is authoritative at Schema 18 / Phase L. Canonical Term creation and bounded lifecycle mutation are authoritative; no Lesson, Teacher, scheduling, capacity, payment, notification, communication, calendar or Amelia authority is introduced.
+
+## Completed Canonical Term Authority — Phase 2A.2-L
+
+From authoritative pre-L main `788bf0989f4365607ba41322471e50fca75a5e81`, independently approved candidate `26beab6147df545fed70949f06b83d83042184cd`, tree `b283c319b9a3af3267cf43ad9591e30d93085986`, was merged without squash or rebase as `36e1d6b754079efcf6fdff02ed2a029099071455`. The merge tree exactly equals the approved candidate tree. Schema 18 / `018_canonical_term_authority` and build `phase2a2l-canonical-term-authority-20260916.1` are authoritative.
+
+Phase L adds administrator-only canonical Term creation plus `authorised → current`, `authorised → cancelled`, `current → closed`, and `current → cancelled`. Durable digest-only command evidence, exact replay/conflict handling, pre-lock aggregate-position binding and Enrolment-first process concurrency preserve stale-command safety. It adds no Lesson consumption, Teacher authority, payment, scheduling, external integration or cross-aggregate mutation.
+
+Phase 2A.2-L is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**. No deployment occurred.
 
 ## Completed Canonical Term Foundation — Phase 2A.2-K
 

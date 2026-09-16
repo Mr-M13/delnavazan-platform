@@ -8,12 +8,12 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Post-K closeout baseline | `fab24b105b6a6ce7e382e399795b7af8b6eab349` |
-| Platform / schema | 0.1.0 / 17 |
-| Candidate migrations | 001–018; latest `018_canonical_term_authority` (Phase L, pending independent review) |
-| Completed coordination work | 2A.2-A through 2A.2-K |
-| Latest merged slice | Canonical Term Foundation |
-| Next planned boundary | 2A.2-L Canonical Term Creation & Lifecycle Authority; not implemented |
+| Phase-L implementation merge | `36e1d6b754079efcf6fdff02ed2a029099071455` |
+| Platform / schema | 0.1.0 / 18 |
+| Migrations | 001–018; latest `018_canonical_term_authority` |
+| Completed coordination work | 2A.2-A through 2A.2-L |
+| Latest merged slice | Canonical Term Creation & Lifecycle Authority |
+| Next planned boundary | Requires separate authorisation; Phase M has not started |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

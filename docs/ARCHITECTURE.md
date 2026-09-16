@@ -4,7 +4,7 @@
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-K / Schema 17. Phases 2A.2-A through K are complete, independently reviewed where consequential, merged and closed. The current branch contains an unmerged Phase L canonical Term creation/lifecycle candidate; later Lesson authority is not implemented. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-L / Schema 18. Phases 2A.2-A through L are complete, independently reviewed where consequential, merged and closed. Later Lesson authority is not implemented. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
 ### Phase 2A.2-J architectural seam
 
