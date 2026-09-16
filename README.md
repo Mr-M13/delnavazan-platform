@@ -9,11 +9,11 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 | Item | State |
 |---|---|
 | Phase-L implementation merge | `36e1d6b754079efcf6fdff02ed2a029099071455` |
-| Platform / schema | 0.1.0 / 18 |
-| Migrations | 001–018; latest `018_canonical_term_authority` |
-| Completed coordination work | 2A.2-A through 2A.2-L |
-| Latest merged slice | Canonical Term Creation & Lifecycle Authority |
-| Next planned boundary | Requires separate authorisation; Phase M has not started |
+| Platform / schema | 0.1.0 / 19 |
+| Migrations | 001–019; latest `019_canonical_enrolment_lifecycle_authority` |
+| Current candidate | Phase 2A.2-M0 canonical Enrolment lifecycle authority |
+| Authoritative merged slice | Canonical Term Creation & Lifecycle Authority |
+| Next boundary | Canonical Lesson authority remains non-authoritative |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
@@ -30,7 +30,7 @@ Booking Request → Coordination Case → Candidate Teacher → Availability Ass
 → canonical Enrolment conversion → Teacher Assignment → canonical Term foundation
 ```
 
-Proposal is not acceptance. Acceptance is not conversion authority. Conversion creates one Student + Course Enrolment and does not create Teacher Assignment. Current Teacher authority belongs to the separate Assignment aggregate. Phase K adds canonical Term storage and protected reads only; Phase L creation/lifecycle authority and later Lesson authority do not yet exist.
+Proposal is not acceptance. Acceptance is not conversion authority. Conversion creates one Student + Course Enrolment and does not create Teacher Assignment. Current Teacher authority belongs to the separate Assignment aggregate. Phase L owns canonical Term creation/lifecycle authority. M0 makes the Enrolment lifecycle graph operational; canonical Lesson authority remains a later boundary.
 
 ## Repository rule
 

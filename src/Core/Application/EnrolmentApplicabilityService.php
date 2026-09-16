@@ -52,7 +52,7 @@ final class EnrolmentApplicabilityService {
                 $legacy = true;
                 continue;
             }
-            if ($row->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($row, $arrangements, $enrolments)) {
+            if ($row->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($row, $arrangements, $enrolments) || !CanonicalEnrolmentLifecycleValidator::valid($row, $enrolments->lifecycleHistory((int)$row->id))) {
                 return self::DATA_INTEGRITY_CONFLICT;
             }
             $canonical = true;
@@ -63,7 +63,7 @@ final class EnrolmentApplicabilityService {
         if ($applicable > 1) return self::DATA_INTEGRITY_CONFLICT;
         if ($sourceRows) {
             $linked = $sourceRows[0];
-            if ($linked->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($linked, $arrangements, $enrolments)) {
+            if ($linked->record_model !== 'canonical_student_course_v1' || !$this->validCanonical($linked, $arrangements, $enrolments) || !CanonicalEnrolmentLifecycleValidator::valid($linked, $enrolments->lifecycleHistory((int)$linked->id))) {
                 return self::DATA_INTEGRITY_CONFLICT;
             }
             return self::ALREADY_LINKED_SOURCE;

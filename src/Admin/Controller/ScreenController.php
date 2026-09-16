@@ -4,6 +4,7 @@ namespace Delnavazan\Platform\Admin\Controller;
 use Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic;
 use Delnavazan\Platform\Core\Application\{
     ArchiveService,
+    CanonicalEnrolmentLifecycleService,
     CanonicalTermAuthorityService,
     CatalogueService,
     CoreReadService,
@@ -100,6 +101,10 @@ final class ScreenController {
                 'create_course' => (new CatalogueService())->course(self::createPayload('course', $post)),
                 'create_term' => (new TermService())->create(self::createPayload('term', $post)),
                 'create_canonical_term' => self::canonicalTermCreate($post),
+                'activate_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'activate'),
+                'pause_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'pause'),
+                'resume_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'resume'),
+                'close_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'close'),
                 'activate_canonical_term' => self::canonicalTermTransition($post, 'activate'),
                 'close_canonical_term' => self::canonicalTermTransition($post, 'close'),
                 'cancel_canonical_term' => self::canonicalTermTransition($post, 'cancel'),
@@ -171,6 +176,7 @@ final class ScreenController {
             echo '<h2>Canonical lifecycle history</h2>';
             $history = (new CoreReadService())->enrolmentLifecycle($id);
             if ($history) self::objectTable($history, null); else echo '<p>No canonical lifecycle history.</p>';
+            if (($record->record_model ?? '') === 'canonical_student_course_v1' && current_user_can('dzn_manage_canonical_enrolment_lifecycle')) self::canonicalEnrolmentLifecycleForm($record);
         }
         if ($entity === 'term' && ($record->record_model ?? '') === 'canonical_enrolment_term_v1' && current_user_can('dzn_manage_canonical_terms')) self::canonicalTermLifecycleForm($record);
         if ($entity === 'lesson') self::lessonSchedules($id);
@@ -190,6 +196,24 @@ final class ScreenController {
         $expected = absint($post['expected_latest_term_id'] ?? 0);
         $result = (new CanonicalTermAuthorityService())->create(absint($post['enrolment_id'] ?? 0), $expected ?: null, $expected ? sanitize_key($post['expected_latest_state'] ?? '') : null, self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
         return (int)$result['term_id'];
+    }
+
+    private static function canonicalEnrolmentTransition(array $post, string $operation): int {
+        if (!current_user_can('dzn_manage_canonical_enrolment_lifecycle')) throw new \RuntimeException('Unauthorized');
+        $service = new CanonicalEnrolmentLifecycleService();
+        $result = $service->{$operation}(absint($post['enrolment_id'] ?? 0), sanitize_key($post['expected_state'] ?? ''), self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
+        return (int)$result['enrolment_id'];
+    }
+
+    private static function canonicalEnrolmentLifecycleForm(object $enrolment): void {
+        $operations = match ((string)$enrolment->lifecycle_state) {
+            'authorised' => array('activate','close'),
+            'current' => array('pause','close'),
+            'paused' => array('resume','close'),
+            default => array(),
+        };
+        echo '<h2>Canonical Enrolment lifecycle</h2>';
+        foreach ($operations as $operation) { self::formStart($operation.'_canonical_enrolment'); echo '<input type="hidden" name="enrolment_id" value="'.esc_attr((string)$enrolment->id).'"><input type="hidden" name="expected_state" value="'.esc_attr((string)$enrolment->lifecycle_state).'">'; self::canonicalEvidenceFields(); submit_button(ucfirst($operation).' canonical Enrolment'); echo '</form>'; }
     }
 
     private static function canonicalTermTransition(array $post, string $operation): int {

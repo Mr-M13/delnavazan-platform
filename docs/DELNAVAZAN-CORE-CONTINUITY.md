@@ -318,3 +318,7 @@ Never treat this document as authority to deploy, merge, access production, chan
 
 ### Phase 2A.2-L candidate
 Phase L is an unmerged candidate adding explicit canonical Term creation and bounded lifecycle authority with durable idempotency. Canonical Enrolment remains Student + Course; Teacher Assignment remains the sole current-Teacher authority. Term closure/cancellation does not mutate Enrolment, and no Lesson, payment, scheduling or integration authority follows from a Term command.
+
+## Phase 2A.2-M0 implementation candidate
+
+The unmerged M0 candidate advances its package identity to Schema 19 / `019_canonical_enrolment_lifecycle_authority` and build `phase2a2m0-enrolment-lifecycle-authority-20260917.1`. It makes the explicit Enrolment lifecycle graph operational and leaves canonical Lesson authority non-authoritative. The frozen pre-M0 Lesson candidate remains historical evidence and must be resumed separately as Schema 20 after M0 review/merge.
