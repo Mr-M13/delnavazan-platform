@@ -7,7 +7,7 @@ are binding inputs to the Platform Phase 1 implementation brief. They do not
 authorise implementation, production data access, an Amelia cutover, or
 Hamnavaz Phase 4.
 
-> **Current-state override:** The initial Phase-1 academy model and lifecycle vocabulary below remain historical product provenance. Current canonical Enrolment identity is Student + Course; canonical `enrolments.teacher_id` is retained Accepted Service Arrangement context, not current Teacher authority. Current Teacher authority belongs to the separate Teacher Assignment aggregate. Schema 17 adds a Teacher-neutral canonical Term foundation with lifecycle `authorised`, `current`, `closed`, or `cancelled`; it does not add Term creation/lifecycle commands, Lesson consumption, or payment authority.
+> **Current-state override:** The initial Phase-1 academy model and lifecycle vocabulary below remain historical product provenance. Current canonical Enrolment identity is Student + Course; canonical `enrolments.teacher_id` is retained Accepted Service Arrangement context, not current Teacher authority. Current Teacher authority belongs to the separate Teacher Assignment aggregate. Schema 17 adds a Teacher-neutral canonical Term foundation with lifecycle `authorised`, `current`, `closed`, or `cancelled`; the unmerged Schema 18 Phase-L candidate adds bounded Term creation/lifecycle commands but no Lesson consumption or payment authority.
 
 ## 2. Identity
 

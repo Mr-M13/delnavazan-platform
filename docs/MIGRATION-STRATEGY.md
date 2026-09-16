@@ -30,7 +30,7 @@ observable, and module-by-module.
 
 The capability marker advances to `2a2k` only to retain and repair the existing administrator `dzn_manage_terms` read/legacy-management capability. No canonical creation capability is added. Migration verification checks the default record model, exact indexes, InnoDB history, digest shape, absence of a Term Teacher field and absence of mutable history.
 
-This is a storage/read foundation only. It introduces no ordinary canonical Term writer, lifecycle command, command-idempotency table, Lesson/consumption authority, scheduling, payment, renewal, notification, calendar, Amelia, Hamnavaz or CRM authority. Schema 17 is authoritative after independent review and merge; Phase L remains unimplemented.
+This is a storage/read foundation only. It introduces no ordinary canonical Term writer, lifecycle command, command-idempotency table, Lesson/consumption authority, scheduling, payment, renewal, notification, calendar, Amelia, Hamnavaz or CRM authority. Schema 17 remains authoritative after independent review and merge; the current branch contains the unmerged Schema 18 Phase-L candidate described below.
 
 ## Schema 16 / migration 016
 
@@ -395,3 +395,6 @@ Migration `014_canonical_enrolment_foundation` additively classifies every exist
 # Schema 15
 
 Migration `015_enrolment_conversion_authority` additively creates the InnoDB `enrolment_identity_roots` and `enrolment_conversion_commands` tables. Verification requires every semantic column, absence of mutable `updated_at`, and exact uniqueness for Student + Course identity, command UID/digest, source provenance and resulting Enrolment before ledger completion. Repeated upgrade verifies the schema and repairs capability `dzn_convert_service_arrangements_to_enrolments` through marker `2a2i` without rewriting domain rows.
+
+### 018_canonical_term_authority
+Additive Schema 17→18 migration creating only `dzn_term_commands` and repairing the administrator `dzn_manage_canonical_terms` capability. It performs no Term backfill, lifecycle inference, legacy translation or downstream integration.

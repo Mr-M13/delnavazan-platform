@@ -10,7 +10,7 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 |---|---|
 | Post-K closeout baseline | `fab24b105b6a6ce7e382e399795b7af8b6eab349` |
 | Platform / schema | 0.1.0 / 17 |
-| Migrations | 001–017; latest `017_canonical_term_foundation` |
+| Candidate migrations | 001–018; latest `018_canonical_term_authority` (Phase L, pending independent review) |
 | Completed coordination work | 2A.2-A through 2A.2-K |
 | Latest merged slice | Canonical Term Foundation |
 | Next planned boundary | 2A.2-L Canonical Term Creation & Lifecycle Authority; not implemented |
