@@ -596,3 +596,7 @@ These records are authority evidence only. They do not create Enrolments, assign
 
 ### Schema 18 candidate: canonical Term commands
 `dzn_term_commands` is immutable command evidence for canonical Term create/activate/close/cancel operations. A unique HMAC key digest and canonical payload digest distinguish replay from conflict; result identity/state support fail-closed validation. Raw keys and evidence references are not stored. Existing Terms are not backfilled or translated.
+
+## Schema 19 candidate — canonical Enrolment lifecycle commands
+
+`enrolment_lifecycle_commands` is immutable digest-only evidence for one explicit `activate`, `pause`, `resume`, or `close` intent. It binds the Enrolment, expected/result states, and exact lifecycle result event. It has no raw key, raw evidence reference, mutable status, or `updated_at`. The Enrolment projection and existing append-only event schema are unchanged.

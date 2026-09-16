@@ -294,3 +294,7 @@ Schema 15 completed the separation of informational conversion readiness from th
 
 ## Phase 2A.2-L candidate boundary
 Canonical Term mutation is isolated in `CanonicalTermAuthorityService` and its dedicated repository. The aggregate locks its canonical Enrolment before ordered Term/history rows. Creation starts at `authorised`; only authorised→current/cancelled and current→closed/cancelled are valid. Durable commands contain digests, canonical identifiers and result facts, never raw keys or PII. This candidate does not coordinate Enrolment, Teacher Assignment, Lesson, payment or scheduling lifecycle.
+
+## Phase 2A.2-M0 canonical Enrolment lifecycle authority
+
+Schema 19 makes the canonical Enrolment graph operational: `authorised -> current`, `current -> paused`, `paused -> current`, and closure from every non-terminal state. Closed is terminal. Lifecycle commands serialize through the Student–Course identity root and Enrolment row, retain applicability through pause, store immutable digest-only command evidence, and block closure while applicable canonical Term or Teacher Assignment authority exists. Canonical Lesson authority remains later; its resumption must add the corresponding non-terminal Lesson closure guard.

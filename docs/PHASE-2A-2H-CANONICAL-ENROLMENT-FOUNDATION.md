@@ -11,7 +11,7 @@ Schema 14 / migration `014_canonical_enrolment_foundation` establishes storage a
 
 ## Lifecycle and lineage
 
-The reserved lifecycle is `authorised → current → paused → closed`. `dzn_enrolment_lifecycle_events` is append-only and deliberately has no update path. Reserved predecessor meanings are `successor`, `return_after_closure`, `correction`, and `distinct_concurrent_service`; none is an operational bypass code.
+The authoritative graph is `authorised -> current`, `current -> paused`, `paused -> current`, and `authorised/current/paused -> closed`; closed is terminal. `dzn_enrolment_lifecycle_events` is append-only and deliberately has no update path. Reserved predecessor meanings are `successor`, `return_after_closure`, `correction`, and `distinct_concurrent_service`; none is an operational bypass code.
 
 ## Applicability classifications
 

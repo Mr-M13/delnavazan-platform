@@ -329,3 +329,7 @@ Administrator uses an approved setup checklist
 An approved implementation must make these boundaries visible in namespaces,
 directories, interfaces, tests, database access ownership, and code review.
 Documentation alone is not sufficient evidence that a boundary is enforced.
+
+## Phase 2A.2-M0 candidate boundary
+
+Academy owns explicit canonical Enrolment lifecycle mutation. The authority neither derives state from payment/Teacher/schedule facts nor mutates Term or Teacher Assignment authority. Closure only validates and rejects stranded applicable subordinate authority. Canonical Lesson storage and authority remain outside M0.

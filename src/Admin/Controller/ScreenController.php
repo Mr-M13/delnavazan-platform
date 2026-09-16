@@ -4,6 +4,7 @@ namespace Delnavazan\Platform\Admin\Controller;
 use Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic;
 use Delnavazan\Platform\Core\Application\{
     ArchiveService,
+    CanonicalEnrolmentLifecycleService,
     CanonicalTermAuthorityService,
     CatalogueService,
     CoreReadService,
@@ -56,7 +57,13 @@ final class ScreenController {
         if (!isset(self::ENTITIES[$screen]) || !current_user_can(self::ENTITIES[$screen][1])) { self::forbidden(); return; }
         self::renderMessages(); $id = absint($_GET['id'] ?? 0);
         echo '<div class="wrap"><h1>Delnavazan ' . esc_html(self::ENTITIES[$screen][0]) . '</h1>';
-        if ($id) self::entityDetail($screen, $id); else {
+        if ($id) {
+            try { self::entityDetail($screen, $id); }
+            catch (\InvalidArgumentException $exception) {
+                if ($exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+                echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+            }
+        } else {
             if ($screen !== 'enrolment') self::entityCreateForm($screen);
             else echo '<p>Enrolments are read-only. Generic creation is disabled; canonical conversion authority is not part of this phase.</p>';
             self::entityList($screen);
@@ -100,6 +107,10 @@ final class ScreenController {
                 'create_course' => (new CatalogueService())->course(self::createPayload('course', $post)),
                 'create_term' => (new TermService())->create(self::createPayload('term', $post)),
                 'create_canonical_term' => self::canonicalTermCreate($post),
+                'activate_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'activate'),
+                'pause_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'pause'),
+                'resume_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'resume'),
+                'close_canonical_enrolment' => self::canonicalEnrolmentTransition($post, 'close'),
                 'activate_canonical_term' => self::canonicalTermTransition($post, 'activate'),
                 'close_canonical_term' => self::canonicalTermTransition($post, 'close'),
                 'cancel_canonical_term' => self::canonicalTermTransition($post, 'cancel'),
@@ -159,7 +170,15 @@ final class ScreenController {
         return $entity;
     }
 
-    private static function entityList(string $entity): void { echo '<h2>Recent records</h2>'; self::objectTable((new CoreReadService())->recent($entity), 'dzn-' . $entity); }
+    private static function entityList(string $entity): void {
+        try { $records = (new CoreReadService())->recent($entity); }
+        catch (\InvalidArgumentException $exception) {
+            if ($entity !== 'enrolment' || $exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+            echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+            return;
+        }
+        echo '<h2>Recent records</h2>'; self::objectTable($records, 'dzn-' . $entity);
+    }
 
     private static function entityDetail(string $entity, int $id): void {
         $record = (new CoreReadService())->find($entity, $id);
@@ -169,8 +188,14 @@ final class ScreenController {
         if ($entity !== 'enrolment' || ($record->record_model ?? 'legacy_phase1') === 'legacy_phase1') self::archiveActions($entity, $id, (string) $record->status);
         if ($entity === 'enrolment') {
             echo '<h2>Canonical lifecycle history</h2>';
-            $history = (new CoreReadService())->enrolmentLifecycle($id);
+            try { $history = (new CoreReadService())->enrolmentLifecycle($id); }
+            catch (\InvalidArgumentException $exception) {
+                if ($exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+                echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+                return;
+            }
             if ($history) self::objectTable($history, null); else echo '<p>No canonical lifecycle history.</p>';
+            if (($record->record_model ?? '') === 'canonical_student_course_v1' && current_user_can('dzn_manage_canonical_enrolment_lifecycle')) self::canonicalEnrolmentLifecycleForm($record);
         }
         if ($entity === 'term' && ($record->record_model ?? '') === 'canonical_enrolment_term_v1' && current_user_can('dzn_manage_canonical_terms')) self::canonicalTermLifecycleForm($record);
         if ($entity === 'lesson') self::lessonSchedules($id);
@@ -190,6 +215,24 @@ final class ScreenController {
         $expected = absint($post['expected_latest_term_id'] ?? 0);
         $result = (new CanonicalTermAuthorityService())->create(absint($post['enrolment_id'] ?? 0), $expected ?: null, $expected ? sanitize_key($post['expected_latest_state'] ?? '') : null, self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
         return (int)$result['term_id'];
+    }
+
+    private static function canonicalEnrolmentTransition(array $post, string $operation): int {
+        if (!current_user_can('dzn_manage_canonical_enrolment_lifecycle')) throw new \RuntimeException('Unauthorized');
+        $service = new CanonicalEnrolmentLifecycleService();
+        $result = $service->{$operation}(absint($post['enrolment_id'] ?? 0), sanitize_key($post['expected_state'] ?? ''), self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
+        return (int)$result['enrolment_id'];
+    }
+
+    private static function canonicalEnrolmentLifecycleForm(object $enrolment): void {
+        $operations = match ((string)$enrolment->lifecycle_state) {
+            'authorised' => array('activate','close'),
+            'current' => array('pause','close'),
+            'paused' => array('resume','close'),
+            default => array(),
+        };
+        echo '<h2>Canonical Enrolment lifecycle</h2>';
+        foreach ($operations as $operation) { self::formStart($operation.'_canonical_enrolment'); echo '<input type="hidden" name="enrolment_id" value="'.esc_attr((string)$enrolment->id).'"><input type="hidden" name="expected_state" value="'.esc_attr((string)$enrolment->lifecycle_state).'">'; self::canonicalEvidenceFields(); submit_button(ucfirst($operation).' canonical Enrolment'); echo '</form>'; }
     }
 
     private static function canonicalTermTransition(array $post, string $operation): int {

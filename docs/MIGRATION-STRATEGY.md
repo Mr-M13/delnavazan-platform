@@ -398,3 +398,7 @@ Migration `015_enrolment_conversion_authority` additively creates the InnoDB `en
 
 ### 018_canonical_term_authority
 Additive Schema 17→18 migration creating only `dzn_term_commands` and repairing the administrator `dzn_manage_canonical_terms` capability. It performs no Term backfill, lifecycle inference, legacy translation or downstream integration.
+
+### Schema 19 — canonical Enrolment lifecycle authority
+
+`019_canonical_enrolment_lifecycle_authority` additively creates immutable `enrolment_lifecycle_commands` and repairs the dedicated administrator capability. It does not alter or backfill Enrolments, infer lifecycle, rewrite conversion evidence, or add canonical Lesson storage. Existing lifecycle history is strengthened by the explicit legal transition graph.
