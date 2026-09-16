@@ -86,6 +86,9 @@ $canonicalEnrolment = dzn_2a2k_canonical_enrolment($studentCanonical, $course, 8
 $term = dzn_2a2k_term($canonicalEnrolment, 1, 'authorised', 1); dzn_2a2k_event($term, 1, null, 'authorised');
 $assessment = new TermApplicabilityAssessment(); $read = new CanonicalTermReadService();
 dzn_2a2k_assert($assessment->inspect($canonicalEnrolment)['classification'] === 'canonical_applicable', 'Applicable canonical Term classification failed');
+$zeroStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Zero Term Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
+$zeroEnrolment = dzn_2a2k_canonical_enrolment($zeroStudent, $course, 810006);
+dzn_2a2k_assert($assessment->inspect($zeroEnrolment)['classification'] === 'none', 'Zero-Term classification failed');
 $view = $read->forEnrolment($canonicalEnrolment);
 dzn_2a2k_assert($view['classification'] === 'canonical_applicable' && count($view['terms']) === 1 && count($view['terms'][0]) === 9 && !array_key_exists('payment_state', $view['terms'][0]) && !array_key_exists('teacher_id', $view['terms'][0]), 'Privacy-minimised canonical read failed');
 dzn_2a2k_assert(count($read->history($term)) === 1 && !array_key_exists('evidence_reference_digest', $read->history($term)[0]), 'Privacy-minimised history read failed');
@@ -99,7 +102,20 @@ dzn_2a2k_assert($wpdb->query("ALTER TABLE {$p}terms ADD UNIQUE KEY enrolment_app
 $terminalStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Terminal Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
 $terminalEnrolment = dzn_2a2k_canonical_enrolment($terminalStudent, $course, 810002);
 $terminal = dzn_2a2k_term($terminalEnrolment, 1, 'closed', null); dzn_2a2k_event($terminal, 1, null, 'authorised'); dzn_2a2k_event($terminal, 2, 'authorised', 'current'); dzn_2a2k_event($terminal, 3, 'current', 'closed');
+dzn_2a2k_assert($wpdb->update($p . 'enrolments', array('lifecycle_state' => 'closed', 'applicable_slot' => null), array('id' => $terminalEnrolment)) === 1, 'Closed terminal-history Enrolment fixture preparation failed');
 dzn_2a2k_assert($assessment->inspect($terminalEnrolment)['classification'] === 'canonical_terminal_history', 'Terminal canonical history classification failed');
+
+$closedAuthorisedStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Closed Authorised Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
+$closedAuthorisedEnrolment = dzn_2a2k_canonical_enrolment($closedAuthorisedStudent, $course, 810007);
+$closedAuthorisedTerm = dzn_2a2k_term($closedAuthorisedEnrolment, 1, 'authorised', 1); dzn_2a2k_event($closedAuthorisedTerm, 1, null, 'authorised');
+dzn_2a2k_assert($wpdb->update($p . 'enrolments', array('lifecycle_state' => 'closed', 'applicable_slot' => null), array('id' => $closedAuthorisedEnrolment)) === 1, 'Closed/authorised Enrolment fixture preparation failed');
+dzn_2a2k_assert($assessment->inspect($closedAuthorisedEnrolment)['classification'] === 'data_integrity_conflict', 'Closed Enrolment exposed authorised Term authority');
+
+$closedCurrentStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Closed Current Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
+$closedCurrentEnrolment = dzn_2a2k_canonical_enrolment($closedCurrentStudent, $course, 810008);
+$closedCurrentTerm = dzn_2a2k_term($closedCurrentEnrolment, 1, 'current', 1); dzn_2a2k_event($closedCurrentTerm, 1, null, 'authorised'); dzn_2a2k_event($closedCurrentTerm, 2, 'authorised', 'current');
+dzn_2a2k_assert($wpdb->update($p . 'enrolments', array('lifecycle_state' => 'closed', 'applicable_slot' => null), array('id' => $closedCurrentEnrolment)) === 1, 'Closed/current Enrolment fixture preparation failed');
+dzn_2a2k_assert($assessment->inspect($closedCurrentEnrolment)['classification'] === 'data_integrity_conflict', 'Closed Enrolment exposed current Term authority');
 
 $mixedStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Mixed Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
 $mixedEnrolment = dzn_2a2k_canonical_enrolment($mixedStudent, $course, 810003);
@@ -116,7 +132,7 @@ dzn_2a2k_assert($missingHistoryRejected, 'History read bypassed aggregate integr
 $invalidEnrolmentStudent = (new StudentService())->create(array('display_name' => 'Synthetic K Invalid Enrolment Student', 'timezone' => 'Australia/Brisbane', 'timezone_source' => 'admin_selected'));
 $invalidEnrolment = dzn_2a2k_canonical_enrolment($invalidEnrolmentStudent, $course, 810005);
 $invalidEnrolmentTerm = dzn_2a2k_term($invalidEnrolment, 1, 'authorised', 1); dzn_2a2k_event($invalidEnrolmentTerm, 1, null, 'authorised');
-dzn_2a2k_assert($wpdb->update($p . 'enrolments', array('lifecycle_state' => 'closed'), array('id' => $invalidEnrolment)) === 1, 'Invalid Enrolment fixture preparation failed');
+dzn_2a2k_assert($wpdb->update($p . 'enrolments', array('lifecycle_state' => 'closed', 'applicable_slot' => 1), array('id' => $invalidEnrolment)) === 1, 'Invalid Enrolment fixture preparation failed');
 dzn_2a2k_assert($assessment->inspect($invalidEnrolment)['classification'] === 'data_integrity_conflict', 'Invalid canonical Enrolment lifecycle was accepted');
 
 $wrongCanonical = dzn_2a2k_term($legacyEnrolment, 3, 'closed', null); dzn_2a2k_event($wrongCanonical, 1, null, 'authorised'); dzn_2a2k_event($wrongCanonical, 2, 'authorised', 'cancelled');
@@ -143,4 +159,4 @@ Migrator::maybe_upgrade();
 $after = array('terms' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}terms"), 'events' => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}term_lifecycle_events"), 'legacy' => (array) $wpdb->get_row($wpdb->prepare("SELECT status,lesson_allocation,replacement_allowance,payment_state,archived_at FROM {$p}terms WHERE id=%d", $legacyTerm), ARRAY_A));
 dzn_2a2k_assert($before === $after && count(array_keys((array) get_option('dzn_platform_completed_migrations', array()), '017_canonical_term_foundation', true)) === 1, 'Repeated upgrade changed state');
 
-echo "schema_16_to_17=pass\nlegacy_term_preservation=pass\nlegacy_term_lesson_compatibility=pass\ncanonical_applicability=pass\ncanonical_terminal_history=pass\ndatabase_applicability_uniqueness=pass\nhistory_integrity=pass\ncanonical_enrolment_relationship=pass\ncanonical_write_boundary=pass\ncanonical_archive_restore_boundary=pass\nprivacy_minimised_read=pass\nno_teacher_payment_authority=pass\ncapability_install_repair=pass\nrepeat_upgrade=pass\nPhase 2A.2-K migration runtime passed\n";
+echo "schema_16_to_17=pass\nlegacy_term_preservation=pass\nlegacy_term_lesson_compatibility=pass\nzero_term_classification=pass\ncanonical_applicability=pass\nclosed_enrolment_applicability_guard=pass\ncanonical_terminal_history=pass\ndatabase_applicability_uniqueness=pass\nhistory_integrity=pass\ncanonical_enrolment_relationship=pass\ncanonical_write_boundary=pass\ncanonical_archive_restore_boundary=pass\nprivacy_minimised_read=pass\nno_teacher_payment_authority=pass\ncapability_install_repair=pass\nrepeat_upgrade=pass\nPhase 2A.2-K migration runtime passed\n";

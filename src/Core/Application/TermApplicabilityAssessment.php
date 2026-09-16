@@ -55,6 +55,9 @@ final class TermApplicabilityAssessment {
             if (in_array((string) $row->lifecycle_state, self::APPLICABLE_STATES, true)) $applicable++;
         }
         if ($applicable > 1) return array('classification' => self::DATA_INTEGRITY_CONFLICT, 'terms' => array());
+        if ($applicable === 1 && !$this->canonicalEnrolmentIsApplicable($enrolment)) {
+            return array('classification' => self::DATA_INTEGRITY_CONFLICT, 'terms' => array());
+        }
         return array(
             'classification' => $applicable === 1 ? self::CANONICAL_APPLICABLE : self::CANONICAL_TERMINAL_HISTORY,
             'terms' => $canonical,
@@ -76,6 +79,11 @@ final class TermApplicabilityAssessment {
             && (($row->applicable_slot === null ? null : (int) $row->applicable_slot) === $expectedSlot)
             && (int) ($row->accepted_service_arrangement_id ?? 0) > 0
             && $row->archived_at === null;
+    }
+
+    private function canonicalEnrolmentIsApplicable(object $row): bool {
+        return in_array((string) $row->lifecycle_state, array('authorised', 'current', 'paused'), true)
+            && (int) $row->applicable_slot === 1;
     }
 
     private function validCanonical(object $row): bool {
