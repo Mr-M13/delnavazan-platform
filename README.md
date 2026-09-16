@@ -8,11 +8,11 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Phase-L implementation merge | `36e1d6b754079efcf6fdff02ed2a029099071455` |
+| Phase-M0 implementation merge | `c316a5153c7a56b810732495b3785786771c695a` |
 | Platform / schema | 0.1.0 / 19 |
 | Migrations | 001–019; latest `019_canonical_enrolment_lifecycle_authority` |
-| Current candidate | Phase 2A.2-M0 canonical Enrolment lifecycle authority |
-| Authoritative merged slice | Canonical Term Creation & Lifecycle Authority |
+| Active Platform candidate | None; Phase 2A.2-M0 is merged and closed |
+| Latest merged slice | Canonical Enrolment Lifecycle Authority |
 | Next boundary | Canonical Lesson authority remains non-authoritative |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.

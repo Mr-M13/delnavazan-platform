@@ -1,6 +1,6 @@
 # Delnavazan Core — Living Project Continuity Record
 
-**Continuity snapshot:** 16 September 2026
+**Continuity snapshot:** 17 September 2026
 **Purpose:** Durable handover for a new CD/ChatGPT session or implementation agent. Source, migrations and locked domain contracts remain authoritative; this record supplies the current state, boundaries and next action without relying on chat history.
 
 ## 1. Current state
@@ -8,19 +8,19 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Pre-Phase 2A.2-L main | `788bf0989f4365607ba41322471e50fca75a5e81` |
-| Phase 2A.2-L approved candidate | `26beab6147df545fed70949f06b83d83042184cd`; tree `b283c319b9a3af3267cf43ad9591e30d93085986` |
-| Phase 2A.2-L implementation merge | `36e1d6b754079efcf6fdff02ed2a029099071455`; tree `b283c319b9a3af3267cf43ad9591e30d93085986` |
+| Pre-Phase 2A.2-M0 main | `8490d712d18116b3ca606d6c2e3dbb8560d2ce54` |
+| Phase 2A.2-M0 approved candidate | `66ba811c47a3494f12f47dbed03775ca7c4e5ba0`; tree `6a9631505a86893abf1fcefa89a78675e7ed3901` |
+| Phase 2A.2-M0 implementation merge | `c316a5153c7a56b810732495b3785786771c695a`; tree `6a9631505a86893abf1fcefa89a78675e7ed3901` |
 | Platform | 0.1.0 |
-| Schema | 18 |
-| Migrations | 001–018; latest `018_canonical_term_authority` |
-| Build identity | `phase2a2l-canonical-term-authority-20260916.1` |
-| Latest completed slice | Phase 2A.2-L — Canonical Term Creation & Lifecycle Authority |
-| Merge state | Independent review PASS; exact approved tree merged as `36e1d6b754079efcf6fdff02ed2a029099071455` |
-| Closeout baseline | `36e1d6b754079efcf6fdff02ed2a029099071455`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None; Phase 2A.2-L is merged and closed |
-| Next Platform action | Requires separate authorisation; no Phase M implementation has started |
-| Current 2A.2-L state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
+| Schema | 19 |
+| Migrations | 001–019; latest `019_canonical_enrolment_lifecycle_authority` |
+| Build identity | `phase2a2m0-enrolment-lifecycle-authority-20260917.1` |
+| Latest completed slice | Phase 2A.2-M0 — Canonical Enrolment Lifecycle Authority |
+| Merge state | Independent review PASS; exact approved tree merged as `c316a5153c7a56b810732495b3785786771c695a` |
+| Closeout baseline | `c316a5153c7a56b810732495b3785786771c695a`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
+| Active Platform candidate | None; Phase 2A.2-M0 is merged and closed |
+| Next Platform action | Requires separate authorisation; canonical Lesson authority remains non-authoritative |
+| Current 2A.2-M0 state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:
 
@@ -36,8 +36,17 @@ The completed coordination chain is:
 10. **2A.2-J** — Teacher Assignment Foundation: separate current-Teacher authority, retained initial provenance, assignment-specific replacement evidence, atomic lifecycle and protected reads/offboarding.
 11. **2A.2-K** — Canonical Term Foundation: legacy-compatible Enrolment + sequence identity, canonical lifecycle/applicability storage, append-only history and protected reads without creation or lifecycle mutation authority.
 12. **2A.2-L** — Canonical Term Creation & Lifecycle Authority: explicit capability-protected creation, bounded transitions, durable idempotency and Enrolment-first concurrency control.
+13. **2A.2-M0** — Canonical Enrolment Lifecycle Authority: explicit activate/pause/resume/close commands, durable idempotency, protected integrity reads and subordinate closure guards.
 
-Main is authoritative at Schema 18 / Phase L. Canonical Term creation and bounded lifecycle mutation are authoritative; no Lesson, Teacher, scheduling, capacity, payment, notification, communication, calendar or Amelia authority is introduced.
+Main is authoritative at Schema 19 / Phase M0. Canonical Enrolment lifecycle authority and canonical Term creation/bounded lifecycle mutation are authoritative; canonical Lesson authority remains non-authoritative. No scheduling, capacity, payment, notification, communication, calendar or Amelia authority is introduced.
+
+## Completed Canonical Enrolment Lifecycle Authority — Phase 2A.2-M0
+
+From authoritative pre-M0 main `8490d712d18116b3ca606d6c2e3dbb8560d2ce54`, independently approved candidate `66ba811c47a3494f12f47dbed03775ca7c4e5ba0`, tree `6a9631505a86893abf1fcefa89a78675e7ed3901`, was merged without squash or rebase as `c316a5153c7a56b810732495b3785786771c695a`. The implementation merge tree exactly equals the approved candidate tree. Schema 19 / `019_canonical_enrolment_lifecycle_authority` and build `phase2a2m0-enrolment-lifecycle-authority-20260917.1` are authoritative.
+
+M0 makes the explicit canonical Enrolment graph operational, adds immutable digest-only command evidence, preserves pause applicability, validates protected lifecycle reads, and blocks closure while applicable canonical Term or Teacher Assignment authority exists. It adds no canonical Lesson storage or authority and performs no cascading subordinate mutation.
+
+Phase 2A.2-M0 is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**. No deployment occurred.
 
 ## Completed Canonical Term Authority — Phase 2A.2-L
 

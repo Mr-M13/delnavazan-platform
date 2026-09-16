@@ -1,5 +1,7 @@
 # Phase 2A.2-M0 — Canonical Enrolment lifecycle authority
 
+Status: **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**. Approved candidate `66ba811c47a3494f12f47dbed03775ca7c4e5ba0`, approved tree `6a9631505a86893abf1fcefa89a78675e7ed3901`, implementation merge `c316a5153c7a56b810732495b3785786771c695a`.
+
 Schema 19 / `019_canonical_enrolment_lifecycle_authority` adds explicit administrator-only lifecycle commands for canonical Enrolments. The legal graph is `authorised -> current`, `current -> paused`, `paused -> current`, and closure from any of `authorised`, `current`, or `paused`. Closed is terminal.
 
 `authorised`, `current`, and `paused` remain applicable with slot `1`; closure atomically clears the slot. Pause blocks future canonical Lesson issuance, but deliberately does not change the Phase J/L rules for Teacher Assignments or canonical Terms.
