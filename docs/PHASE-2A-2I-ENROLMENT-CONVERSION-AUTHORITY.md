@@ -1,6 +1,8 @@
 # Phase 2A.2-I — Enrolment Conversion Authority
 
-Schema 15 / migration `015_enrolment_conversion_authority` adds a capability-protected informational readiness boundary and a separate explicit, atomic Accepted Service Arrangement conversion command. This is an unmerged review candidate until independently approved and merged.
+> **Historical phase record:** Phase 2A.2-I was subsequently independently reviewed, merged and closed. This document preserves its at-the-time authority contract; current status is recorded in `DELNAVAZAN-CORE-CONTINUITY.md`.
+
+Schema 15 / migration `015_enrolment_conversion_authority` adds a capability-protected informational readiness boundary and a separate explicit, atomic Accepted Service Arrangement conversion command.
 
 ## Readiness and authority
 

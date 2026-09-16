@@ -8,8 +8,9 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Pre-Phase 2A.2-J main | `7bd4430737f460fdb995bbe05dea272b55641294` |
-| Platform merge main (Phase 2A.2-J) | `763a9fa9f792cd45114e10978a1bda0a53662c21` |
+| Pre-Phase 2A.2-K main | `cf222d20e4ab0d08c992e7ec38bcece8b7625d9e` |
+| Platform merge main (Phase 2A.2-K) | `25e213c69d7f299c9ed5330eed7cd9ba4051c022` |
+| Phase 2A.2-K post-closeout main | `fab24b105b6a6ce7e382e399795b7af8b6eab349` |
 | Platform | 0.1.0 |
 | Schema | 17 |
 | Migrations | 001–017; latest `017_canonical_term_foundation` |
@@ -17,7 +18,7 @@
 | Latest completed slice | Phase 2A.2-K — Canonical Term Foundation |
 | Phase 2A.2-K approved candidate | `a6491ccc1cf624be205d1ea022421a5f7903eb2b`; tree `9a59062c2a6aa10c95e88e4d24909c6e770dd27d` |
 | Merge state | Independent review PASS; merged as `25e213c69d7f299c9ed5330eed7cd9ba4051c022` |
-| Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
+| Continuity-normalisation baseline | `fab24b105b6a6ce7e382e399795b7af8b6eab349`; the resulting documentation commit is recorded in the task closeout because a commit cannot embed its own hash |
 | Active Platform candidate | None; Phase 2A.2-K is merged and closed |
 | Next Platform action | Phase L requires separate authorisation; no canonical Term mutation authority is implied by Phase K |
 | Current 2A.2-K state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
@@ -80,6 +81,9 @@ Booking Request
 → explicit conversion authority
 → idempotent Enrolment conversion
 → explicit Teacher Assignment authority
+→ canonical Term foundation (storage/read only)
+→ future explicit Term creation/lifecycle authority
+→ later canonical Lesson authority
 ```
 
 These distinctions are deliberate and must not be collapsed:
@@ -91,7 +95,7 @@ These distinctions are deliberate and must not be collapsed:
 - A successful conversion creates exactly one Enrolment authorised by the accepted arrangement. It does not create Teacher Assignment.
 - Teacher Assignment is separate, effective-dated authority.
 
-Any subsequent work must preserve this graph and must not silently advance to Term, Lesson, scheduling, capacity, payment, notification, calendar or Amelia work.
+Any subsequent work must preserve this graph. Phase K does not authorise Term creation or lifecycle mutation, and no work may silently advance to Lesson, scheduling, capacity, payment, notification, calendar or Amelia authority.
 
 ## Completed Enrolment Conversion Authority — Phase 2A.2-I
 
@@ -198,13 +202,9 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-Phase 2A.2-H is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED** at Schema 14 / migration `014_canonical_enrolment_foundation`, build `phase2a2h-canonical-enrolment-foundation-20260913.1`.
+Phases 2A.2-A through K are complete. The next planned boundary is **Phase 2A.2-L — Canonical Term Creation & Lifecycle Authority**. Phase L is not implemented or authorised by this record.
 
-The next Platform work begins after H. Conversion readiness and explicit conversion authority remain separate future increments: readiness is not authority, and authority is not successful conversion. No canonical Enrolment creation, Teacher Assignment, Term, Lesson, scheduling, payment, notification, calendar or Amelia authority may be inferred from the H foundation.
-
-### Phase 2A.2-I recovery candidate (unmerged)
-
-From authoritative main `f855103c6449ad466ff267c7a9740b56c9ffed66`, branch `phase-2a2i-enrolment-conversion-authority-recovery-2` prepares Schema 15 / `015_enrolment_conversion_authority`, build `phase2a2i-enrolment-conversion-authority-20260914.1`, for independent review. It adds non-bearer readiness, explicit atomic conversion, concrete Student + Course serialization, digest-only idempotency, initial lifecycle evidence and privacy-safe final-arrangement conversion. This candidate is not authoritative until independently reviewed and merged; no deployment or external-system change is implied.
+Its expected subject area is explicit canonical Term creation and lifecycle command authority, a dedicated capability boundary, idempotency, locking/concurrency and authoritative creation evidence. Those subjects require a separately locked implementation contract; this continuity record does not design them. Canonical Lesson foundation/authority follows later and must not be pulled into Phase L implicitly.
 
 ## 5. Persistent architectural boundaries
 
@@ -228,13 +228,20 @@ Historical Phase 0/Phase 1 planning documents remain useful where they do not co
 | 0.4.1 validated package | `delnavazan-production-theme-0.4.1.zip` |
 | 0.4.1 package SHA-256 | `4f90bea5c58b0426d6ae81b16c676d0d477d97fa6c3047918f2c90f276a435b3` |
 | NIU 0.4.1 state | Manually installed; no production deployment |
-| 0.4.2 branch | `codex/increment-0.4.2-art-direction` |
-| 0.4.2 candidate | `a4dfc4acd614f049c725f599a4d856ea40f6d517` |
-| 0.4.2 status | Source candidate, ready for runtime/visual validation; not merged or deployed |
+| Historical 0.4.2 branch | `codex/increment-0.4.2-art-direction` |
+| Historical 0.4.2 candidate | `a4dfc4acd614f049c725f599a4d856ea40f6d517` |
 
 Theme 0.4.2 implements a contemporary Persian cultural-institution direction: an asymmetric replaceable hero, restrained Persian typography, Custom Logo header/footer, corrected SVG hamburger, six-item instrument folio, human coordination reassurance, presentation-only regional pricing, FAQ before articles, homepage date removal, and responsive/accessibility refinements.
 
 Final Academy-owned or licensed hero/instrument imagery remains required before visual sign-off. The Theme remains presentation only: it has no Platform, pricing-authority, payment, enrolment, Teacher, scheduling, notification, calendar or Amelia business authority.
+
+### Current header and homepage continuity
+
+The public Theme remains Persian-first (`fa-IR`), RTL, refined/editorial/warm/human, with warm ivory, Delnavazan turquoise, restrained pomegranate, PHP templates, `theme.json`, Gutenberg and minimal JavaScript. Desktop navigation order is `خانه`, `ورود هنرجویان`, `ورود اساتید`, `مقالات`, `ثبت نام`. Ordinary links use deep Delnavazan turquoise; only `ثبت نام` receives CTA treatment. Preserve Custom Logo, the warm-ivory header and mobile-menu behaviour.
+
+Current homepage work includes refined responsive styling, corrected mobile/full-width sections, the green pricing/finale section, and reuse of `BG-Ornoments.webp`. The artwork already carries reduced opacity, so CSS renders it at `opacity: 1`. Footer intent is logo right/top, actions centred/top, legal left/bottom and secondary navigation right/bottom.
+
+The homepage shows three randomly selected published articles. Gutenberg Query Loop remains presentation markup. The identifying class `dzn-home-random-posts` belongs on the inner `core/post-template` block; `query_loop_block_query_vars` then targets that query with `posts_per_page = 3`, `orderby = rand` and `ignore_sticky_posts = true`. Putting the class only on the outer `core/query` block does not target the query-vars filter. Authoritative Theme source must contain no temporary forced `post__in`, post ID or footer diagnostic comment.
 
 ### Theme staging
 
@@ -276,11 +283,15 @@ The future authority flow is: location signal → suggested region → visitor s
 
 ## 8. Execution posture
 
-CD is the architecture/orchestration authority: source review, security/privacy/concurrency review, merge readiness, sequencing, dependencies and collision control.
+CD / ChatGPT is the architect, orchestrator, dependency manager and handoff coordinator: it controls sequencing, dependencies, collision avoidance and review routing.
 
-Hamed and Ina are dynamic execution-agent identities, each with Work and Codex available. Do not use obsolete permanent labels such as “Hamed Theme”, “Ina Platform” or equivalent. For substantial work CD specifies Agent → Environment → Model → Reasoning → Parallel yes/no.
+Ina / Codex Local and Hamed / Codex Cloud operate under a dual-owner, reciprocal-review model. Either may own a complete bounded slice and perform reconnaissance, implementation, tests and self-review. Ownership alternates according to dependency, quota/capacity, task shape, context and efficiency; neither identity is permanently restricted to developer or reviewer work.
 
-Current orchestration allocation: Ina / Codex Local is the primary bulk implementation and execution agent; Hamed / Codex Cloud is the independent reviewer and secondary specialist. Both environments have confirmed GitHub access. Implementation and independent review of the same increment are normally sequential, not parallel. Avoid duplicate expensive reconnaissance or runtime work.
+For consequential migrations, authority transitions, concurrency/idempotency, identity/privacy, payments, external side effects, destructive operations and consequential merge candidates, the non-owner performs independent cross-review. Routine deterministic/documentation work does not automatically require independent review. After an independent PASS, the implementation owner may perform deterministic merge/closeout only when the exact reviewed candidate is preserved.
+
+Parallelise genuinely dependency-independent work. Do not parallelise sequential authority work where that would create speculative implementation, collisions or rework. Avoid duplicate expensive reconnaissance and runtime work.
+
+Delivery cadence should reuse established patterns rather than automatically splitting every capability into tiny phases. Prefer a larger bounded increment when authority boundaries are established, rollback is clear, validation remains tractable, concurrency risk is controlled and independent review can inspect one coherent candidate. Retain smaller increments when migration or authority risk genuinely requires them.
 
 Delivery posture: **CONTROLLED MOMENTUM**. For bounded, reversible work: IMPLEMENT → TEST → INSPECT → CORRECT. Remain strict around production, real-user/private data, security/privacy, destructive migrations, payments, external communications, Amelia/calendar, identity/guardian authority, acceptance/conversion authority and consequential deployment.
 

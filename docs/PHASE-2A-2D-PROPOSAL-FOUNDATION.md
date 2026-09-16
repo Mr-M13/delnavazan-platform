@@ -1,6 +1,6 @@
 # Phase 2A.2-D — Proposal Foundation
 
-Status: source candidate; runtime validation remains required.
+> **Historical phase record:** Phase 2A.2-D was subsequently validated and merged. This document preserves its at-the-time boundary; current status and downstream authority are recorded in `DELNAVAZAN-CORE-CONTINUITY.md`.
 
 ## Authority boundary
 

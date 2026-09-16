@@ -1,12 +1,12 @@
 # Delnavazan Platform Conceptual Data Model
 
-## Canonical Term foundation (Schema 17 review candidate)
+## Current authoritative model — canonical Term foundation (Schema 17)
 
-The Phase 2A.2-K candidate additively separates existing `legacy_phase1` Terms from `canonical_enrolment_term_v1`. A canonical Term is one bounded educational cycle identified by one canonical Enrolment plus an immutable server-owned sequence. It contains no Teacher identity: current Teacher authority remains exclusively in the Teacher Assignment aggregate, while `enrolments.teacher_id` remains historical Accepted Service Arrangement context.
+Phase 2A.2-K additively separates existing `legacy_phase1` Terms from `canonical_enrolment_term_v1`. A canonical Term is one bounded educational cycle identified by one canonical Enrolment plus an immutable server-owned sequence. It contains no Teacher identity: current Teacher authority remains exclusively in the Teacher Assignment aggregate, while `enrolments.teacher_id` remains historical Accepted Service Arrangement context.
 
-Canonical lifecycle storage is `authorised`, `current`, `closed`, or `cancelled`. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
+Canonical lifecycle progression is `authorised → current → closed`, with `cancelled` as the terminal alternative. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
 
-Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. Schema 17 supplies protected integrity/read surfaces but no ordinary canonical writer, lifecycle command, idempotency table, Lesson creation, scheduling, payment, renewal or external authority.
+Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. An applicable Term requires an applicable parent Enrolment; a valid closed Enrolment cannot expose an `authorised` or `current` Term, while retained terminal Term history is valid. Schema 17 supplies protected integrity/read surfaces but no ordinary canonical writer, lifecycle command, idempotency table, Lesson creation, scheduling, payment, renewal or external authority.
 
 ## Teacher Assignment foundation (Schema 16)
 
@@ -200,9 +200,13 @@ Lifecycle evidence is append-only. A predecessor may reserve only `successor`, `
 
 ### Schema 15 conversion evidence
 
-The Phase 2A.2-I review candidate adds `enrolment_identity_roots` as a state-free concrete `(student_id, course_id)` serialization root and `enrolment_conversion_commands` as immutable conversion evidence. The command table uniquely binds a digest-only idempotency key to one canonical payload, Accepted Service Arrangement and resulting Enrolment; it has no mutable status or `updated_at`.
+Phase 2A.2-I added `enrolment_identity_roots` as a state-free concrete `(student_id, course_id)` serialization root and `enrolment_conversion_commands` as immutable conversion evidence. The command table uniquely binds a digest-only idempotency key to one canonical payload, Accepted Service Arrangement and resulting Enrolment; it has no mutable status or `updated_at`.
 
 Explicit conversion is the only ordinary canonical writer. It copies exact final arrangement Student/Course identity and frozen Teacher context, writes lifecycle state `authorised`, and appends the sequence-1 conversion event. A return after clean closure history links to the unambiguous most-recent closure-evidenced predecessor. No Booking Request contact PII or operational authority is added.
+
+### Historical Phase-1 model
+
+The responsibility, attributes and invariants below record the original Phase-1 Enrolment model. They do not override the current Student + Course canonical identity, separate Teacher Assignment authority, or retained historical meaning of canonical `enrolments.teacher_id`.
 
 ### Responsibility
 
@@ -230,7 +234,7 @@ Course. It is independent of any single payment, renewal cycle, or lesson block.
 
 ## 9. Term
 
-> **Current-state clarification:** The lifecycle and payment-oriented material below documents the Phase-1 legacy model. The Schema 17 Phase-K candidate boundary is defined above. It must not be used to restore `awaiting_payment`, `payment_state`, generic archive, or Teacher identity as canonical Term authority.
+> **Current-state clarification:** The lifecycle and payment-oriented material below documents the Phase-1 legacy model. The authoritative Schema 17 Phase-K boundary is defined above. It must not be used to restore `awaiting_payment`, `payment_state`, generic archive, or Teacher identity as canonical Term authority.
 
 ### Responsibility
 

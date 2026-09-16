@@ -8,12 +8,12 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Repository main | `c041028b16b6cb6976453630480484bd7d1ddc0b` |
-| Platform / schema | 0.1.0 / 10 |
-| Migrations | 001–010 |
-| Completed coordination work | 2A.2-A through 2A.2-D |
-| Latest merged slice | Proposal Foundation — PR #13 |
-| Next work | 2A.2-E Acceptance Foundation reconnaissance only |
+| Post-K closeout baseline | `fab24b105b6a6ce7e382e399795b7af8b6eab349` |
+| Platform / schema | 0.1.0 / 17 |
+| Migrations | 001–017; latest `017_canonical_term_foundation` |
+| Completed coordination work | 2A.2-A through 2A.2-K |
+| Latest merged slice | Canonical Term Foundation |
+| Next planned boundary | 2A.2-L Canonical Term Creation & Lifecycle Authority; not implemented |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
@@ -21,15 +21,16 @@ Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginnin
 
 The canonical business concepts are Teacher, Student, Instrument, Course, Enrolment, Term and Lesson. Lesson is the later operational centre for attendance, scheduling, finance, notifications and provider integrations. Provider identifiers are mappings, not business identity.
 
-The current coordination path is deliberately narrower:
+The completed coordination path is deliberately layered:
 
 ```text
 Booking Request → Coordination Case → Candidate Teacher → Availability Assent
 → Proposal Family → Teacher-specific Option → immutable Proposal Version
-→ future acceptance → future arrangement/conversion authority
+→ Provisional Acceptance → Final Acceptance / Accepted Service Arrangement
+→ canonical Enrolment conversion → Teacher Assignment → canonical Term foundation
 ```
 
-Proposal is not acceptance. Acceptance is not conversion authority. Successful later conversion creates one Enrolment and does not create a Teacher Assignment; assignment is a separate effective-dated authority.
+Proposal is not acceptance. Acceptance is not conversion authority. Conversion creates one Student + Course Enrolment and does not create Teacher Assignment. Current Teacher authority belongs to the separate Assignment aggregate. Phase K adds canonical Term storage and protected reads only; Phase L creation/lifecycle authority and later Lesson authority do not yet exist.
 
 ## Repository rule
 

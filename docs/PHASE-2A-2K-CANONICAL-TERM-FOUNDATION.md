@@ -6,8 +6,9 @@ Schema 17 / migration `017_canonical_term_foundation` is an additive storage and
 
 - Record models are `legacy_phase1` and `canonical_enrolment_term_v1`.
 - Canonical identity is canonical Enrolment plus immutable server-owned sequence.
-- Canonical lifecycle storage is `authorised`, `current`, `closed`, or `cancelled`.
+- Canonical lifecycle progression is `authorised → current → closed`, with `cancelled` as the terminal alternative.
 - `authorised` and `current` occupy the one applicable slot; future-Term staging is unavailable.
+- An applicable Term requires an applicable parent Enrolment (`authorised`, `current`, or `paused` with slot `1`). A valid closed Enrolment with an `authorised` or `current` Term is `data_integrity_conflict`; terminal Term history remains valid.
 - A canonical Term contains no Teacher identity. Teacher Assignment is the only current-Teacher authority.
 - Allocation origin is 12 standard Lessons and 2 eligible replacements. These are not consumption counters or Lesson authority.
 

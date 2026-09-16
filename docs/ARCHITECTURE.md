@@ -4,7 +4,7 @@
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-J / Schema 16. Phase 2A.2-K is an unmerged Schema 17 canonical Term foundation candidate. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-K / Schema 17. Phases 2A.2-A through K are complete, independently reviewed where consequential, merged and closed. Phase L canonical Term creation/lifecycle authority and later Lesson authority are not implemented. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
 ### Phase 2A.2-J architectural seam
 
@@ -14,7 +14,7 @@ Teacher Assignment commands serialize on the canonical Enrolment, use ascending 
 
 ### Phase 2A.2-K architectural seam
 
-Canonical Term identity is canonical Enrolment plus immutable server-owned sequence. Term contains no Teacher identity and a Teacher Assignment replacement never re-identifies or mutates a Term. The Schema 17 candidate separates preserved Phase-1 Terms from canonical storage, provides append-only lifecycle evidence and protected reads, and stops before canonical creation, lifecycle commands, Lessons, consumption, scheduling, payment, renewal or external authority.
+Canonical Term identity is canonical Enrolment plus immutable server-owned sequence. Term contains no Teacher identity and a Teacher Assignment replacement never re-identifies or mutates a Term. Schema 17 separates preserved Phase-1 Terms from canonical storage, provides append-only lifecycle evidence and protected reads, and stops before canonical creation, lifecycle commands, Lessons, consumption, scheduling, payment, renewal or external authority. An applicable Term (`authorised` or `current`) is coherent only beneath an applicable Enrolment (`authorised`, `current`, or `paused` with slot `1`); a closed Enrolment with an applicable Term fails closed as `data_integrity_conflict`.
 
 ## 2. Architectural goal
 
@@ -227,7 +227,7 @@ delete either identity.
 These are Platform phases and do not renumber Hamnavaz phases.
 
 1. **Phase 0 — Existing System Audit & Architecture:** completed audit, architecture, migration map, module boundaries, security baseline and roadmap.
-2. **Phase 1 / 2A foundations:** implementation is underway and merged through the Booking Request coordination, Candidate Teacher, Availability Assent and Proposal Foundation slices. The current exact state and next bounded phase are maintained in the continuity record; this historical roadmap must not be read as a claim that implementation has not begun.
+2. **Phase 1 / 2A foundations:** implementation is merged through Phase 2A.2-K Canonical Term Foundation. The current exact state and next bounded phase are maintained in the continuity record; this historical roadmap must not be read as a claim that downstream Term mutation or Lesson authority already exists.
 3. **Phase 2 — Core Data Setup & Cutover Preparation:** manually create and
    validate the initial Instrument/Course catalogue, Teachers, active Students,
    Enrolments, Terms, and required Lessons; prepare cutover controls without an
@@ -290,4 +290,4 @@ This architecture does not:
 
 Schema 14 separates preserved `legacy_phase1` Enrolments from the future `canonical_student_course_v1` aggregate. Canonical structural identity is Student + Course; nullable Teacher context is not Teacher Assignment. Accepted Service Arrangement provenance, applicable-slot uniqueness, reserved lifecycle/lineage fields, append-only history and protected applicability reads are foundation data only. Generic creation is closed. Readiness, conversion authority/idempotency, lifecycle transitions, Teacher Assignment, Terms, Lessons and every external integration remain later boundaries.
 
-The unmerged Schema 15 Phase 2A.2-I review candidate separates informational conversion readiness from the explicit atomic conversion command. Conversion revalidates the immutable final source graph under canonical lock order, serializes on a concrete Student + Course identity root, and records one authorised canonical Enrolment, its initial lifecycle event and immutable digest-only command evidence. It creates no Teacher Assignment or downstream operational authority.
+Schema 15 completed the separation of informational conversion readiness from the explicit atomic conversion command. Conversion revalidates the immutable final source graph under canonical lock order, serializes on a concrete Student + Course identity root, and records one authorised canonical Enrolment, its initial lifecycle event and immutable digest-only command evidence. Schema 16 then introduced separate Teacher Assignment authority, and Schema 17 introduced the read/storage-only canonical Term foundation. None of these phases creates Lesson, payment, scheduling, calendar, notification or Amelia authority.

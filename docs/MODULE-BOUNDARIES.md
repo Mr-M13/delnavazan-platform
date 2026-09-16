@@ -7,6 +7,8 @@ application services, explicit read models, commands, and versioned domain
 events. They do not reach into another module's tables or use an external
 provider as an implicit shared domain model.
 
+> **Current implementation boundary:** The ownership sections below describe the target modular architecture. At authoritative Schema 17, canonical Enrolment identity is Student + Course, current Teacher authority is a separate Teacher Assignment, and canonical Term is a storage/read foundation only. Canonical Term creation/lifecycle commands and all canonical Lesson authority remain future work; target ownership must not be mistaken for implemented authority.
+
 The dependency direction is inward toward Core contracts:
 
 ```text
