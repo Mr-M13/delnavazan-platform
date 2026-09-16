@@ -10,6 +10,7 @@ foreach(array('applicable_term_exists','applicable_teacher_assignment_exists','s
 foreach(array('activate_canonical_enrolment','pause_canonical_enrolment','resume_canonical_enrolment','close_canonical_enrolment')as$n)if(!str_contains($screen,$n))throw new RuntimeException('Missing admin invocation: '.$n);
 foreach(array("record_model ?? 'legacy_phase1'","CanonicalEnrolmentLifecycleValidator::valid(\$enrolment, \$history)",'data_integrity_conflict')as$n)if(!str_contains($read,$n))throw new RuntimeException('Protected canonical lifecycle read does not fail closed: '.$n);
 if(!str_contains($screen,'Canonical lifecycle history failed integrity validation.'))throw new RuntimeException('Admin lifecycle integrity error path missing');
+foreach(array("\$entity !== 'enrolment'","\$exception->getMessage() !== 'data_integrity_conflict'",'self::objectTable($records')as$n)if(!str_contains($screen,$n))throw new RuntimeException('Admin list integrity handling missing: '.$n);
 $ddl=substr($migration,strpos($migration,'CREATE TABLE {$p}enrolment_lifecycle_commands'),strpos($migration,'private static function private_digest')-strpos($migration,'CREATE TABLE {$p}enrolment_lifecycle_commands'));
 foreach(array('raw_key','updated_at','evidence_reference varchar')as$n)if(str_contains($ddl,$n))throw new RuntimeException('Mutable/raw lifecycle command evidence: '.$n);
 foreach(array('canonical_lesson','dzn_manage_canonical_lessons')as$n)if(str_contains($service.$repository.$migration,$n))throw new RuntimeException('Lesson authority introduced: '.$n);

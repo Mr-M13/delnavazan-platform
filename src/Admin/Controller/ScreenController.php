@@ -170,7 +170,15 @@ final class ScreenController {
         return $entity;
     }
 
-    private static function entityList(string $entity): void { echo '<h2>Recent records</h2>'; self::objectTable((new CoreReadService())->recent($entity), 'dzn-' . $entity); }
+    private static function entityList(string $entity): void {
+        try { $records = (new CoreReadService())->recent($entity); }
+        catch (\InvalidArgumentException $exception) {
+            if ($entity !== 'enrolment' || $exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+            echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+            return;
+        }
+        echo '<h2>Recent records</h2>'; self::objectTable($records, 'dzn-' . $entity);
+    }
 
     private static function entityDetail(string $entity, int $id): void {
         $record = (new CoreReadService())->find($entity, $id);
