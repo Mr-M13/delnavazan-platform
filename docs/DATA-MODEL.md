@@ -1,12 +1,12 @@
 # Delnavazan Platform Conceptual Data Model
 
-## Current authoritative model — canonical Term foundation (Schema 17)
+## Current authoritative model — canonical Term foundation (Schema 17); Schema 18 authority candidate
 
 Phase 2A.2-K additively separates existing `legacy_phase1` Terms from `canonical_enrolment_term_v1`. A canonical Term is one bounded educational cycle identified by one canonical Enrolment plus an immutable server-owned sequence. It contains no Teacher identity: current Teacher authority remains exclusively in the Teacher Assignment aggregate, while `enrolments.teacher_id` remains historical Accepted Service Arrangement context.
 
 Canonical lifecycle progression is `authorised → current → closed`, with `cancelled` as the terminal alternative. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
 
-Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. An applicable Term requires an applicable parent Enrolment; a valid closed Enrolment cannot expose an `authorised` or `current` Term, while retained terminal Term history is valid. Schema 17 supplies protected integrity/read surfaces but no ordinary canonical writer, lifecycle command, idempotency table, Lesson creation, scheduling, payment, renewal or external authority.
+Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. An applicable Term requires an applicable parent Enrolment; a valid closed Enrolment cannot expose an `authorised` or `current` Term, while retained terminal Term history is valid. Schema 17 supplied protected integrity/read surfaces. The unmerged Schema 18 Phase-L candidate adds explicit administrator-only creation/lifecycle commands and durable idempotency, but no Lesson creation, scheduling, payment, renewal or external authority.
 
 ## Teacher Assignment foundation (Schema 16)
 
@@ -593,3 +593,6 @@ Schema 10 adds only `dzn_proposal_families`, `dzn_proposal_options`, and `dzn_pr
 - `proposal_option_outcome_events`: one immutable terminal outcome per sibling Option, with exactly the selected Option recorded as `accepted` and the remaining siblings recorded as `closed_competing` in the same transaction.
 
 These records are authority evidence only. They do not create Enrolments, assignments, Lessons, bookings, payments, notifications, calendar entries, or Amelia records.
+
+### Schema 18 candidate: canonical Term commands
+`dzn_term_commands` is immutable command evidence for canonical Term create/activate/close/cancel operations. A unique HMAC key digest and canonical payload digest distinguish replay from conflict; result identity/state support fail-closed validation. Raw keys and evidence references are not stored. Existing Terms are not backfilled or translated.

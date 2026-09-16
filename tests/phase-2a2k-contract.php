@@ -12,7 +12,9 @@ $screen = file_get_contents($root . '/src/Admin/Controller/ScreenController.php'
 $lesson = file_get_contents($root . '/src/Core/Application/LessonService.php');
 $runtime = file_get_contents($root . '/tests/phase-2a2k-migration-runtime.php');
 
-foreach (array("DZN_PLATFORM_SCHEMA_VERSION', '17'", 'phase2a2k-canonical-term-foundation-20260916.1', '017_canonical_term_foundation', 'install_canonical_term_foundation', 'verify_canonical_term_schema') as $needle) {
+if (!str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '17'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '18'")) throw new RuntimeException('Missing compatible Phase K+ schema');
+if (!str_contains($plugin, 'phase2a2k-canonical-term-foundation-20260916.1') && !str_contains($plugin, 'phase2a2l-canonical-term-authority-20260916.1')) throw new RuntimeException('Missing compatible Phase K+ build');
+foreach (array( '017_canonical_term_foundation', 'install_canonical_term_foundation', 'verify_canonical_term_schema') as $needle) {
     if (!str_contains($plugin . $migration, $needle)) throw new RuntimeException('Missing Phase K identity/migration: ' . $needle);
 }
 foreach (array('record_model', 'legacy_phase1', 'canonical_enrolment_term_v1', 'lifecycle_state', 'applicable_slot', 'term_lifecycle_events', 'evidence_reference_digest', 'ENGINE=InnoDB') as $needle) {
@@ -35,6 +37,6 @@ if (!str_contains($read, 'Canonical Term integrity conflict')) throw new Runtime
 foreach (array('payment_state', 'teacher_id', 'email', 'phone', 'starts_at', 'ends_at') as $prohibited) if (str_contains($read, "'{$prohibited}'")) throw new RuntimeException('Canonical Term read exposes prohibited authority: ' . $prohibited);
 if (!str_contains($assessment . $read, "current_user_can('dzn_manage_terms')")) throw new RuntimeException('Canonical Term reads are not capability protected');
 foreach (array('command_key_digest', 'command_payload_digest', 'IdempotencyConflictException', 'START TRANSACTION', 'FOR UPDATE', 'TeacherAssignmentService', 'LessonService', 'register_rest_route') as $prohibited) if (stripos($assessment . $read, $prohibited) !== false) throw new RuntimeException('Phase K exceeded read-only foundation boundary: ' . $prohibited);
-if (str_contains($screen, "'create_canonical_term'") || !str_contains($lesson, 'Canonical Enrolment grants no Lesson or Teacher Assignment authority')) throw new RuntimeException('Canonical mutation/downstream boundary reopened');
+if (!str_contains($lesson, 'Canonical Enrolment grants no Lesson or Teacher Assignment authority')) throw new RuntimeException('Canonical mutation/downstream boundary reopened');
 foreach (array('schema_16_to_17=pass', 'legacy_term_preservation=pass', 'zero_term_classification=pass', 'canonical_applicability=pass', 'closed_enrolment_applicability_guard=pass', 'canonical_terminal_history=pass', 'database_applicability_uniqueness=pass', 'history_integrity=pass', 'canonical_write_boundary=pass', 'canonical_archive_restore_boundary=pass', 'privacy_minimised_read=pass', 'no_teacher_payment_authority=pass', 'repeat_upgrade=pass') as $needle) if (!str_contains($runtime, $needle)) throw new RuntimeException('Missing Phase K runtime evidence declaration: ' . $needle);
 echo "Phase 2A.2-K source contract passed\n";

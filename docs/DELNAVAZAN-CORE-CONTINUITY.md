@@ -307,3 +307,6 @@ Before starting another slice, establish:
 6. the single next authorised action.
 
 Never treat this document as authority to deploy, merge, access production, change NIU, activate plugins, send communications, or extend a later phase.
+
+### Phase 2A.2-L candidate
+Phase L is an unmerged candidate adding explicit canonical Term creation and bounded lifecycle authority with durable idempotency. Canonical Enrolment remains Student + Course; Teacher Assignment remains the sole current-Teacher authority. Term closure/cancellation does not mutate Enrolment, and no Lesson, payment, scheduling or integration authority follows from a Term command.

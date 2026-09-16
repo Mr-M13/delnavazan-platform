@@ -25,6 +25,11 @@ final class TermApplicabilityAssessment {
 
     public function inspect(int $enrolmentId): array {
         if (!current_user_can('dzn_manage_terms')) throw new \RuntimeException('Unauthorized');
+        return $this->inspectForAuthority($enrolmentId);
+    }
+
+    /** Internal integrity seam for capability-protected canonical authority services. */
+    public function inspectForAuthority(int $enrolmentId): array {
         if ($enrolmentId < 1) throw new \InvalidArgumentException('Enrolment identity required');
         $enrolment = $this->enrolments->find($enrolmentId);
         if (!$enrolment) return array('classification' => self::DATA_INTEGRITY_CONFLICT, 'terms' => array());

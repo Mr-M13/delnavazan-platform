@@ -4,6 +4,7 @@ namespace Delnavazan\Platform\Admin\Controller;
 use Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic;
 use Delnavazan\Platform\Core\Application\{
     ArchiveService,
+    CanonicalTermAuthorityService,
     CatalogueService,
     CoreReadService,
     DiagnosticsService,
@@ -59,6 +60,7 @@ final class ScreenController {
             if ($screen !== 'enrolment') self::entityCreateForm($screen);
             else echo '<p>Enrolments are read-only. Generic creation is disabled; canonical conversion authority is not part of this phase.</p>';
             self::entityList($screen);
+            if ($screen === 'term' && current_user_can('dzn_manage_canonical_terms')) self::canonicalTermCreateForm();
         }
         echo '</div>';
     }
@@ -97,6 +99,10 @@ final class ScreenController {
                 'create_instrument' => (new CatalogueService())->instrument(self::createPayload('instrument', $post)),
                 'create_course' => (new CatalogueService())->course(self::createPayload('course', $post)),
                 'create_term' => (new TermService())->create(self::createPayload('term', $post)),
+                'create_canonical_term' => self::canonicalTermCreate($post),
+                'activate_canonical_term' => self::canonicalTermTransition($post, 'activate'),
+                'close_canonical_term' => self::canonicalTermTransition($post, 'close'),
+                'cancel_canonical_term' => self::canonicalTermTransition($post, 'cancel'),
                 'create_lesson' => (new LessonService())->create(self::createPayload('lesson', $post)),
                 'archive' => self::archive($post), 'restore' => self::restore($post),
                 'initial_schedule' => self::schedule($post, true), 'reschedule' => self::schedule($post, false),
@@ -166,6 +172,7 @@ final class ScreenController {
             $history = (new CoreReadService())->enrolmentLifecycle($id);
             if ($history) self::objectTable($history, null); else echo '<p>No canonical lifecycle history.</p>';
         }
+        if ($entity === 'term' && ($record->record_model ?? '') === 'canonical_enrolment_term_v1' && current_user_can('dzn_manage_canonical_terms')) self::canonicalTermLifecycleForm($record);
         if ($entity === 'lesson') self::lessonSchedules($id);
     }
 
@@ -177,6 +184,35 @@ final class ScreenController {
         };
         submit_button('Create ' . self::ENTITIES[$entity][0]); echo '</form>';
     }
+
+    private static function canonicalTermCreate(array $post): int {
+        if (!current_user_can('dzn_manage_canonical_terms')) throw new \RuntimeException('Unauthorized');
+        $expected = absint($post['expected_latest_term_id'] ?? 0);
+        $result = (new CanonicalTermAuthorityService())->create(absint($post['enrolment_id'] ?? 0), $expected ?: null, $expected ? sanitize_key($post['expected_latest_state'] ?? '') : null, self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
+        return (int)$result['term_id'];
+    }
+
+    private static function canonicalTermTransition(array $post, string $operation): int {
+        if (!current_user_can('dzn_manage_canonical_terms')) throw new \RuntimeException('Unauthorized');
+        $service = new CanonicalTermAuthorityService();
+        $result = $service->{$operation}(absint($post['term_id'] ?? 0), sanitize_key($post['expected_state'] ?? ''), self::canonicalEvidence($post), (string)($post['idempotency_key'] ?? ''));
+        return (int)$result['term_id'];
+    }
+
+    private static function canonicalEvidence(array $post): array { return array('evidence_channel'=>sanitize_key($post['evidence_channel']??''),'evidence_reference'=>sanitize_text_field($post['evidence_reference']??''),'evidence_at'=>sanitize_text_field($post['evidence_at']??'')); }
+
+    private static function canonicalTermCreateForm(): void {
+        echo '<h2>Create canonical Term</h2>'; self::formStart('create_canonical_term');
+        self::input('enrolment_id','Canonical Enrolment ID',true,'number'); self::input('expected_latest_term_id','Expected latest terminal Term ID',false,'number');
+        self::select('expected_latest_state','Expected latest state',['closed','cancelled'],'closed'); self::canonicalEvidenceFields(); submit_button('Create canonical Term'); echo '</form>';
+    }
+
+    private static function canonicalTermLifecycleForm(object $term): void {
+        echo '<h2>Canonical lifecycle</h2>';
+        foreach (array('activate','close','cancel') as $operation) { self::formStart($operation.'_canonical_term'); echo '<input type="hidden" name="term_id" value="'.esc_attr((string)$term->id).'"><input type="hidden" name="expected_state" value="'.esc_attr((string)$term->lifecycle_state).'">'; self::canonicalEvidenceFields(); submit_button(ucfirst($operation).' canonical Term'); echo '</form>'; }
+    }
+
+    private static function canonicalEvidenceFields(): void { self::select('evidence_channel','Evidence channel',['staff_record','authenticated_platform','document_reference'],'staff_record'); self::input('evidence_reference','Evidence reference',true); self::input('evidence_at','Evidence UTC',true,'text',gmdate('Y-m-d H:i:s')); self::input('idempotency_key','Idempotency key',true,'text',wp_generate_uuid4()); }
 
     private static function teacherFields(): void {
         self::input('persian_name', 'Persian name'); self::input('english_name', 'English name'); self::input('display_name', 'Display name', true); self::input('email', 'Email', false, 'email'); self::input('phone', 'Phone'); self::input('whatsapp_phone', 'WhatsApp'); self::input('country_code', 'Country code', false, 'text', 'IR'); self::input('city', 'City'); self::input('timezone', 'Timezone', false, 'text', 'Asia/Tehran'); self::select('timezone_source', 'Timezone source', ['admin_selected', 'student_selected', 'imported', 'system_suggested'], 'admin_selected'); self::input('locale', 'Locale', false, 'text', 'fa_IR'); self::select('calendar_preference', 'Calendar', ['persian', 'gregorian', 'auto'], 'persian'); self::select('status', 'Status', ['active', 'inactive'], 'active');

@@ -201,3 +201,8 @@ Schema 12 / migrations 001–012. Build identity: `phase2a2f-student-identity-ac
 - Adds Schema 13 / migration 013 for immutable, PII-free Accepted Service Arrangements and sibling Proposal Option outcomes.
 - Adds lock-revalidated adult-self/minor-guardian final acceptance, HMAC idempotency, privacy-safe replay, and a protected internal admin form.
 - Freezes further Proposal issuance after a Family has a final arrangement. No deployment or downstream service conversion is included.
+
+## Phase 2A.2-L candidate — 2026-09-16
+- Advances the candidate to Schema 18 with migration `018_canonical_term_authority` and immutable digest-only canonical-Term command evidence.
+- Adds explicit administrator-only canonical Term creation and the four bounded lifecycle transitions with Enrolment-first locking, fail-closed replay, and process-level race harnesses.
+- Preserves legacy Term/Lesson behavior and adds no Lesson, Teacher, payment, scheduling, allocation-consumption, notification, or external-integration authority.
