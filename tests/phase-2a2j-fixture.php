@@ -10,8 +10,9 @@ function dzn_2a2j_f_key(string $label): string { return 'dzn-2a2j-fixture-' . $l
 
 $catalogue = new CatalogueService();
 $instrument = $catalogue->instrument(array('slug' => 'phase-j-' . $suffix, 'name_fa' => 'آزمون', 'name_en' => 'Synthetic Phase J', 'status' => 'active'));
+$labels = array('one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve');
 $courses = array();
-foreach (array('one', 'two') as $label) $courses[] = $catalogue->course(array('instrument_id' => $instrument, 'name_fa' => 'آزمون', 'name_en' => 'Synthetic J ' . $label, 'course_type' => 'introductory', 'status' => 'active', 'default_duration_minutes' => 30, 'default_buffer_minutes' => 15));
+foreach ($labels as $label) $courses[] = $catalogue->course(array('instrument_id' => $instrument, 'name_fa' => 'آزمون', 'name_en' => 'Synthetic J ' . $label, 'course_type' => 'introductory', 'status' => 'active', 'default_duration_minutes' => 30, 'default_buffer_minutes' => 15));
 $teachers = array();
 foreach (array('initial', 'staff replacement', 'authenticated replacement') as $label) {
     $teacherId = (new TeacherService())->create(array('display_name' => 'Synthetic J ' . $label, 'email' => str_replace(' ', '-', $label) . '-' . $suffix . '@phase-2a2j.invalid'));
@@ -40,7 +41,7 @@ $make = function(string $label, int $course) use ($instrument, $teachers, $actor
     $converted = (new EnrolmentConversionService())->convert((int) $accepted['arrangement_id'], dzn_2a2j_f_key('convert-' . $label));
     return array('request_id' => $request, 'arrangement_id' => (int) $accepted['arrangement_id'], 'enrolment_id' => (int) $converted['enrolment_id'], 'student_id' => $student, 'course_id' => $course, 'teacher_id' => $teachers[0]);
 };
-$sources = array($make('one', $courses[0]), $make('two', $courses[1]));
+$sources = array(); foreach ($labels as $index => $label) $sources[] = $make($label, $courses[$index]);
 $teacherUsers = array();
 foreach ($teachers as $index => $teacherId) {
     $teacherPrincipal = wp_insert_user(array('user_login' => 'dzn-j-teacher-' . $index . '-' . $suffix, 'user_pass' => wp_generate_password(32, true, true), 'user_email' => 'teacher-principal-' . $index . '-' . $suffix . '@phase-2a2j.invalid', 'role' => 'dzn_teacher'));

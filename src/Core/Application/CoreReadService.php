@@ -27,11 +27,17 @@ final class CoreReadService {
 
     public function recent(string $entity): array {
         $repository = $this->repository($entity);
-        return $repository->recent();
+        $rows = $repository->recent();
+        if ($entity === 'enrolment' && $repository instanceof EnrolmentRepository) {
+            foreach ($rows as $row) $this->validateCanonicalEnrolment($repository, $row);
+        }
+        return $rows;
     }
 
     public function find(string $entity, int $id): ?object {
-        return $this->repository($entity)->find($id);
+        $repository = $this->repository($entity); $row = $repository->find($id);
+        if ($entity === 'enrolment' && $row && $repository instanceof EnrolmentRepository) $this->validateCanonicalEnrolment($repository, $row);
+        return $row;
     }
 
     public function exceptions(?string $status): array {
@@ -58,8 +64,17 @@ final class CoreReadService {
     public function enrolmentLifecycle(int $enrolmentId): array {
         if (!current_user_can('dzn_manage_enrolments')) throw new \RuntimeException('Unauthorized');
         $repository = new EnrolmentRepository();
-        if (!$repository->find($enrolmentId)) throw new \InvalidArgumentException('Enrolment does not exist');
-        return $repository->lifecycleHistory($enrolmentId);
+        $enrolment = $repository->find($enrolmentId);
+        if (!$enrolment) throw new \InvalidArgumentException('Enrolment does not exist');
+        $history = $repository->lifecycleHistory($enrolmentId);
+        $this->validateCanonicalEnrolment($repository, $enrolment, $history);
+        return $history;
+    }
+
+    private function validateCanonicalEnrolment(EnrolmentRepository $repository, object $enrolment, ?array $history = null): void {
+        if (($enrolment->record_model ?? 'legacy_phase1') !== 'canonical_student_course_v1') return;
+        $history ??= $repository->lifecycleHistory((int)$enrolment->id);
+        if (!CanonicalEnrolmentLifecycleValidator::valid($enrolment, $history)) throw new \InvalidArgumentException('data_integrity_conflict');
     }
 
     private function repository(string $entity): BaseRepository {

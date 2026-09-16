@@ -57,7 +57,13 @@ final class ScreenController {
         if (!isset(self::ENTITIES[$screen]) || !current_user_can(self::ENTITIES[$screen][1])) { self::forbidden(); return; }
         self::renderMessages(); $id = absint($_GET['id'] ?? 0);
         echo '<div class="wrap"><h1>Delnavazan ' . esc_html(self::ENTITIES[$screen][0]) . '</h1>';
-        if ($id) self::entityDetail($screen, $id); else {
+        if ($id) {
+            try { self::entityDetail($screen, $id); }
+            catch (\InvalidArgumentException $exception) {
+                if ($exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+                echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+            }
+        } else {
             if ($screen !== 'enrolment') self::entityCreateForm($screen);
             else echo '<p>Enrolments are read-only. Generic creation is disabled; canonical conversion authority is not part of this phase.</p>';
             self::entityList($screen);
@@ -174,7 +180,12 @@ final class ScreenController {
         if ($entity !== 'enrolment' || ($record->record_model ?? 'legacy_phase1') === 'legacy_phase1') self::archiveActions($entity, $id, (string) $record->status);
         if ($entity === 'enrolment') {
             echo '<h2>Canonical lifecycle history</h2>';
-            $history = (new CoreReadService())->enrolmentLifecycle($id);
+            try { $history = (new CoreReadService())->enrolmentLifecycle($id); }
+            catch (\InvalidArgumentException $exception) {
+                if ($exception->getMessage() !== 'data_integrity_conflict') throw $exception;
+                echo '<p class="notice notice-error">Canonical lifecycle history failed integrity validation.</p>';
+                return;
+            }
             if ($history) self::objectTable($history, null); else echo '<p>No canonical lifecycle history.</p>';
             if (($record->record_model ?? '') === 'canonical_student_course_v1' && current_user_can('dzn_manage_canonical_enrolment_lifecycle')) self::canonicalEnrolmentLifecycleForm($record);
         }
