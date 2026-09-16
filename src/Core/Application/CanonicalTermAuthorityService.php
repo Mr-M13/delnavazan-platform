@@ -17,15 +17,20 @@ final class CanonicalTermAuthorityService {
         if ($enrolmentId < 1) throw new \InvalidArgumentException('Enrolment identity required');
         if (($expectedLatestTermId === null) !== ($expectedLatestState === null)) throw new \InvalidArgumentException('Expected aggregate position is incomplete');
         if ($expectedLatestState !== null && !in_array($expectedLatestState,array('closed','cancelled'),true)) throw new \InvalidArgumentException('Expected latest terminal state required');
+        // Bind this invocation to what was committed before it can wait for the
+        // canonical Enrolment lock. A terminal transition completed while this
+        // command waits must not make an otherwise stale successor valid.
+        $observedPosition=$this->aggregatePosition($this->repository->termsForEnrolment($enrolmentId,false));
         $proof=$this->evidence('canonical_term_created',$evidence);
         $facts=array('expected_latest_term_id'=>$expectedLatestTermId,'expected_latest_state'=>$expectedLatestState)+$proof['payload'];
-        return $this->execute('create',$enrolmentId,$facts,$idempotencyKey,function(string$key,string$payload)use($enrolmentId,$expectedLatestTermId,$expectedLatestState,$proof,$facts,$actor):array{
+        return $this->execute('create',$enrolmentId,$facts,$idempotencyKey,function(string$key,string$payload)use($enrolmentId,$expectedLatestTermId,$expectedLatestState,$observedPosition,$proof,$facts,$actor):array{
             $parent=$this->repository->enrolment($enrolmentId,true);
             $terms=$this->repository->termsForEnrolment($enrolmentId,true);foreach($terms as$t)$this->repository->events((int)$t->id,true);
             do_action('dzn_phase_2a2l_term_locks_held','create',$enrolmentId);
             $this->validAggregate($enrolmentId,$terms);
             if($winner=$this->repository->commandForDigest($key))return $this->replay($winner,$payload,'create',$enrolmentId,$facts);
             $this->validParent($parent);
+            if($observedPosition!==$this->aggregatePosition($terms))throw new \InvalidArgumentException('stale_term_aggregate');
             $latest=$terms?end($terms):null;
             if(!$this->expectedPosition($latest,$expectedLatestTermId,$expectedLatestState)){
                 if($latest&&$this->createdIntentMatches($latest,$expectedLatestTermId,$expectedLatestState,$proof))return $this->converge($key,$payload,'create',$enrolmentId,$latest,$actor,$expectedLatestTermId,$expectedLatestState);
@@ -36,7 +41,7 @@ final class CanonicalTermAuthorityService {
             $id=$this->repository->insertTerm(array('uid'=>Identifier::uid(),'reference_code'=>null,'enrolment_id'=>$enrolmentId,'sequence_number'=>$sequence,'status'=>'canonical','lesson_allocation'=>12,'replacement_allowance'=>2,'starts_at'=>null,'ends_at'=>null,'activated_at'=>null,'completed_at'=>null,'payment_state'=>'not_applicable','created_at'=>$now,'updated_at'=>$now,'created_by'=>$actor,'updated_by'=>$actor,'archived_at'=>null,'archived_by'=>null,'record_model'=>'canonical_enrolment_term_v1','lifecycle_state'=>'authorised','applicable_slot'=>1));
             $this->repository->assignReference($id,Identifier::reference('DZN-TRM-',$id));do_action('dzn_phase_2a2l_after_term_insert','create');
             $this->repository->insertEvent($this->event($id,1,null,'authorised','canonical_term_created',$proof,$now,$actor));do_action('dzn_phase_2a2l_after_event_insert','create');
-            $this->recordCommand($key,$payload,'create',$enrolmentId,$id,$expectedLatestTermId,null,'authorised',$now,$actor);do_action('dzn_phase_2a2l_after_command_insert','create');
+            $this->recordCommand($key,$payload,'create',$enrolmentId,$id,$expectedLatestTermId,$expectedLatestState,'authorised',$now,$actor);do_action('dzn_phase_2a2l_after_command_insert','create');
             $this->validAggregate($enrolmentId,$this->repository->termsForEnrolment($enrolmentId,false));
             return $this->result($id,'create',true,false,false);
         });
@@ -87,6 +92,7 @@ final class CanonicalTermAuthorityService {
     private function validParent(?object$p):void{if(!$p||($p->record_model??null)!=='canonical_student_course_v1'||($p->status??null)!=='canonical'||!in_array((string)($p->lifecycle_state??''),array('authorised','current','paused'),true)||(int)($p->applicable_slot??0)!==1||(int)($p->accepted_service_arrangement_id??0)<1||$p->archived_at!==null)throw new \InvalidArgumentException('enrolment_not_applicable');}
     private function validAggregate(int$id,array$terms):void{$assessment=(new TermApplicabilityAssessment())->inspectForAuthority($id);if($terms&&$assessment['classification']===TermApplicabilityAssessment::DATA_INTEGRITY_CONFLICT)throw new \InvalidArgumentException('data_integrity_conflict');if(!$terms&&$assessment['classification']!==TermApplicabilityAssessment::NONE)throw new \InvalidArgumentException('data_integrity_conflict');}
     private function expectedPosition(?object$latest,?int$id,?string$state):bool{return(!$latest&&$id===null&&$state===null)||($latest&&$id===(int)$latest->id&&$state===(string)$latest->lifecycle_state&&in_array($state,array('closed','cancelled'),true));}
+    private function aggregatePosition(array$terms):array{$latest=$terms?end($terms):null;return array('count'=>count($terms),'latest_id'=>$latest?(int)$latest->id:null,'latest_sequence'=>$latest?(int)$latest->sequence_number:null,'latest_state'=>$latest?(string)($latest->lifecycle_state??''):null,'latest_model'=>$latest?(string)($latest->record_model??''):null);}
     private function createdIntentMatches(object$t,?int$expectedId,?string$expectedState,array$p):bool{$events=$this->repository->events((int)$t->id,false);$origin=$events[0]??null;$prior=(int)$t->sequence_number===1?null:$this->repository->termsForEnrolment((int)$t->enrolment_id,false)[(int)$t->sequence_number-2]??null;return$origin&&$origin->reason_code==='canonical_term_created'&&$this->matchingEvidence($origin,$p)&&(($expectedId===null&&(int)$t->sequence_number===1)||($prior&&$expectedId===(int)$prior->id&&$expectedState===(string)$prior->lifecycle_state));}
     private function transitionIntentMatches(object$t,string$from,string$to,array$p):bool{foreach($this->repository->events((int)$t->id,false)as$event)if((string)$event->from_state===$from&&(string)$event->to_state===$to&&$this->matchingEvidence($event,$p))return true;return false;}
     private function evidence(string$reason,array$e):array{$channel=(string)($e['evidence_channel']??'');if(!in_array($channel,self::CHANNELS,true))throw new \InvalidArgumentException('Controlled evidence channel required');$now=gmdate('Y-m-d H:i:s');$at=(string)($e['evidence_at']??'');if(!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D',$at)||strtotime($at.' UTC')===false||$at>$now)throw new \InvalidArgumentException('Valid past-or-present UTC evidence time required');$digest=CanonicalTermIdempotency::evidenceDigest((string)($e['evidence_reference']??''));return array('reason'=>$reason,'channel'=>$channel,'digest'=>$digest,'at'=>$at,'payload'=>array('reason_code'=>$reason,'evidence_channel'=>$channel,'evidence_reference_digest'=>$digest,'evidence_at'=>$at));}
