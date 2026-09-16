@@ -7,7 +7,7 @@ application services, explicit read models, commands, and versioned domain
 events. They do not reach into another module's tables or use an external
 provider as an implicit shared domain model.
 
-> **Current implementation boundary:** The ownership sections below describe the target modular architecture. At authoritative Schema 18, canonical Enrolment identity is Student + Course, current Teacher authority is a separate Teacher Assignment, and canonical Term is a storage/read foundation only. Phase L provides bounded canonical Term creation/lifecycle commands; all canonical Lesson authority remains future work; target ownership must not be mistaken for implemented authority.
+> **Current implementation boundary:** The ownership sections below describe the target modular architecture. At the Phase-M candidate boundary, canonical Enrolment identity is Student + Course, current Teacher authority is a separate Teacher Assignment, canonical Term has bounded creation/lifecycle authority, and canonical Lesson authority is separately capability-controlled. Scheduling, attendance, payment, calendar and external-provider authority remain excluded; target ownership must not be mistaken for implemented authority.
 
 The dependency direction is inward toward Core contracts:
 
