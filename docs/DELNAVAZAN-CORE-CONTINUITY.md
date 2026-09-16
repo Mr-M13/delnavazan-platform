@@ -18,8 +18,8 @@
 | Latest completed slice | Phase 2A.2-L — Canonical Term Creation & Lifecycle Authority |
 | Merge state | Independent review PASS; exact approved tree merged as `36e1d6b754079efcf6fdff02ed2a029099071455` |
 | Closeout baseline | `36e1d6b754079efcf6fdff02ed2a029099071455`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None; Phase 2A.2-L is merged and closed |
-| Next Platform action | Requires separate authorisation; no Phase M implementation has started |
+| Active Platform candidate | Phase 2A.2-M — Canonical Lesson Authority; review pending |
+| Next Platform action | Independent review of the bounded Schema-19 canonical Lesson candidate |
 | Current 2A.2-L state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:

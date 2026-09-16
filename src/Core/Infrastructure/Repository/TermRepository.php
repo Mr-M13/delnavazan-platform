@@ -114,6 +114,15 @@ final class TermRepository extends BaseRepository {
         ));
     }
 
+    /** Canonical Term terminalisation may not strand an unresolved canonical Lesson authority. */
+    public function hasAuthorisedCanonicalLessons(int $termId): bool {
+        global $wpdb;
+        return (bool) $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}dzn_lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1' AND lifecycle_state='authorised' LIMIT 1 FOR UPDATE",
+            $termId
+        ));
+    }
+
     private function requireLegacyMutationTarget(int $id): object {
         $row = $this->findAny($id);
         if (!$row || ($row->record_model ?? null) !== 'legacy_phase1') {
