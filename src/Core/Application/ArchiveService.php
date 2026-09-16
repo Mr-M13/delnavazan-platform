@@ -28,10 +28,13 @@ final class ArchiveService {
         [$repository, $capability] = $this->entry($type);
         if (!current_user_can($capability)) throw new \RuntimeException('Unauthorized');
 
-        $row = $repository->find($id);
+        $row = $type === 'term' && $repository instanceof TermRepository ? $repository->findAny($id) : $repository->find($id);
         if (!$row) throw new \InvalidArgumentException('Archive conflict');
         if ($type === 'enrolment' && ($row->record_model ?? 'legacy_phase1') !== 'legacy_phase1') {
             throw new \InvalidArgumentException('Canonical Enrolment lifecycle is not mutable through legacy archive');
+        }
+        if ($type === 'term' && ($row->record_model ?? 'legacy_phase1') !== 'legacy_phase1') {
+            throw new \InvalidArgumentException('Canonical Term lifecycle is not mutable through legacy archive');
         }
         if ($row->archived_at !== null || $row->status === 'archived' || in_array($row->status, ['scheduled', 'completed', 'cancelled'], true)) {
             throw new \InvalidArgumentException('Archive conflict');
@@ -45,10 +48,13 @@ final class ArchiveService {
         [$repository, $capability, $restoreStatus] = $this->entry($type);
         if (!current_user_can($capability)) throw new \RuntimeException('Unauthorized');
 
-        $row = $repository->find($id);
+        $row = $type === 'term' && $repository instanceof TermRepository ? $repository->findAny($id) : $repository->find($id);
         if (!$row) throw new \InvalidArgumentException('Record is not archived');
         if ($type === 'enrolment' && ($row->record_model ?? 'legacy_phase1') !== 'legacy_phase1') {
             throw new \InvalidArgumentException('Canonical Enrolment lifecycle is not mutable through legacy restore');
+        }
+        if ($type === 'term' && ($row->record_model ?? 'legacy_phase1') !== 'legacy_phase1') {
+            throw new \InvalidArgumentException('Canonical Term lifecycle is not mutable through legacy restore');
         }
         if ($row->status !== 'archived' || $row->archived_at === null) {
             throw new \InvalidArgumentException('Record is not archived');

@@ -18,7 +18,8 @@
 | Phase 2A.2-J approved candidate | `b1fd5aebf47a0bce33f74ab56b53c5334d719bf4`; tree `5766e126a5abd7e9160e6c00dc96b6837f49b05e` |
 | Merge state | Final independent check PASS; merged as `763a9fa9f792cd45114e10978a1bda0a53662c21` |
 | Final main after continuity update | The commit containing this record (`origin/main`); its exact SHA is recorded in the merge completion report because a Git commit cannot embed its own hash |
-| Next Platform action | Requires a separately authorised and reviewed increment; no downstream authority is implied by Phase J |
+| Active Platform candidate | Phase 2A.2-K — Canonical Term Foundation; branch `phase-2a2k-canonical-term-foundation`; unmerged Schema 17 review candidate |
+| Next Platform action | Independent review of the exact Phase-K candidate; no merge or downstream authority is implied |
 | Current 2A.2-J state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:
@@ -35,6 +36,14 @@ The completed coordination chain is:
 10. **2A.2-J** — Teacher Assignment Foundation: separate current-Teacher authority, retained initial provenance, assignment-specific replacement evidence, atomic lifecycle and protected reads/offboarding.
 
 Main is authoritative at Schema 16 / Phase J. Teacher Assignment creates no Term or Lesson authority and establishes no scheduling, capacity, payment, notification, communication, calendar or Amelia authority.
+
+## Phase 2A.2-K Canonical Term Foundation — unmerged review candidate
+
+From authoritative main `cf222d20e4ab0d08c992e7ec38bcece8b7625d9e`, branch `phase-2a2k-canonical-term-foundation` prepares Schema 17 / `017_canonical_term_foundation`, build `phase2a2k-canonical-term-foundation-20260916.1`, for independent review.
+
+The candidate preserves all existing Terms as `legacy_phase1` without translating status, payment, allocation, dates or archive state. It reserves `canonical_enrolment_term_v1` for a Teacher-neutral Term identified by canonical Enrolment plus immutable sequence; adds `authorised`, `current`, `closed`, and `cancelled` lifecycle storage, one-applicable-row arbitration and append-only digest-only history; and provides protected integrity classification and privacy-minimised reads.
+
+The candidate intentionally contains no ordinary canonical Term creator, lifecycle mutation command, command-idempotency table, Lesson creation/consumption, scheduling, payment, renewal or external authority. The existing legacy Term/Lesson path remains available only through explicit legacy record-model guards. Generic archive/restore cannot mutate canonical lifecycle. This candidate is not authoritative until independently reviewed and merged.
 
 ## Completed Teacher Assignment Foundation — Phase 2A.2-J
 
@@ -268,7 +277,7 @@ CD is the architecture/orchestration authority: source review, security/privacy/
 
 Hamed and Ina are dynamic execution-agent identities, each with Work and Codex available. Do not use obsolete permanent labels such as “Hamed Theme”, “Ina Platform” or equivalent. For substantial work CD specifies Agent → Environment → Model → Reasoning → Parallel yes/no.
 
-Work and Codex share the same usage/credit pool. Avoid duplicate expensive reconnaissance. Prefer Codex when a real runtime/development environment is uniquely useful; prefer Work when source/repository/architecture evidence is sufficient.
+Current orchestration allocation: Ina / Codex Local is the primary bulk implementation and execution agent; Hamed / Codex Cloud is the independent reviewer and secondary specialist. Both environments have confirmed GitHub access. Implementation and independent review of the same increment are normally sequential, not parallel. Avoid duplicate expensive reconnaissance or runtime work.
 
 Delivery posture: **CONTROLLED MOMENTUM**. For bounded, reversible work: IMPLEMENT → TEST → INSPECT → CORRECT. Remain strict around production, real-user/private data, security/privacy, destructive migrations, payments, external communications, Amelia/calendar, identity/guardian authority, acceptance/conversion authority and consequential deployment.
 

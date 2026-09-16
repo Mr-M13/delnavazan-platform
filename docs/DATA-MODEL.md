@@ -1,5 +1,13 @@
 # Delnavazan Platform Conceptual Data Model
 
+## Canonical Term foundation (Schema 17 review candidate)
+
+The Phase 2A.2-K candidate additively separates existing `legacy_phase1` Terms from `canonical_enrolment_term_v1`. A canonical Term is one bounded educational cycle identified by one canonical Enrolment plus an immutable server-owned sequence. It contains no Teacher identity: current Teacher authority remains exclusively in the Teacher Assignment aggregate, while `enrolments.teacher_id` remains historical Accepted Service Arrangement context.
+
+Canonical lifecycle storage is `authorised`, `current`, `closed`, or `cancelled`. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
+
+Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. Schema 17 supplies protected integrity/read surfaces but no ordinary canonical writer, lifecycle command, idempotency table, Lesson creation, scheduling, payment, renewal or external authority.
+
 ## Teacher Assignment foundation (Schema 16)
 
 `teacher_assignments` is the first-class current-Teacher authority for a canonical Enrolment. It is not `enrolments.teacher_id`, which remains historical final-arrangement context. Zero rows is valid and migration 016 does not backfill. One nullable-slot unique key on `(enrolment_id, applicable_slot)` permits history while enforcing at most one applicable row. Ordered predecessor lineage prohibits a staged future replacement.
@@ -58,11 +66,11 @@ belong to the approved Phase 1 implementation brief.
 ## 3. Relationship overview
 
 ```text
-Instrument 1 ─── * Course 1 ─── * Enrolment * ─── 1 Student
+Instrument 1 ─── * Course 1 ─── * canonical Enrolment * ─── 1 Student
                                   │
-Teacher 1 ────────────────────────┘
+                                  ├── 0..* Teacher Assignment ─── 1 Teacher
                                   │
-                                  * Term
+                                  * Term (no Teacher identity)
                                   │
                                   * standard/replacement Lesson
                                     ├── 0..1 Attendance aggregate
@@ -221,6 +229,8 @@ Course. It is independent of any single payment, renewal cycle, or lesson block.
   unchanged.
 
 ## 9. Term
+
+> **Current-state clarification:** The lifecycle and payment-oriented material below documents the Phase-1 legacy model. The Schema 17 Phase-K candidate boundary is defined above. It must not be used to restore `awaiting_payment`, `payment_state`, generic archive, or Teacher identity as canonical Term authority.
 
 ### Responsibility
 
