@@ -8,12 +8,12 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Phase-M0 implementation merge | `c316a5153c7a56b810732495b3785786771c695a` |
-| Platform / schema | 0.1.0 / 19 authoritative; Schema-20 candidate in review preparation |
-| Migrations | 001–019 authoritative; candidate adds `020_canonical_lesson_authority` |
-| Active Platform candidate | Phase 2A.2-M canonical Lesson authority — unmerged |
-| Latest merged slice | Canonical Enrolment Lifecycle Authority (M0) |
-| Next boundary | Canonical Lesson authority, with no scheduling/delivery/payment authority |
+| Phase-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
+| Platform / schema | 0.1.0 / 20 authoritative |
+| Migrations | 001–020 authoritative; latest `020_canonical_lesson_authority` |
+| Active Platform candidate | None — Phase N has not started |
+| Latest merged slice | Canonical Lesson Authority (M) |
+| Next boundary | Not yet authorised; scheduling/delivery/payment remain outside Platform authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
@@ -30,7 +30,7 @@ Booking Request → Coordination Case → Candidate Teacher → Availability Ass
 → canonical Enrolment conversion → M0 current Enrolment → Teacher Assignment → canonical Term → canonical Lesson authority
 ```
 
-Proposal is not acceptance. Acceptance is not conversion authority. Conversion creates one Student + Course Enrolment and does not create Teacher Assignment. Current Teacher authority belongs to the separate Assignment aggregate. Phase L owns canonical Term creation/lifecycle authority. M0 makes the Enrolment lifecycle graph operational; the unmerged Schema-20 candidate issues canonical Lesson authority only.
+Proposal is not acceptance. Acceptance is not conversion authority. Conversion creates one Student + Course Enrolment and does not create Teacher Assignment. Current Teacher authority belongs to the separate Assignment aggregate. Phase L owns canonical Term creation/lifecycle authority. M0 makes the Enrolment lifecycle graph operational; Phase M makes canonical Lesson issuance and its bounded terminal lifecycle authoritative only.
 
 ## Repository rule
 

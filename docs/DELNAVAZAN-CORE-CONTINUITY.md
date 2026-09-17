@@ -8,19 +8,19 @@
 | Item | Authoritative state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Pre-Phase 2A.2-M0 main | `8490d712d18116b3ca606d6c2e3dbb8560d2ce54` |
-| Phase 2A.2-M0 approved candidate | `66ba811c47a3494f12f47dbed03775ca7c4e5ba0`; tree `6a9631505a86893abf1fcefa89a78675e7ed3901` |
-| Phase 2A.2-M0 implementation merge | `c316a5153c7a56b810732495b3785786771c695a`; tree `6a9631505a86893abf1fcefa89a78675e7ed3901` |
+| Pre-Phase 2A.2-M main | `c83c1f99557b2cd1f2f81aa82a05177887a468e6` |
+| Phase 2A.2-M approved candidate | `f44b502509f5dcb9b5d0281cfda4329407abd3bf`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
+| Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
-| Schema | 19 |
-| Migrations | 001–019; latest `019_canonical_enrolment_lifecycle_authority` |
-| Build identity | `phase2a2m0-enrolment-lifecycle-authority-20260917.1` |
-| Latest completed slice | Phase 2A.2-M0 — Canonical Enrolment Lifecycle Authority |
-| Merge state | Independent review PASS; exact approved tree merged as `c316a5153c7a56b810732495b3785786771c695a` |
-| Closeout baseline | `c316a5153c7a56b810732495b3785786771c695a`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | Phase 2A.2-M canonical Lesson authority, Schema-20 post-M0 resumption — unmerged |
-| Next Platform action | Independent review of the narrow canonical Lesson authority candidate |
-| Current 2A.2-M0 state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
+| Schema | 20 |
+| Migrations | 001–020; latest `020_canonical_lesson_authority` |
+| Build identity | `phase2a2m-canonical-lesson-authority-20260917.1` |
+| Latest completed slice | Phase 2A.2-M — Canonical Lesson Authority |
+| Merge state | Independent review PASS; exact approved tree merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
+| Closeout baseline | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
+| Active Platform candidate | None — Phase N has not started |
+| Next Platform action | No next implementation authority has been started |
+| Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:
 
@@ -37,12 +37,13 @@ The completed coordination chain is:
 11. **2A.2-K** — Canonical Term Foundation: legacy-compatible Enrolment + sequence identity, canonical lifecycle/applicability storage, append-only history and protected reads without creation or lifecycle mutation authority.
 12. **2A.2-L** — Canonical Term Creation & Lifecycle Authority: explicit capability-protected creation, bounded transitions, durable idempotency and Enrolment-first concurrency control.
 13. **2A.2-M0** — Canonical Enrolment Lifecycle Authority: explicit activate/pause/resume/close commands, durable idempotency, protected integrity reads and subordinate closure guards.
+14. **2A.2-M** — Canonical Lesson Authority: bounded standard/replacement issuance and terminal completion/cancellation, immutable Term/Enrolment/Assignment/Teacher provenance, append-only lifecycle evidence and idempotent command evidence.
 
-Main is authoritative at Schema 19 / Phase M0. Canonical Enrolment lifecycle authority and canonical Term creation/bounded lifecycle mutation are authoritative. The active but unmerged Schema-20 candidate adds canonical Lesson authority only; it introduces no scheduling, capacity, payment, notification, communication, calendar or Amelia authority.
+Main is authoritative at Schema 20 / Phase M. Canonical Enrolment lifecycle authority, canonical Term creation/bounded lifecycle mutation and canonical Lesson authority are authoritative. Phase M introduces no scheduling, attendance, capacity, payment, notification, communication, calendar or Amelia authority; Phase N has not started.
 
-## Active Phase 2A.2-M candidate — Canonical Lesson Authority
+## Completed Phase 2A.2-M — Canonical Lesson Authority
 
-The resumed post-M0 candidate uses additive Schema 20 / `020_canonical_lesson_authority` and build `phase2a2m-canonical-lesson-authority-20260917.1`. It preserves legacy Lesson rows, requires a current canonical Enrolment, current canonical Term and current Teacher Assignment, and derives Teacher provenance from that Assignment. It adds immutable command/lifecycle evidence, permanent 12-standard/2-replacement allocation and no scheduling or delivery authority. M0 closure now rejects an authorised canonical Lesson without cascade; terminal Lessons do not block closure, and malformed Lesson evidence fails closed. This candidate is not complete or authoritative until independently reviewed and merged.
+Phase M uses additive Schema 20 / `020_canonical_lesson_authority` and build `phase2a2m-canonical-lesson-authority-20260917.1`. It preserves legacy Lesson rows, requires a current canonical Enrolment, current canonical Term and current Teacher Assignment, and derives Teacher provenance from that Assignment. It adds immutable command/lifecycle evidence, permanent 12-standard/2-replacement allocation and no scheduling or delivery authority. M0 closure rejects an authorised canonical Lesson without cascade; terminal Lessons do not block closure, and malformed Lesson evidence fails closed. It is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**.
 
 ### Correction round 1 — 2026-09-17
 
@@ -53,7 +54,7 @@ The reviewed candidate `1d723e0d7b5ef73db7bc6c24683a73c62684432c` (tree `cb577b7
 3. `tests/phase-2a2m-concurrency-runner.sh` commits a deterministic process-level runner that coordinates setup, gated worker start, lock-wait observation, controlled release, worker completion and final database verification, consumes and asserts worker artefacts, and fails non-zero on any violated race invariant.
 4. Failure injection spans standard creation, replacement creation, completion, cancellation, lifecycle/history evidence writes and command evidence writes, proving complete rollback with no false replay.
 
-Verification for this round: all 29 static/source contract tests pass; the Phase F, G, I, J, L, M0 and M runtime suites pass on disposable MariaDB 11.4.13 baselines, including a genuine Phase-H Schema-14 fixture database upgraded to Schema 20; the 16-mode gated concurrency matrix passes deterministically. The stale finite schema/build enumerations in `tests/phase-2a2h-contract.php` and `tests/phase-2a2l-runtime.php` were replaced with the repository's established minimum-schema plus canonical-build-identity pattern; both were failing on the reviewed candidate itself. The correction remains an unmerged candidate and is not authoritative until independently re-reviewed and merged.
+Verification for this round: all 29 static/source contract tests pass; the Phase F, G, I, J, L, M0 and M runtime suites pass on disposable MariaDB 11.4.13 baselines, including a genuine Phase-H Schema-14 fixture database upgraded to Schema 20; the 16-mode gated concurrency matrix passes deterministically. The stale finite schema/build enumerations in `tests/phase-2a2h-contract.php` and `tests/phase-2a2l-runtime.php` were replaced with the repository's established minimum-schema plus canonical-build-identity pattern; both were failing on the reviewed candidate itself. Independently approved candidate `f44b502509f5dcb9b5d0281cfda4329407abd3bf`, tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e`, was merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4`, whose tree exactly matches the approved tree. No deployment occurred.
 
 ## Completed Canonical Enrolment Lifecycle Authority — Phase 2A.2-M0
 

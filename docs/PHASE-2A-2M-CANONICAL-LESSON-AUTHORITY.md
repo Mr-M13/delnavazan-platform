@@ -1,8 +1,8 @@
 # Phase 2A.2-M — Canonical Lesson Authority
 
-Status: **CANDIDATE — INDEPENDENT REVIEW CORRECTION ROUND 1 COMPLETE, NOT MERGED, NOT AUTHORITATIVE**
+Status: **COMPLETE — INDEPENDENTLY REVIEWED / MERGED / CLOSED**
 
-Base candidate `1d723e0d7b5ef73db7bc6c24683a73c62684432c`, tree `cb577b7ece33d8533b2e47dacd4b3894566376ec`, correction branch `phase-2a2m-canonical-lesson-authority-correction1`. Schema 20 / migration `020_canonical_lesson_authority` / build `phase2a2m-canonical-lesson-authority-20260917.1`.
+The failed candidate `1d723e0d7b5ef73db7bc6c24683a73c62684432c`, tree `cb577b7ece33d8533b2e47dacd4b3894566376ec`, was corrected on `phase-2a2m-canonical-lesson-authority-correction1`. Independently approved candidate `f44b502509f5dcb9b5d0281cfda4329407abd3bf`, tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e`, was merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; the implementation merge tree exactly matches the approved tree. Schema 20 / migration `020_canonical_lesson_authority` / build `phase2a2m-canonical-lesson-authority-20260917.1` are authoritative.
 
 ## Locked contract
 
@@ -30,7 +30,7 @@ Disposable MariaDB 11.4.13 (intended runtime target); no production or external 
 - All 29 static/source contract tests pass.
 - Phase F, G, I, J, L, M0 and M runtime suites pass, including a genuine Phase-H Schema-14 fixture database upgraded to Schema 20.
 - The 16-mode gated process-level concurrency matrix passes deterministically.
-- The correction remains an unmerged candidate; merge, deployment and external authority are out of scope.
+- Phase M is closed. No deployment or external authority change occurred.
 
 ## Residual validation
 

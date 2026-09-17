@@ -24,9 +24,9 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration and Schema-20 candidate
+## Current authoritative migration — Schema 20
 
-Schema 19 / `019_canonical_enrolment_lifecycle_authority` is authoritative: it establishes explicit canonical Enrolment activation, pause, resume and closure. The unmerged Schema-20 Phase-M candidate adds `020_canonical_lesson_authority` only: legacy Lessons retain `legacy_phase1`; canonical Lesson rows use a separate model, immutable Assignment/Teacher provenance, append-only lifecycle and digest-only command evidence. It creates no schedule, delivery, attendance, payment, notification, calendar, Amelia or provider authority.
+Schema 20 / `020_canonical_lesson_authority` is authoritative. It retains Schema 19's explicit canonical Enrolment activation, pause, resume and closure; legacy Lessons retain `legacy_phase1`; canonical Lesson rows use a separate model, immutable Assignment/Teacher provenance, append-only lifecycle and digest-only command evidence. It creates no schedule, delivery, attendance, payment, notification, calendar, Amelia or provider authority.
 
 ## Earlier authoritative migration — Schema 18 / migration 018
 
