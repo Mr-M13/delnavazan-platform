@@ -19,8 +19,8 @@
 | Merge state | Independent review PASS; exact approved tree merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
 | Closeout baseline | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
-| Active Phase 2A.2-N candidate | `phase-2a2n-canonical-lesson-schedule-authority` — Schema 21 canonical Lesson scheduling and Teacher capacity authority; unmerged candidate |
-| Phase 2A.2-N state | **IMPLEMENTED / SELF-VALIDATED / AWAITING INDEPENDENT REVIEW** (branch base `f90c41e6d9e129d7d9e1a243941d4655fadc6b8e`, tree `15c257aedf6d2d18afc5c1ba4991d7c468f1195c`) |
+| Active Phase 2A.2-N branch | `phase-2a2n-migration-verification-correction1` (descendant of reviewed candidate `503a96fb4bf14964117b5e2bb2c292dda848e912`, tree `0bf581ce40bb42c765085e818d789d74249f87e8`) — Schema 21 canonical Lesson scheduling and Teacher capacity authority; unmerged correction of the independent-review HIGH finding |
+| Phase 2A.2-N state | **REVIEWED CANDIDATE FAILED INDEPENDENT REVIEW / CORRECTION ROUND 1 IN PROGRESS (UNCOMMITTED)** — the Phase-N schema verifier is now invoked by the per-migration loop and `verify_current_schema()`, and its fail-closed error form plus malformed-storage regression coverage are corrected (branch base `f90c41e6d9e129d7d9e1a243941d4655fadc6b8e`, candidate tree `15c257aedf6d2d18afc5c1ba4991d7c468f1195c`) |
 | Next Platform action after N merge | Requires separate authorisation; attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority |
 
 The completed coordination chain is:

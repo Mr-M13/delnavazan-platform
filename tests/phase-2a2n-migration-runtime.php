@@ -77,4 +77,35 @@ $role = get_role('administrator');
 dzn_nm_assert($role->has_cap('dzn_manage_canonical_lesson_schedules') && $role->has_cap('dzn_override_canonical_lesson_schedule_availability'), 'Capability repair did not restore canonical scheduling capabilities');
 dzn_nm_assert((string) get_option('dzn_platform_capability_version') === '2a2n', 'Capability marker was not advanced');
 
-echo "fresh_schema_21=pass\nlegacy_preservation=pass\nno_canonical_backfill=pass\nschema_20_to_21_upgrade=pass\nrepeat_migration=pass\ncapability_repair=pass\nteacher_root_backfill=pass\nPhase 2A.2-N migration runtime passed\n";
+// 5. Malformed Phase-N storage must fail closed: Schema 21 is never activated or retained merely
+// because the schema option says 21. Each damaged state must reject before it can be repaired.
+$failClosed = static function (string $label, callable $damage, callable $repair) use ($wpdb): void {
+    dzn_nm_assert($damage() !== false, 'Failed to apply malformed canonical scheduling storage: ' . $label);
+    $rejected = false;
+    try { Migrator::maybe_upgrade(); } catch (RuntimeException $exception) { $rejected = str_contains($exception->getMessage(), 'Migration verification failed'); }
+    dzn_nm_assert($repair() !== false, 'Failed to repair malformed canonical scheduling storage: ' . $label);
+    dzn_nm_assert($rejected, 'Malformed canonical scheduling storage was accepted: ' . $label);
+    Migrator::maybe_upgrade();
+    dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Repaired storage did not return to Schema 21: ' . $label);
+};
+$failClosed('dropped applicable-slot index',
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions DROP INDEX lesson_applicable"),
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions ADD UNIQUE KEY lesson_applicable(lesson_id,applicable_slot)"));
+$failClosed('dropped teacher occupancy index',
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions DROP INDEX teacher_occupancy"),
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions ADD KEY teacher_occupancy(teacher_id,starts_at_utc,occupied_ends_at_utc)"));
+$failClosed('dropped Teacher scheduling root index',
+    fn() => $wpdb->query("ALTER TABLE {$p}teacher_schedule_roots DROP INDEX teacher"),
+    fn() => $wpdb->query("ALTER TABLE {$p}teacher_schedule_roots ADD UNIQUE KEY teacher(teacher_id)"));
+$failClosed('mutable schedule evidence stamped on append-only history',
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_events ADD COLUMN updated_at datetime NULL"),
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_events DROP COLUMN updated_at"));
+$failClosed('nullable non-digest evidence reference',
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_commands MODIFY command_key_digest varchar(64) NULL"),
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_commands MODIFY command_key_digest char(64) NOT NULL"));
+$failClosed('canonical scheduling table moved to a non-transactional engine',
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_events ENGINE=MyISAM"),
+    fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_events ENGINE=InnoDB"));
+dzn_nm_assert($count('canonical_lesson_schedule_versions') === 0 && $count('canonical_lesson_schedule_commands') === 0, 'Malformed-storage regression must not leave canonical scheduling rows behind');
+
+echo "fresh_schema_21=pass\nlegacy_preservation=pass\nno_canonical_backfill=pass\nschema_20_to_21_upgrade=pass\nrepeat_migration=pass\ncapability_repair=pass\nteacher_root_backfill=pass\nmalformed_storage_fail_closed=pass cases=6\nPhase 2A.2-N migration runtime passed\n";
