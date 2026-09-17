@@ -13,6 +13,8 @@ final class CanonicalLessonAuthorityRepository {
     public function enrolment(int $id,bool $lock=false):?object{return $this->row('enrolments',$id,$lock);}
     public function term(int $id,bool $lock=false):?object{return $this->row('terms',$id,$lock);}
     public function assignment(int $enrolmentId,bool $lock=false):?object{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}teacher_assignments WHERE enrolment_id=%d AND applicable_slot=1{$suffix}",$enrolmentId));}
+    /** Historical or current Teacher Assignment by primary key; replaced Assignments stay loadable. */
+    public function assignmentById(int $id,bool $lock=false):?object{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $id>0?$wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}teacher_assignments WHERE id=%d{$suffix}",$id)):null;}
     public function teacher(int $id):?object{global $wpdb;return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}teachers WHERE id=%d LOCK IN SHARE MODE",$id));}
     public function lessons(int $termId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1' ORDER BY canonical_sequence,id{$suffix}",$termId))?:array();}
     public function lessonsForEnrolment(int $enrolmentId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT l.* FROM {$this->p}lessons l WHERE l.enrolment_id=%d AND l.record_model='canonical_term_lesson_v1' ORDER BY l.term_id,l.canonical_sequence,l.id{$suffix}",$enrolmentId))?:array();}
