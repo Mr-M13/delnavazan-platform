@@ -12,8 +12,8 @@ $screen = file_get_contents($root . '/src/Admin/Controller/ScreenController.php'
 $lesson = file_get_contents($root . '/src/Core/Application/LessonService.php');
 $runtime = file_get_contents($root . '/tests/phase-2a2k-migration-runtime.php');
 
-if (!str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '17'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '18'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '19'")) throw new RuntimeException('Missing compatible Phase K+ schema');
-if (!str_contains($plugin, 'phase2a2k-canonical-term-foundation-20260916.1') && !str_contains($plugin, 'phase2a2l-canonical-term-authority-20260916.1') && !str_contains($plugin, 'phase2a2m0-enrolment-lifecycle-authority-20260917.1') && !str_contains($plugin, 'phase2a2m0-enrolment-lifecycle-authority-20260917.1')) throw new RuntimeException('Missing compatible Phase K+ build');
+if (!str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '17'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '18'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '19'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '20'")) throw new RuntimeException('Missing compatible Phase K+ schema');
+if (!str_contains($plugin, 'phase2a2k-canonical-term-foundation-20260916.1') && !str_contains($plugin, 'phase2a2l-canonical-term-authority-20260916.1') && !str_contains($plugin, 'phase2a2m0-enrolment-lifecycle-authority-20260917.1') && !str_contains($plugin, 'phase2a2m-canonical-lesson-authority-20260917.1')) throw new RuntimeException('Missing compatible Phase K+ build');
 foreach (array( '017_canonical_term_foundation', 'install_canonical_term_foundation', 'verify_canonical_term_schema') as $needle) {
     if (!str_contains($plugin . $migration, $needle)) throw new RuntimeException('Missing Phase K identity/migration: ' . $needle);
 }

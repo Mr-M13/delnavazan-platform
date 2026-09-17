@@ -68,6 +68,7 @@ final class CanonicalTermAuthorityService {
                 if((string)$term->lifecycle_state===$pair[1]&&$this->transitionIntentMatches($term,$expectedState,$pair[1],$proof))return $this->converge($key,$payload,$operation,$enrolmentId,$term,$actor,$termId,$expectedState);
                 throw new \InvalidArgumentException('stale_term_state');
             }
+            if(in_array($pair[1],array('closed','cancelled'),true)&&(new \Delnavazan\Platform\Core\Infrastructure\Repository\TermRepository())->hasAuthorisedCanonicalLessons($termId))throw new \InvalidArgumentException('authorised_canonical_lesson_exists');
             $now=gmdate('Y-m-d H:i:s');$this->repository->transition($term,$expectedState,$pair[1],$now,$actor);do_action('dzn_phase_2a2l_after_term_mutation',$operation);
             $sequence=count($this->repository->events($termId,false))+1;$this->repository->insertEvent($this->event($termId,$sequence,$expectedState,$pair[1],'canonical_term_'.$operation.'d',$proof,$now,$actor));do_action('dzn_phase_2a2l_after_event_insert',$operation);
             $this->recordCommand($key,$payload,$operation,$enrolmentId,$termId,$termId,$expectedState,$pair[1],$now,$actor);do_action('dzn_phase_2a2l_after_command_insert',$operation);

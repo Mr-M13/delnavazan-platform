@@ -1,12 +1,12 @@
 # Delnavazan Platform Conceptual Data Model
 
-## Current authoritative model — canonical Term authority (Schema 18)
+## Current candidate model — canonical Lesson authority (Schema 20)
 
-Phase 2A.2-K additively separates existing `legacy_phase1` Terms from `canonical_enrolment_term_v1`. A canonical Term is one bounded educational cycle identified by one canonical Enrolment plus an immutable server-owned sequence. It contains no Teacher identity: current Teacher authority remains exclusively in the Teacher Assignment aggregate, while `enrolments.teacher_id` remains historical Accepted Service Arrangement context.
+Phase 2A.2-M additively separates existing `legacy_phase1` Lessons from `canonical_term_lesson_v1`. A canonical Lesson is identified by its canonical Term plus an immutable server-owned sequence. It snapshots the exact Teacher Assignment and Teacher identity at issuance, while canonical Term remains Teacher-neutral.
 
-Canonical lifecycle progression is `authorised → current → closed`, with `cancelled` as the terminal alternative. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
+Schema 19 is the independently merged M0 canonical Enrolment lifecycle authority. Schema 20 is the unmerged Lesson candidate: a Lesson lifecycle is only `authorised → completed|cancelled`; it has no schedule, delivery, attendance, payment, calendar or provider state. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
 
-Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements in this foundation. They are not mutable consumption counters and create no Lesson entitlement or Lesson record. Lifecycle evidence is append-only and digest-only. An applicable Term requires an applicable parent Enrolment; a valid closed Enrolment cannot expose an `authorised` or `current` Term, while retained terminal Term history is valid. Schema 17 supplied protected integrity/read surfaces. Schema 18 Phase L adds explicit administrator-only creation/lifecycle commands and durable idempotency, but no Lesson creation, scheduling, payment, renewal or external authority.
+Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements. Phase M derives permanent issued-authority consumption from canonical Lesson rows; it keeps no mutable counters. A canonical Lesson has lifecycle `authorised → completed|cancelled`; cancellation does not restore allocation. Replacement requires one cancelled, staff-attested non-delivery standard origin and is unique per origin. Lifecycle and command evidence are append-only and digest-only. There is no scheduling, attendance, payment, renewal or external authority.
 
 ## Teacher Assignment foundation (Schema 16)
 

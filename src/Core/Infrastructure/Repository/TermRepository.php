@@ -114,6 +114,14 @@ final class TermRepository extends BaseRepository {
         ));
     }
 
+    /** Canonical Term terminalisation may not strand an unresolved canonical Lesson authority. */
+    public function hasAuthorisedCanonicalLessons(int $termId): bool {
+        global $wpdb;
+        $lessons=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$wpdb->prefix}dzn_lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1' ORDER BY canonical_sequence,id FOR UPDATE",$termId))?:array();
+        foreach($lessons as$lesson){$events=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$wpdb->prefix}dzn_canonical_lesson_lifecycle_events WHERE lesson_id=%d ORDER BY event_sequence,id FOR UPDATE",(int)$lesson->id))?:array();if(!\Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityValidator::valid($lesson,$events))throw new \InvalidArgumentException('canonical_lesson_integrity_conflict');if((string)$lesson->lifecycle_state==='authorised')return true;}
+        return false;
+    }
+
     private function requireLegacyMutationTarget(int $id): object {
         $row = $this->findAny($id);
         if (!$row || ($row->record_model ?? null) !== 'legacy_phase1') {
