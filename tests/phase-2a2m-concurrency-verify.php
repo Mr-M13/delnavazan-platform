@@ -1,0 +1,21 @@
+<?php
+/** Verify the persisted state of one gated, synthetic Phase-M race. */
+if(getenv('DZN_PHASE_2A2M_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!WP_CLI){fwrite(STDERR,"Phase 2A.2-M verifier refused.\n");exit(1);}
+use Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityService;
+global $wpdb;
+$p=$wpdb->prefix.'dzn_';$mode=(string)getenv('DZN_PHASE_2A2M_MODE');$state=get_option('dzn_phase_2a2m_concurrency_state');if(!is_array($state)||$mode==='')throw new RuntimeException('concurrency state');
+$assert=static function(bool$valid,string$message):void{if(!$valid)throw new RuntimeException($message);};$count=static function(string$sql,array$args=array())use($wpdb):int{return(int)$wpdb->get_var($args?$wpdb->prepare($sql,...$args):$sql);};$lessonCount=static fn(int$term)=>$count("SELECT COUNT(*) FROM {$p}lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1'",array($term));$replacementCount=static fn(int$term)=>$count("SELECT COUNT(*) FROM {$p}lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1' AND lesson_type='replacement'",array($term));
+$term=(int)$state['term_id'];$enrolment=(int)$state['enrolment_id'];$stateOfEnrolment=static fn()=>(string)$wpdb->get_var($wpdb->prepare("SELECT canonical_lifecycle_state FROM {$p}enrolments WHERE id=%d",$enrolment));$stateOfTerm=static fn()=>(string)$wpdb->get_var($wpdb->prepare("SELECT lifecycle_state FROM {$p}terms WHERE id=%d",$term));
+if(in_array($mode,array('replacement_same','replacement_diff'),true)){$assert($replacementCount($term)===1,'replacement race persisted an unexpected replacement count');$assert($count("SELECT COUNT(*) FROM {$p}canonical_lesson_commands WHERE term_id=%d AND operation='create_replacement'",array($term))===1,'replacement race command evidence count');}
+elseif($mode==='replacement_final'){$assert($replacementCount($term)===2,'final replacement allocation did not remain capped at two');$assert($count("SELECT COUNT(*) FROM {$p}canonical_lesson_commands WHERE term_id=%d AND operation='create_replacement'",array($term))===2,'final replacement command evidence count');}
+elseif($mode==='lesson_pause'){$assert($lessonCount($term)===1&&$stateOfEnrolment()==='paused','Lesson/pause winner state');}
+elseif($mode==='pause_lesson'){$assert($lessonCount($term)===0&&$stateOfEnrolment()==='paused','Pause/Lesson stale rejection state');}
+elseif(in_array($mode,array('lesson_close','close_lesson'),true)){$assert($lessonCount($term)===1&&$stateOfEnrolment()==='current','Enrolment closure guard did not retain current Lesson context');}
+elseif($mode==='lesson_term_close'){$assert($lessonCount($term)===1&&$stateOfTerm()==='current','Lesson/Term close guard state');}
+elseif($mode==='term_close_lesson'){$assert($lessonCount($term)===0&&$stateOfTerm()==='closed','Term close/Lesson stale rejection state');}
+elseif($mode==='lesson_term_cancel'){$assert($lessonCount($term)===1&&$stateOfTerm()==='current','Lesson/Term cancel guard state');}
+elseif($mode==='term_cancel_lesson'){$assert($lessonCount($term)===0&&$stateOfTerm()==='cancelled','Term cancel/Lesson stale rejection state');}
+elseif(in_array($mode,array('lesson_replace','replace_lesson'),true)){$old=(int)$state['assignment_id'];$current=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}teacher_assignments WHERE enrolment_id=%d AND applicable_slot=1",$enrolment));$assert($current>0&&$current!==$old,'Assignment replacement was not current');if($mode==='lesson_replace')$assert($lessonCount($term)===1,'Lesson issued before Assignment replacement did not persist');else $assert($lessonCount($term)===0,'Stale Lesson survived Assignment-first replacement');$fresh=(new CanonicalLessonAuthorityService())->createStandard($term,$current,array('evidence_channel'=>'staff_record','evidence_reference'=>'fresh-b-'.$mode,'evidence_at'=>gmdate('Y-m-d H:i:s')),'fresh-b-'.$mode.'-'.wp_generate_uuid4());$assert(!empty($fresh['created'])&&$lessonCount($term)===($mode==='lesson_replace'?2:1),'Fresh B Lesson after replacement failed');}
+elseif($mode==='unrelated'){foreach($state['chains'] as$chain)$assert($lessonCount((int)$chain['term_id'])===1,'Unrelated chain did not retain exactly one Lesson');}
+else throw new RuntimeException('Unknown verifier mode');
+echo "mode={$mode} verifier=pass lessons=".$lessonCount($term)." replacement=".$replacementCount($term)."\n";
