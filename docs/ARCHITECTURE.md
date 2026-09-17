@@ -6,6 +6,8 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 
 > **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-L / Schema 18. Phases 2A.2-A through L are complete, independently reviewed where consequential, merged and closed. Later Lesson authority is not implemented. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
+> **Update 2026-09-17:** main is authoritative at Schema 20 after the Phase 2A.2-M canonical Lesson authority merge and closeout. An unmerged Schema-21 candidate (`phase-2a2n-canonical-lesson-schedule-authority`) adds canonical Lesson scheduling and Teacher capacity authority; it is implemented and self-validated, awaiting independent review. Attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority.
+
 ### Phase 2A.2-J architectural seam
 
 Teacher Assignment is separate from canonical Enrolment identity and lifecycle. `enrolments.teacher_id` remains Accepted Service Arrangement history; current Teacher authority comes only from the privacy-minimised Assignment read seam. Zero Assignment is valid, migration performs no backfill, and Assignment creation is confined to applicable canonical Enrolments. Initial authority follows exact final-arrangement Teacher provenance; replacement authority requires new Assignment-specific authenticated-Teacher evidence or authorised staff attestation. Assignment lifecycle cannot create or mutate Terms, Lessons, schedules, capacity, payments, notifications, calendars, Amelia, Hamnavaz, or CRM state.
@@ -298,3 +300,9 @@ Canonical Term mutation is isolated in `CanonicalTermAuthorityService` and its d
 ## Phase 2A.2-M0 canonical Enrolment lifecycle authority
 
 Schema 19 makes the canonical Enrolment graph operational: `authorised -> current`, `current -> paused`, `paused -> current`, and closure from every non-terminal state. Closed is terminal. Lifecycle commands serialize through the Student–Course identity root and Enrolment row, retain applicability through pause, store immutable digest-only command evidence, and block closure while applicable canonical Term or Teacher Assignment authority exists. Canonical Lesson authority remains later; its resumption must add the corresponding non-terminal Lesson closure guard.
+
+## Phase 2A.2-N canonical Lesson scheduling & Teacher capacity authority (candidate)
+
+Schema 21 makes scheduled Teacher time authoritative. A scheduled canonical Lesson is a canonical Lesson in `authorised` state plus exactly one applicable canonical schedule version; Phase N adds no `scheduled` Lesson lifecycle state and never mutates Lesson lifecycle as a side effect. Schedule versions freeze the UTC interval, the explicit IANA timezone and local wall provenance, duration, buffer and the occupied end `[start, end + buffer)`. Teacher capacity is one concurrent canonical Lesson per Teacher, derived from applicable versions with no mutable reservation projection.
+
+Scheduling serializes on a dedicated per-Teacher root acquired after the canonical Enrolment/Lesson/Assignment context and before the capacity decision, because `READ COMMITTED` disables gap locking and an empty overlap range offers no row to lock. Lesson completion/cancellation, Enrolment closure, Term close/cancel, Teacher Assignment replacement and Teacher archival all reject `active_future_schedule_exists` rather than cascading. Legacy Phase-1 scheduling stays legacy-only with no backfill and no dual-read.

@@ -49,6 +49,7 @@ final class CanonicalEnrolmentLifecycleService {
         $assignments=$this->repository->assignments($id,true);foreach($assignments as$a)$this->repository->assignmentEvents((int)$a->id,true);
         if($assignments&&!TeacherAssignmentAssessment::validHistory(new TeacherAssignmentRepository(),$id,$assignments))throw new \InvalidArgumentException('subordinate_assignment_integrity_conflict');
         foreach($assignments as$a)if((string)$a->state==='assigned'&&(int)$a->applicable_slot===1)throw new \InvalidArgumentException('applicable_teacher_assignment_exists');
+        if((new \Delnavazan\Platform\Core\Application\CanonicalLessonScheduleGuard())->activeFutureExists('enrolment',$id,gmdate('Y-m-d H:i:s')))throw new \InvalidArgumentException('active_future_schedule_exists');
     }
 
     private function replay(object$c,string$payload,string$operation,int$id,array$facts):array{

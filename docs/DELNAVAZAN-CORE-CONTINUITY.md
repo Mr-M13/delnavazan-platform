@@ -18,9 +18,10 @@
 | Latest completed slice | Phase 2A.2-M — Canonical Lesson Authority |
 | Merge state | Independent review PASS; exact approved tree merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
 | Closeout baseline | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None — Phase N has not started |
-| Next Platform action | No next implementation authority has been started |
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
+| Active Phase 2A.2-N candidate | `phase-2a2n-canonical-lesson-schedule-authority` — Schema 21 canonical Lesson scheduling and Teacher capacity authority; unmerged candidate |
+| Phase 2A.2-N state | **IMPLEMENTED / SELF-VALIDATED / AWAITING INDEPENDENT REVIEW** (branch base `f90c41e6d9e129d7d9e1a243941d4655fadc6b8e`, tree `15c257aedf6d2d18afc5c1ba4991d7c468f1195c`) |
+| Next Platform action after N merge | Requires separate authorisation; attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority |
 
 The completed coordination chain is:
 
