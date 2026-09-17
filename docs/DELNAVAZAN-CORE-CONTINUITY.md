@@ -18,8 +18,8 @@
 | Latest completed slice | Phase 2A.2-M0 — Canonical Enrolment Lifecycle Authority |
 | Merge state | Independent review PASS; exact approved tree merged as `c316a5153c7a56b810732495b3785786771c695a` |
 | Closeout baseline | `c316a5153c7a56b810732495b3785786771c695a`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None; Phase 2A.2-M0 is merged and closed |
-| Next Platform action | Requires separate authorisation; canonical Lesson authority remains non-authoritative |
+| Active Platform candidate | Phase 2A.2-M canonical Lesson authority, Schema-20 post-M0 resumption — unmerged |
+| Next Platform action | Independent review of the narrow canonical Lesson authority candidate |
 | Current 2A.2-M0 state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 
 The completed coordination chain is:
@@ -38,7 +38,11 @@ The completed coordination chain is:
 12. **2A.2-L** — Canonical Term Creation & Lifecycle Authority: explicit capability-protected creation, bounded transitions, durable idempotency and Enrolment-first concurrency control.
 13. **2A.2-M0** — Canonical Enrolment Lifecycle Authority: explicit activate/pause/resume/close commands, durable idempotency, protected integrity reads and subordinate closure guards.
 
-Main is authoritative at Schema 19 / Phase M0. Canonical Enrolment lifecycle authority and canonical Term creation/bounded lifecycle mutation are authoritative; canonical Lesson authority remains non-authoritative. No scheduling, capacity, payment, notification, communication, calendar or Amelia authority is introduced.
+Main is authoritative at Schema 19 / Phase M0. Canonical Enrolment lifecycle authority and canonical Term creation/bounded lifecycle mutation are authoritative. The active but unmerged Schema-20 candidate adds canonical Lesson authority only; it introduces no scheduling, capacity, payment, notification, communication, calendar or Amelia authority.
+
+## Active Phase 2A.2-M candidate — Canonical Lesson Authority
+
+The resumed post-M0 candidate uses additive Schema 20 / `020_canonical_lesson_authority` and build `phase2a2m-canonical-lesson-authority-20260917.1`. It preserves legacy Lesson rows, requires a current canonical Enrolment, current canonical Term and current Teacher Assignment, and derives Teacher provenance from that Assignment. It adds immutable command/lifecycle evidence, permanent 12-standard/2-replacement allocation and no scheduling or delivery authority. M0 closure now rejects an authorised canonical Lesson without cascade; terminal Lessons do not block closure, and malformed Lesson evidence fails closed. This candidate is not complete or authoritative until independently reviewed and merged.
 
 ## Completed Canonical Enrolment Lifecycle Authority — Phase 2A.2-M0
 

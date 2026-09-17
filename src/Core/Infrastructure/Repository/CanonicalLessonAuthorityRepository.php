@@ -9,11 +9,13 @@ final class CanonicalLessonAuthorityRepository {
     public function commit():void{global $wpdb;if($wpdb->query('COMMIT')===false)throw new \RuntimeException('Transaction commit failed');}
     public function rollback():void{global $wpdb;$wpdb->query('ROLLBACK');}
     public function command(string $digest):?object{global $wpdb;return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}canonical_lesson_commands WHERE command_key_digest=%s",$digest));}
+    public function lockRoot(object $e):object{global $wpdb;$row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}enrolment_identity_roots WHERE student_id=%d AND course_id=%d FOR UPDATE",(int)$e->student_id,(int)$e->course_id));if(!$row)throw new \RuntimeException('Enrolment identity root unavailable');return$row;}
     public function enrolment(int $id,bool $lock=false):?object{return $this->row('enrolments',$id,$lock);}
     public function term(int $id,bool $lock=false):?object{return $this->row('terms',$id,$lock);}
     public function assignment(int $enrolmentId,bool $lock=false):?object{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}teacher_assignments WHERE enrolment_id=%d AND applicable_slot=1{$suffix}",$enrolmentId));}
     public function teacher(int $id):?object{global $wpdb;return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}teachers WHERE id=%d LOCK IN SHARE MODE",$id));}
     public function lessons(int $termId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}lessons WHERE term_id=%d AND record_model='canonical_term_lesson_v1' ORDER BY canonical_sequence,id{$suffix}",$termId))?:array();}
+    public function lessonsForEnrolment(int $enrolmentId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT l.* FROM {$this->p}lessons l WHERE l.enrolment_id=%d AND l.record_model='canonical_term_lesson_v1' ORDER BY l.term_id,l.canonical_sequence,l.id{$suffix}",$enrolmentId))?:array();}
     public function lesson(int $id,bool $lock=false):?object{return $this->row('lessons',$id,$lock);}
     public function events(int $lessonId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_lesson_lifecycle_events WHERE lesson_id=%d ORDER BY event_sequence,id{$suffix}",$lessonId))?:array();}
     public function insertLesson(array $data):int{return $this->insert('lessons',$data,'Canonical Lesson persistence failed');}

@@ -1,10 +1,10 @@
 # Delnavazan Platform Conceptual Data Model
 
-## Current candidate model — canonical Lesson authority (Schema 19)
+## Current candidate model — canonical Lesson authority (Schema 20)
 
 Phase 2A.2-M additively separates existing `legacy_phase1` Lessons from `canonical_term_lesson_v1`. A canonical Lesson is identified by its canonical Term plus an immutable server-owned sequence. It snapshots the exact Teacher Assignment and Teacher identity at issuance, while canonical Term remains Teacher-neutral.
 
-Canonical lifecycle progression is `authorised → current → closed`, with `cancelled` as the terminal alternative. `authorised` and `current` share the single applicable slot; terminal states carry no slot. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
+Schema 19 is the independently merged M0 canonical Enrolment lifecycle authority. Schema 20 is the unmerged Lesson candidate: a Lesson lifecycle is only `authorised → completed|cancelled`; it has no schedule, delivery, attendance, payment, calendar or provider state. Legacy `draft`, `awaiting_payment`, `active`, `completed`, `cancelled`, `archived`, and `payment_state` values retain only their Phase-1 meaning and are not canonical authority.
 
 Canonical allocation-origin facts are 12 standard Lessons and 2 eligible replacements. Phase M derives permanent issued-authority consumption from canonical Lesson rows; it keeps no mutable counters. A canonical Lesson has lifecycle `authorised → completed|cancelled`; cancellation does not restore allocation. Replacement requires one cancelled, staff-attested non-delivery standard origin and is unique per origin. Lifecycle and command evidence are append-only and digest-only. There is no scheduling, attendance, payment, renewal or external authority.
 

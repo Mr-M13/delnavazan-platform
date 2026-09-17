@@ -48,6 +48,7 @@ final class CanonicalEnrolmentLifecycleService {
         $assignments=$this->repository->assignments($id,true);foreach($assignments as$a)$this->repository->assignmentEvents((int)$a->id,true);
         if($assignments&&!TeacherAssignmentAssessment::validHistory(new TeacherAssignmentRepository(),$id,$assignments))throw new \InvalidArgumentException('subordinate_assignment_integrity_conflict');
         foreach($assignments as$a)if((string)$a->state==='assigned'&&(int)$a->applicable_slot===1)throw new \InvalidArgumentException('applicable_teacher_assignment_exists');
+        $lessons=$this->repository->canonicalLessons($id,true);foreach($lessons as$lesson){$history=$this->repository->canonicalLessonEvents((int)$lesson->id,true);if(!CanonicalLessonAuthorityValidator::valid($lesson,$history))throw new \InvalidArgumentException('subordinate_lesson_integrity_conflict');if((string)$lesson->lifecycle_state==='authorised')throw new \InvalidArgumentException('authorised_canonical_lesson_exists');}
     }
 
     private function replay(object$c,string$payload,string$operation,int$id,array$facts):array{
