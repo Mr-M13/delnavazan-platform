@@ -8,12 +8,12 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Phase-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
-| Platform / schema | 0.1.0 / 20 authoritative |
-| Migrations | 001–020 authoritative; latest `020_canonical_lesson_authority` |
-| Active Platform candidate | Phase 2A.2-N canonical Lesson scheduling & Teacher capacity authority — Schema 21, unmerged, awaiting independent review |
-| Latest merged slice | Canonical Lesson Authority (M) — Schema 20 authoritative on main |
-| Next boundary | Phase 2A.2-N merge decision by the owner; attendance/delivery/payment/provider integration remain outside Platform authority |
+| Authoritative main | `b0687fec98748144f96e3fc56f7e4fb53e01f673` (Phase N closeout commit; docs-only closeout hash is recorded in the task closeout) |
+| Platform / schema | 0.1.0 / 21 authoritative on `main` |
+| Migrations | 001–021 authoritative; latest `021_canonical_lesson_schedule_authority` |
+| Latest merged slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority (complete / independently reviewed / merged / closed) |
+| Active Platform candidate | Phase 2A.2-O canonical Lesson delivery & attendance outcome authority — Schema 22, unmerged, owner-verified, awaiting independent review |
+| Next boundary | Independent review of the Phase O candidate; delivery/attendance cutover, payment, notification and provider integration remain outside current authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

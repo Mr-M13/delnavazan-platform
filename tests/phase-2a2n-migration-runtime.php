@@ -17,8 +17,8 @@ $engine = static function (string $table) use ($wpdb, $p): string {
 $count = static function (string $table) use ($wpdb, $p): int { return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}{$table}"); };
 
 // 1. Fresh Schema-21 state: identity, tables, indexes, capability and root backfill.
-dzn_nm_assert((string) DZN_PLATFORM_SCHEMA_VERSION === '21', 'Expected Schema 21 identity');
-dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Schema option must be 21');
+dzn_nm_assert((int) DZN_PLATFORM_SCHEMA_VERSION >= 21, 'Expected Phase N or later schema identity');
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === (string) DZN_PLATFORM_SCHEMA_VERSION, 'Schema option must match the current schema identity');
 $completed = (array) get_option('dzn_platform_completed_migrations', array());
 dzn_nm_assert(in_array('021_canonical_lesson_schedule_authority', $completed, true), 'Migration 021 must be recorded');
 dzn_nm_assert(in_array('020_canonical_lesson_authority', $completed, true), 'Migration 020 must remain recorded');
@@ -53,7 +53,7 @@ foreach ($tables as $table) dzn_nm_assert($wpdb->query("DROP TABLE IF EXISTS {$p
 update_option('dzn_platform_completed_migrations', array_values(array_filter($completed, static fn($id) => $id !== '021_canonical_lesson_schedule_authority')), false);
 update_option('dzn_platform_schema_version', '20', false);
 Migrator::maybe_upgrade();
-dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Rehearsed 20 -> 21 upgrade did not reach Schema 21');
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === (string) DZN_PLATFORM_SCHEMA_VERSION, 'Rehearsed pre-021 upgrade did not reach the current schema');
 $replayed = (array) get_option('dzn_platform_completed_migrations', array());
 dzn_nm_assert(in_array('021_canonical_lesson_schedule_authority', $replayed, true), 'Rehearsed upgrade did not record migration 021');
 foreach ($tables as $table) dzn_nm_assert($tableExists($table) && $engine($table) === 'innodb', 'Rehearsed upgrade did not rebuild ' . $table);
@@ -63,7 +63,7 @@ $rootsAfterUpgrade = $count('teacher_schedule_roots');
 $teachersNow = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$p}teachers");
 dzn_nm_assert($teachersNow > 0 && $rootsAfterUpgrade >= $teachersNow, 'Upgrade must create a serialization root for every existing Teacher');
 Migrator::maybe_upgrade();
-dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21' && $count('teacher_schedule_roots') === $rootsAfterUpgrade, 'Repeat migration changed durable scheduling state');
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === (string) DZN_PLATFORM_SCHEMA_VERSION && $count('teacher_schedule_roots') === $rootsAfterUpgrade, 'Repeat migration changed durable scheduling state');
 $teacherRow = $wpdb->get_row("SELECT * FROM {$p}teachers ORDER BY id LIMIT 1");
 if ($teacherRow) dzn_nm_assert((int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}teacher_schedule_roots WHERE teacher_id=%d", (int) $teacherRow->id)) === 1, 'Repeat migration duplicated a Teacher scheduling root');
 
@@ -86,7 +86,7 @@ $failClosed = static function (string $label, callable $damage, callable $repair
     dzn_nm_assert($repair() !== false, 'Failed to repair malformed canonical scheduling storage: ' . $label);
     dzn_nm_assert($rejected, 'Malformed canonical scheduling storage was accepted: ' . $label);
     Migrator::maybe_upgrade();
-    dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Repaired storage did not return to Schema 21: ' . $label);
+    dzn_nm_assert((string) get_option('dzn_platform_schema_version') === (string) DZN_PLATFORM_SCHEMA_VERSION, 'Repaired storage did not return to the current schema: ' . $label);
 };
 $failClosed('dropped applicable-slot index',
     fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions DROP INDEX lesson_applicable"),
@@ -122,7 +122,7 @@ dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '20', 'Reje
 dzn_nm_assert(in_array('021_canonical_lesson_schedule_authority', (array) get_option('dzn_platform_completed_migrations', array()), true), 'Rejected retained-021 activation must not drop the completed marker');
 dzn_nm_assert($wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions ADD UNIQUE KEY lesson_applicable(lesson_id,applicable_slot)") !== false, 'Failed to repair Phase-N storage after the retained-021 regression');
 Migrator::maybe_upgrade();
-dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Repaired retained-021 storage did not recover to Schema 21');
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === (string) DZN_PLATFORM_SCHEMA_VERSION, 'Repaired retained-021 storage did not recover to the current schema');
 dzn_nm_assert(count(array_keys((array) get_option('dzn_platform_completed_migrations', array()), '021_canonical_lesson_schedule_authority', true)) === 1, 'Recovery must keep migration 021 recorded exactly once');
 
 echo "fresh_schema_21=pass\nlegacy_preservation=pass\nno_canonical_backfill=pass\nschema_20_to_21_upgrade=pass\nrepeat_migration=pass\ncapability_repair=pass\nteacher_root_backfill=pass\nmalformed_storage_fail_closed=pass cases=6\nretained_021_preactivation_fail_closed=pass\nPhase 2A.2-N migration runtime passed\n";

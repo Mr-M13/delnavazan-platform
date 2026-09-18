@@ -241,6 +241,9 @@ final class CanonicalLessonScheduleService {
 
     private function requireSchedulable(object $lesson,?object $enrolment,?object $term):void{
         if((string)($lesson->lifecycle_state??'')!=='authorised')throw new \InvalidArgumentException('lesson_not_schedulable');
+        // Phase 2A.2-O: once an occurrence outcome exists, the occurrence happened; scheduling
+        // authority may not be created or moved for it afterwards.
+        if((new CanonicalLessonDeliveryGuard())->hasOutcome((int)$lesson->id))throw new \InvalidArgumentException('delivery_outcome_exists');
         if(!$enrolment||(string)($enrolment->record_model??'')!=='canonical_student_course_v1'||(string)$enrolment->lifecycle_state!=='current'||(int)$enrolment->applicable_slot!==1||$enrolment->archived_at!==null)throw new \InvalidArgumentException('enrolment_not_schedulable');
         if(!$term||(string)($term->record_model??'')!=='canonical_enrolment_term_v1'||(string)$term->lifecycle_state!=='current'||(int)$term->applicable_slot!==1||$term->archived_at!==null||(int)$term->enrolment_id!==(int)$enrolment->id)throw new \InvalidArgumentException('term_not_current');
     }

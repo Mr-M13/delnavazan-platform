@@ -4,9 +4,9 @@
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override:** Platform 0.1.0 main is authoritative through Phase 2A.2-L / Schema 18. Phases 2A.2-A through L are complete, independently reviewed where consequential, merged and closed. Later Lesson authority is not implemented. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+> **Current-state override (2026-09-18):** Platform 0.1.0 `main` is authoritative at Schema 21 after the Phase 2A.2-N canonical Lesson scheduling and Teacher capacity merge and closeout. Phases 2A.2-A through N are complete, independently reviewed where consequential, merged and closed. An unmerged Schema-22 candidate (`phase-2a2o-canonical-lesson-delivery-attendance-authority`) adds provider-neutral canonical Lesson delivery/attendance outcomes; it is implemented and owner-verified, awaiting independent review. Attendance cutover, payment, renewal, notification and provider integration remain outside Platform authority. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
-> **Update 2026-09-17:** main is authoritative at Schema 20 after the Phase 2A.2-M canonical Lesson authority merge and closeout. An unmerged Schema-21 candidate (`phase-2a2n-canonical-lesson-schedule-authority`) adds canonical Lesson scheduling and Teacher capacity authority; it is implemented and self-validated, awaiting independent review. Attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority.
+> Historical note: the paragraph above previously recorded the Phase 2A.2-L / Schema 18 and Phase 2A.2-M / Schema 20 states. Those states are historical provenance; the current authoritative state is Schema 21 on `main` with the Phase O candidate at Schema 22.
 
 ### Phase 2A.2-J architectural seam
 

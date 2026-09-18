@@ -57,7 +57,11 @@ final class CanonicalLessonAuthorityValidator {
         );
     }
 
-    /** Controlled replacement eligibility: generic cancellation alone is never sufficient. */
+    /**
+     * Controlled replacement eligibility: generic cancellation alone is never sufficient. This is
+     * the Phase-M Student replacement allowance only; a Phase-O academy-owed occurrence is DISTINCT
+     * canonical authority and is never materialised as a `replacement` Lesson.
+     */
     public static function replacementEligible(object $origin,array $events):bool{
         if((string)($origin->record_model??'')!==self::MODEL)return false;
         if((string)($origin->lifecycle_state??'')!=='cancelled')return false;

@@ -20,7 +20,7 @@
 | Closeout baseline | `08138270f4bd32e5829ef0f5a18a316f6780607d`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
-| Next Platform action after N merge | Requires separate authorisation; attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority |
+| Next Platform action after N merge | Authorised as Phase 2A.2-O (see the Phase 2A.2-O candidate section below): canonical Lesson delivery & attendance outcome authority. Attendance cutover, payment, renewal, notification and provider integration remain outside Platform authority |
 
 The completed coordination chain is:
 
@@ -241,9 +241,46 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-Phases 2A.2-A through K are complete. The next planned boundary is **Phase 2A.2-L — Canonical Term Creation & Lifecycle Authority**. Phase L is not implemented or authorised by this record.
+Historical roadmap note (superseded 2026-09-18): this section previously recorded Phase 2A.2-L, then the Phase 2A.2-M0/M boundaries, as the next Platform action. Those slices are complete and merged; the paragraph is retained only as provenance and is **not** the current next action.
 
-Its expected subject area is explicit canonical Term creation and lifecycle command authority, a dedicated capability boundary, idempotency, locking/concurrency and authoritative creation evidence. Those subjects require a separately locked implementation contract; this continuity record does not design them. Canonical Lesson foundation/authority follows later and must not be pulled into Phase L implicitly.
+## Phase 2A.2-O candidate — canonical Lesson delivery & attendance outcome authority
+
+Authoritative base: post-Phase-N `main` at `b0687fec98748144f96e3fc56f7e4fb53e01f673` (Phase 2A.2-N is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** at Schema 21). Phase O is implemented on branch `phase-2a2o-canonical-lesson-delivery-attendance-authority` at Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`. It is **owner-verified, NOT merged, NOT deployed and NOT claimed complete**; the next Platform action is its independent review.
+
+Phase O is a **provider-neutral** canonical authority over what actually happened to a canonical Lesson occurrence. It adds no provider integration, no Google/Amelia/calendar/notification coupling, no payment or payroll effect and no public surface.
+
+### Locked product decisions O-D1 … O-D9
+
+| Decision | Locked meaning |
+| --- | --- |
+| O-D1 | Canonical Lesson `completed` means the occurrence was delivered. No new Lesson lifecycle state is added. |
+| O-D2 | Exception-based recording: ordinary delivery is the absence of an outcome row, so no manual attendance record is required per Lesson. |
+| O-D3 | A student no-show is a distinct fact: the Lesson is consumed, completion is still permitted, and no entitlement is created. |
+| O-D4 | Teacher/academy non-delivery blocks completion and creates an academy-owed occurrence. |
+| O-D5 | Cancellation stays a pre-occurrence scheduling/lifecycle fact; post-occurrence non-delivery is a delivery fact. The two can never describe the same event. |
+| O-D6 | Corrections supersede append-only history, never mutate it, never reopen the Lesson and never move money. |
+| O-D7 | Authorised administrator recording is immediate, idempotent and needs no second approval. Student/Teacher self-service is not authorised. |
+| O-D8 | A completed Lesson may later be reconciled by an explicit authorised append-only command into Teacher/academy non-delivery. The historical completion event stays immutable; the effective delivery truth becomes non-delivery; the academy obligation is established; nothing reopens, reschedules, replaces or pays. |
+| O-D9 | An advance Teacher/academy cancellation (`academy_unavailable`) establishes an academy obligation; a Student-requested cancellation never does. |
+
+### Provider-neutral evidence boundary
+
+Evidence is a controlled channel (`staff_record`, `authenticated_platform`, `document_reference`) plus an opaque keyed digest, an observed time and an actor. Phase O makes no provider call and never lets provider output become authority merely because it was emitted. Roadmap Phase 4 (direct Google integration) can ingest meeting evidence (teacher/student join, join/leave interval, overlap, duration) through this same boundary without changing canonical identity or adding Google coupling to the domain. No Google-specific schema exists.
+
+### Phase-M replacement allowance vs Phase-O academy-owed occurrence
+
+These are deliberately different authorities and must not be merged:
+
+- the **Phase-M replacement allowance** is the Student's own bounded make-up allowance — at most two per Term, one per eligible origin, created only by a pre-occurrence cancellation carrying the controlled `attested_non_delivery` attestation, materialised as a `replacement` Lesson, and expiring with the Term;
+- the **Phase-O academy-owed occurrence** is a teaching occurrence the academy owes because it failed to deliver. It is recorded in `{prefix}dzn_canonical_academy_obligations`, bounded to one immutable row per source occurrence, never counted against the two-per-Term allowance, never materialised as a `replacement` Lesson, and never removed or deactivated by Term closure. Materialising it into a delivered future occurrence remains a later explicit command/phase.
+
+Historical `canonical_lesson_cancelled_replacement_eligible` and `attested_non_delivery` records keep their historical Phase-M meaning; there is no semantic backfill.
+
+### Current exclusions
+
+Attendance cutover, Google Meet/Calendar evidence ingestion, signed public join/absence links, Student/Teacher portals, notifications/WhatsApp, payment/Stripe, Finance, payability, teacher payroll, renewal automation, partial-delivery proration, legacy attendance import, retention policy, Theme/NIU work and any materialisation or scheduling of an owed occurrence remain later authority. The Phase O candidate itself creates none of them.
+
+Full contract, validation record and residual notes: [PHASE-2A-2O-CANONICAL-LESSON-DELIVERY-ATTENDANCE-AUTHORITY.md](PHASE-2A-2O-CANONICAL-LESSON-DELIVERY-ATTENDANCE-AUTHORITY.md).
 
 ## 5. Persistent architectural boundaries
 
@@ -347,9 +384,10 @@ Before starting another slice, establish:
 
 Never treat this document as authority to deploy, merge, access production, change NIU, activate plugins, send communications, or extend a later phase.
 
-### Phase 2A.2-L candidate
-Phase L is an unmerged candidate adding explicit canonical Term creation and bounded lifecycle authority with durable idempotency. Canonical Enrolment remains Student + Course; Teacher Assignment remains the sole current-Teacher authority. Term closure/cancellation does not mutate Enrolment, and no Lesson, payment, scheduling or integration authority follows from a Term command.
+### Historical candidate records (superseded — provenance only)
 
-## Phase 2A.2-M0 implementation candidate
+The two paragraphs below described Phase 2A.2-L and Phase 2A.2-M0 while they were still unmerged candidates. Both slices have since been independently reviewed, merged and closed (Phase L at Schema 18, Phase M0 at Schema 19), so they are historical provenance and must not be read as current state.
 
-The unmerged M0 candidate advances its package identity to Schema 19 / `019_canonical_enrolment_lifecycle_authority` and build `phase2a2m0-enrolment-lifecycle-authority-20260917.1`. It makes the explicit Enrolment lifecycle graph operational and leaves canonical Lesson authority non-authoritative. The frozen pre-M0 Lesson candidate remains historical evidence and must be resumed separately as Schema 20 after M0 review/merge.
+> **Historical Phase 2A.2-L record:** Phase L was an unmerged candidate adding explicit canonical Term creation and bounded lifecycle authority with durable idempotency. Canonical Enrolment remains Student + Course; Teacher Assignment remains the sole current-Teacher authority. Term closure/cancellation does not mutate Enrolment, and no Lesson, payment, scheduling or integration authority follows from a Term command.
+
+> **Historical Phase 2A.2-M0 record:** the formerly unmerged M0 candidate advanced its package identity to Schema 19 / `019_canonical_enrolment_lifecycle_authority` and build `phase2a2m0-enrolment-lifecycle-authority-20260917.1`, made the explicit Enrolment lifecycle graph operational and left canonical Lesson authority non-authoritative. The frozen pre-M0 Lesson candidate was subsequently resumed as Schema 20 / Phase M.
