@@ -108,4 +108,21 @@ $failClosed('canonical scheduling table moved to a non-transactional engine',
     fn() => $wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_events ENGINE=InnoDB"));
 dzn_nm_assert($count('canonical_lesson_schedule_versions') === 0 && $count('canonical_lesson_schedule_commands') === 0, 'Malformed-storage regression must not leave canonical scheduling rows behind');
 
-echo "fresh_schema_21=pass\nlegacy_preservation=pass\nno_canonical_backfill=pass\nschema_20_to_21_upgrade=pass\nrepeat_migration=pass\ncapability_repair=pass\nteacher_root_backfill=pass\nmalformed_storage_fail_closed=pass cases=6\nPhase 2A.2-N migration runtime passed\n";
+// 6. Retained-021 / stale-schema-version activation path: migration 021 is already recorded in the
+// completed ledger while the schema option is still 20 (021 recorded, then execution stopped before
+// the option advanced). maybe_upgrade() skips 021, so Phase-N storage must still be verified before
+// the option is advanced to 21. Damaged storage must reject fail-closed and leave the option at 20.
+dzn_nm_assert(in_array('021_canonical_lesson_schedule_authority', (array) get_option('dzn_platform_completed_migrations', array()), true), 'Retained-021 regression requires migration 021 to stay recorded');
+dzn_nm_assert($wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions DROP INDEX lesson_applicable") !== false, 'Failed to damage Phase-N storage for the retained-021 regression');
+update_option('dzn_platform_schema_version', '20', false);
+$retainedRejected = false;
+try { Migrator::maybe_upgrade(); } catch (RuntimeException $exception) { $retainedRejected = str_contains($exception->getMessage(), 'Migration verification failed'); }
+dzn_nm_assert($retainedRejected, 'Retained-021/stale-schema-version activation accepted damaged Phase-N storage');
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '20', 'Rejected retained-021 activation must not advance the schema option to 21');
+dzn_nm_assert(in_array('021_canonical_lesson_schedule_authority', (array) get_option('dzn_platform_completed_migrations', array()), true), 'Rejected retained-021 activation must not drop the completed marker');
+dzn_nm_assert($wpdb->query("ALTER TABLE {$p}canonical_lesson_schedule_versions ADD UNIQUE KEY lesson_applicable(lesson_id,applicable_slot)") !== false, 'Failed to repair Phase-N storage after the retained-021 regression');
+Migrator::maybe_upgrade();
+dzn_nm_assert((string) get_option('dzn_platform_schema_version') === '21', 'Repaired retained-021 storage did not recover to Schema 21');
+dzn_nm_assert(count(array_keys((array) get_option('dzn_platform_completed_migrations', array()), '021_canonical_lesson_schedule_authority', true)) === 1, 'Recovery must keep migration 021 recorded exactly once');
+
+echo "fresh_schema_21=pass\nlegacy_preservation=pass\nno_canonical_backfill=pass\nschema_20_to_21_upgrade=pass\nrepeat_migration=pass\ncapability_repair=pass\nteacher_root_backfill=pass\nmalformed_storage_fail_closed=pass cases=6\nretained_021_preactivation_fail_closed=pass\nPhase 2A.2-N migration runtime passed\n";
