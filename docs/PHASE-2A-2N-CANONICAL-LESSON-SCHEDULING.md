@@ -1,8 +1,8 @@
 # Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority
 
-Status: **IMPLEMENTED / SELF-VALIDATED / AWAITING INDEPENDENT REVIEW**
+Status: **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**
 
-Schema 21 / migration `021_canonical_lesson_schedule_authority` / build `phase2a2n-canonical-lesson-schedule-authority-20260917.1`. Branch `phase-2a2n-canonical-lesson-schedule-authority` from authoritative post-M main `f90c41e6d9e129d7d9e1a243941d4655fadc6b8e` (tree `15c257aedf6d2d18afc5c1ba4991d7c468f1195c`). This candidate is not merged and not authoritative.
+Schema 21 / migration `021_canonical_lesson_schedule_authority` / build `phase2a2n-canonical-lesson-schedule-authority-20260917.1` are authoritative. Final independently approved candidate `9f92ada6ba82d809c1515566fb426c90a5a68e57`, tree `ec29baabf2d737d0eecd72d857a152b8eba4b163`, was merged as `08138270f4bd32e5829ef0f5a18a316f6780607d` with exact tree preservation.
 
 ## Locked contract
 

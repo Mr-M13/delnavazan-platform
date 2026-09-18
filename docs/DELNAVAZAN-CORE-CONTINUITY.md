@@ -12,15 +12,14 @@
 | Phase 2A.2-M approved candidate | `f44b502509f5dcb9b5d0281cfda4329407abd3bf`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
-| Schema | 20 |
-| Migrations | 001–020; latest `020_canonical_lesson_authority` |
-| Build identity | `phase2a2m-canonical-lesson-authority-20260917.1` |
-| Latest completed slice | Phase 2A.2-M — Canonical Lesson Authority |
-| Merge state | Independent review PASS; exact approved tree merged as `ed11086ad8ddc65899c3b855248611b1eb9e09a4` |
-| Closeout baseline | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
+| Schema | 21 |
+| Migrations | 001–021; latest `021_canonical_lesson_schedule_authority` |
+| Build identity | `phase2a2n-canonical-lesson-schedule-authority-20260917.1` |
+| Latest completed slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority |
+| Merge state | Phase N independent re-review PASS; exact approved tree merged as `08138270f4bd32e5829ef0f5a18a316f6780607d` |
+| Closeout baseline | `08138270f4bd32e5829ef0f5a18a316f6780607d`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
-| Active Phase 2A.2-N branch | `phase-2a2n-migration-verification-correction2` (descendant of correction-round-1 candidate `4a1741af1af622936e45b1f1d6f7419fcfcc3b43`, tree `e067496bd5ce8dca64573c794dd0cf8dc5ddaf8d`) — Schema 21 canonical Lesson scheduling and Teacher capacity authority; unmerged second correction of the independent-review HIGH finding |
-| Phase 2A.2-N state | **REVIEWED CANDIDATE FAILED INDEPENDENT REVIEW / CORRECTION ROUND 2 IN PROGRESS (UNCOMMITTED)** — the Phase-N schema verifier is invoked by the per-migration loop, by `verify_current_schema()` and now unconditionally before `maybe_upgrade()` advances the schema option to 21, closing the retained-021/stale-schema-version activation path (branch base `f90c41e6d9e129d7d9e1a243941d4655fadc6b8e`, candidate tree `15c257aedf6d2d18afc5c1ba4991d7c468f1195c`) |
+| Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Next Platform action after N merge | Requires separate authorisation; attendance, delivery, payment, renewal, notification and provider integration remain outside Platform authority |
 
 The completed coordination chain is:
@@ -40,7 +39,13 @@ The completed coordination chain is:
 13. **2A.2-M0** — Canonical Enrolment Lifecycle Authority: explicit activate/pause/resume/close commands, durable idempotency, protected integrity reads and subordinate closure guards.
 14. **2A.2-M** — Canonical Lesson Authority: bounded standard/replacement issuance and terminal completion/cancellation, immutable Term/Enrolment/Assignment/Teacher provenance, append-only lifecycle evidence and idempotent command evidence.
 
-Main is authoritative at Schema 20 / Phase M. Canonical Enrolment lifecycle authority, canonical Term creation/bounded lifecycle mutation and canonical Lesson authority are authoritative. Phase M introduces no scheduling, attendance, capacity, payment, notification, communication, calendar or Amelia authority; Phase N has not started.
+Main is authoritative at Schema 21 / Phase N. Canonical Lesson scheduling and Teacher capacity authority are now authoritative alongside the completed Enrolment, Term, Assignment and Lesson authority chain. Attendance, delivery, payment, renewal, notification, communication-provider, calendar/Meet, Amelia and payroll authority remain outside Platform scope.
+
+## Completed Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority
+
+Phase N is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**. The independently approved final candidate `9f92ada6ba82d809c1515566fb426c90a5a68e57`, tree `ec29baabf2d737d0eecd72d857a152b8eba4b163`, was merged without squash or rebase as `08138270f4bd32e5829ef0f5a18a316f6780607d`, whose merge tree exactly matches the approved tree. Schema 21 / `021_canonical_lesson_schedule_authority` / build `phase2a2n-canonical-lesson-schedule-authority-20260917.1` are authoritative.
+
+The final correction ensures Phase-N storage verification runs after migration 021, during current-schema verification, and unconditionally before Schema 21 activation, including the retained-021/stale-schema-version recovery path. The focused independent re-review returned no findings. No deployment occurred; production, Theme/NIU, Amelia and external integrations were untouched.
 
 ## Completed Phase 2A.2-M — Canonical Lesson Authority
 
