@@ -600,3 +600,25 @@ These records are authority evidence only. They do not create Enrolments, assign
 ## Schema 19 candidate — canonical Enrolment lifecycle commands
 
 `enrolment_lifecycle_commands` is immutable digest-only evidence for one explicit `activate`, `pause`, `resume`, or `close` intent. It binds the Enrolment, expected/result states, and exact lifecycle result event. It has no raw key, raw evidence reference, mutable status, or `updated_at`. The Enrolment projection and existing append-only event schema are unchanged.
+
+## Schema 21 candidate — canonical Lesson schedule versions, events and commands
+
+Phase 2A.2-N stores canonical Lesson scheduling authority separately from Lesson lifecycle. A scheduled canonical Lesson is a Lesson in `authorised` state plus exactly one applicable version in `{prefix}dzn_canonical_lesson_schedule_versions`.
+
+### `dzn_canonical_lesson_schedule_versions`
+
+Immutable interval assertions: `lesson_id`, `version_number`, `applicable_slot` (`1` for the single applicable version, `NULL` for history), snapshots of `enrolment_id`, `term_id`, `teacher_assignment_id` and `teacher_id`, `starts_at_utc`, `ends_at_utc`, `duration_minutes`, `buffer_minutes`, `duration_source` (`course_default` or `override`), `occupied_ends_at_utc`, `schedule_timezone`, `local_wall_date`, `local_wall_time`, `availability_basis` (`within_availability` or `administrative_override`) with the audited override reason/channel/digest/timestamp, `reason_code`, evidence channel/digest/timestamp, and supersession lineage (`superseded_at`, `superseded_by_version_id`). Only `applicable_slot`, `superseded_at` and `superseded_by_version_id` may mutate.
+
+Uniqueness: `UNIQUE(lesson_id, version_number)` and `UNIQUE(lesson_id, applicable_slot)`; `KEY teacher_occupancy(teacher_id, starts_at_utc, occupied_ends_at_utc)` supports the half-open occupancy conflict query.
+
+### `dzn_canonical_lesson_schedule_events`
+
+Append-only per-Lesson event chain with `event_sequence`, `event_type` (`scheduled`, `rescheduled`, `released`), `from_schedule_version_id`, `to_schedule_version_id` and the recorded reason/channel/digest/timestamp. `scheduled` opens an authority period, `rescheduled` continues it and `released` closes it; a released Lesson may be scheduled again in a new period.
+
+### `dzn_canonical_lesson_schedule_commands`
+
+Digest-only durable command evidence for `schedule_initial`, `schedule_revise` and `schedule_release` in domain `canonical_lesson_schedule_v1`: command key and payload digests, Lesson/Enrolment/Term/Teacher identity, expected Assignment, expected active version, expected Lesson state, requested timezone/wall provenance, duration override, availability override intent and evidence, the resolved interval/duration/buffer/duration-source/availability-basis, and the result version/event/state. No raw keys and no raw evidence references are stored.
+
+### `dzn_teacher_schedule_roots`
+
+One row per Teacher (`UNIQUE(teacher_id)`), created by migration for existing Teachers and lazily for later ones. It is a serialization anchor only: it stores no availability, capacity or authority state. Teacher occupancy is derived from applicable schedule versions, never from a separate mutable reservation projection.

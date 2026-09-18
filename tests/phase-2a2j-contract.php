@@ -20,7 +20,8 @@ $race = file_get_contents($root . '/tests/phase-2a2j-concurrency-runner.sh') . f
 foreach (array('016_teacher_assignment_foundation', 'teacher_assignments', 'teacher_assignment_lifecycle_events', 'teacher_assignment_commands', 'verify_teacher_assignment_schema', 'dzn_manage_teacher_assignments') as $needle) {
     if (!str_contains($plugin . $migration, $needle)) throw new RuntimeException('Missing Phase J identity/schema/capability: ' . $needle);
 }
-if ((!str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '16'") && !str_contains($plugin, "DZN_PLATFORM_SCHEMA_VERSION', '17'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '18'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '19'")&&!str_contains($plugin,"DZN_PLATFORM_SCHEMA_VERSION', '20'")) || (!str_contains($plugin, 'phase2a2j-teacher-assignment-foundation-20260915.1') && !str_contains($plugin, 'phase2a2k-canonical-term-foundation-20260916.1') && !str_contains($plugin, 'phase2a2l-canonical-term-authority-20260916.1') && !str_contains($plugin, 'phase2a2m0-enrolment-lifecycle-authority-20260917.1') && !str_contains($plugin, 'phase2a2m-canonical-lesson-authority-20260917.1'))) throw new RuntimeException('Missing compatible Phase J+ identity');
+if (!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/", $plugin, $schema) || (int) $schema[1] < 16) throw new RuntimeException('Missing compatible Phase J+ schema identity');
+if (!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2[a-z0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/", $plugin)) throw new RuntimeException('Missing compatible Phase J+ build identity');
 foreach (array('assignInitial', 'replace', 'end', 'cancel', 'initial_final_arrangement', 'replacement_agreement', 'retained_final_arrangement_and_assent', 'staff_attested_teacher_agreement', 'authenticated_teacher_acceptance') as $needle) {
     if (!str_contains($service, $needle)) throw new RuntimeException('Missing Teacher Assignment lifecycle/evidence behavior: ' . $needle);
 }

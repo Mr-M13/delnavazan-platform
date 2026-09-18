@@ -44,6 +44,8 @@ final class TeacherRepository extends BaseRepository {
             if (!$teacher || $teacher->archived_at !== null || $teacher->status === 'archived') throw new \InvalidArgumentException('Record is not archivable');
             do_action('dzn_phase_2a2j_teacher_archive_lock_held', $id);
             if ($this->hasApplicableTeacherAssignments($id)) throw new \InvalidArgumentException('Archive conflict: applicable Teacher Assignment exists');
+            // Phase 2A.2-N: archival must not strand future canonical schedule authority.
+            if ((new \Delnavazan\Platform\Core\Application\CanonicalLessonScheduleGuard())->activeFutureExists('teacher', $id, $now)) throw new \InvalidArgumentException('active_future_schedule_exists');
             parent::archive($id, $now, $actor);
             $this->commit();
         } catch (\Throwable $exception) {

@@ -333,3 +333,11 @@ Documentation alone is not sufficient evidence that a boundary is enforced.
 ## Phase 2A.2-M0 candidate boundary
 
 Academy owns explicit canonical Enrolment lifecycle mutation. The authority neither derives state from payment/Teacher/schedule facts nor mutates Term or Teacher Assignment authority. Closure only validates and rejects stranded applicable subordinate authority. Canonical Lesson storage and authority remain outside M0.
+
+## Phase 2A.2-N candidate boundary
+
+Academy owns canonical Lesson scheduling and Teacher occupied-time authority. It owns exactly one applicable schedule version per scheduled canonical Lesson, the append-only schedule event chain, digest-only scheduling command evidence and the per-Teacher serialization root. Teacher occupancy is derived from applicable versions; no module may introduce a second, mutable capacity or reservation counter.
+
+Teacher availability remains an upstream fact and is consumed as a constraint, never as occupancy authority. Teacher Assignment remains the sole current-Teacher authority; scheduling snapshots the recorded Assignment and refuses stale or replaced Assignments. No module may treat Amelia, Google Calendar, Google Meet, Meta/WhatsApp, Stripe or any other provider as canonical scheduling authority, and no module may cascade schedule release from Lesson, Enrolment, Term, Assignment or Teacher lifecycle changes.
+
+The cross-phase guards (Lesson completion/cancellation, Enrolment closure, Term close/cancel, Assignment replacement, Teacher archival) validate the affected schedule aggregates before deciding, so corrupted scheduling state blocks the consuming authority instead of silently approving or stranding future Teacher time.

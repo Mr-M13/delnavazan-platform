@@ -115,6 +115,9 @@ final class ScreenController {
                 'close_canonical_term' => self::canonicalTermTransition($post, 'close'),
                 'cancel_canonical_term' => self::canonicalTermTransition($post, 'cancel'),
                 'create_lesson' => (new LessonService())->create(self::createPayload('lesson', $post)),
+                'schedule_canonical_lesson' => self::canonicalScheduleAction($post, 'schedule_initial'),
+                'revise_canonical_lesson' => self::canonicalScheduleAction($post, 'schedule_revise'),
+                'release_canonical_lesson' => self::canonicalScheduleAction($post, 'schedule_release'),
                 'archive' => self::archive($post), 'restore' => self::restore($post),
                 'initial_schedule' => self::schedule($post, true), 'reschedule' => self::schedule($post, false),
                 'acknowledge_exception' => self::transition($post, 'acknowledged'),
@@ -198,7 +201,7 @@ final class ScreenController {
             if (($record->record_model ?? '') === 'canonical_student_course_v1' && current_user_can('dzn_manage_canonical_enrolment_lifecycle')) self::canonicalEnrolmentLifecycleForm($record);
         }
         if ($entity === 'term' && ($record->record_model ?? '') === 'canonical_enrolment_term_v1' && current_user_can('dzn_manage_canonical_terms')) self::canonicalTermLifecycleForm($record);
-        if ($entity === 'lesson') self::lessonSchedules($id);
+        if ($entity === 'lesson') { self::lessonSchedules($id); if (($record->record_model ?? '') === 'canonical_term_lesson_v1') self::canonicalLessonSchedule($record); }
     }
 
     private static function entityCreateForm(string $entity): void {
@@ -318,4 +321,77 @@ final class ScreenController {
     }
     private static function renderMessages(): void { if (!isset($_GET['dzn_notice'])) return; $notice = sanitize_text_field(wp_unslash($_GET['dzn_notice'])); echo '<div class="notice ' . esc_attr((($_GET['dzn_error'] ?? '') === '1') ? 'notice-error' : 'notice-success') . '"><p>' . esc_html($notice) . '</p></div>'; }
     private static function forbidden(): void { echo '<div class="wrap"><h1>Delnavazan</h1><p>Access denied.</p></div>'; }
+    /** Phase 2A.2-N: minimum administrator invocation for canonical Lesson scheduling. */
+    private static function canonicalScheduleAction(array $post, string $operation): int {
+        if (!current_user_can('dzn_manage_canonical_lesson_schedules')) throw new \RuntimeException('Unauthorized');
+        $service = new CanonicalLessonScheduleService();
+        $lessonId = absint($post['lesson_id'] ?? 0);
+        $key = (string) ($post['idempotency_key'] ?? '');
+        $reason = sanitize_key($post['reason_code'] ?? '');
+        if ($operation === 'schedule_release') {
+            $result = $service->release($lessonId, array(
+                'expected_schedule_version_id' => absint($post['expected_schedule_version_id'] ?? 0),
+                'reason_code' => $reason,
+            ) + self::canonicalEvidence($post), $key);
+            return (int) $result['schedule_version_id'];
+        }
+        $input = array(
+            'schedule_timezone' => sanitize_text_field($post['schedule_timezone'] ?? ''),
+            'local_wall_date' => sanitize_text_field($post['local_wall_date'] ?? ''),
+            'local_wall_time' => sanitize_text_field($post['local_wall_time'] ?? ''),
+            'reason_code' => $reason,
+            'duration_minutes' => sanitize_text_field($post['duration_minutes'] ?? ''),
+            'expected_schedule_version_id' => absint($post['expected_schedule_version_id'] ?? 0),
+        ) + self::canonicalEvidence($post);
+        if (!empty($post['availability_override'])) {
+            $input['availability_override'] = true;
+            $input['override_reason_code'] = sanitize_key($post['override_reason_code'] ?? '');
+            $input['override_evidence_channel'] = sanitize_key($post['override_evidence_channel'] ?? '');
+            $input['override_evidence_reference'] = sanitize_text_field($post['override_evidence_reference'] ?? '');
+            $input['override_evidence_at'] = sanitize_text_field($post['override_evidence_at'] ?? '');
+        }
+        $expectedAssignment = absint($post['expected_assignment_id'] ?? 0);
+        $result = $operation === 'schedule_initial' ? $service->schedule($lessonId, $expectedAssignment, $input, $key) : $service->revise($lessonId, $expectedAssignment, $input, $key);
+        return (int) $result['schedule_version_id'];
+    }
+    private static function canonicalLessonSchedule(object $lesson): void {
+        if (!current_user_can('dzn_manage_canonical_lesson_schedules')) return;
+        echo '<h2>Canonical Lesson schedule</h2>';
+        try { $state = (new CanonicalLessonScheduleReadService())->forLesson((int) $lesson->id); }
+        catch (\InvalidArgumentException $exception) {
+            if ($exception->getMessage() !== 'canonical_schedule_integrity_conflict') throw $exception;
+            echo '<p class="notice notice-error">Canonical schedule failed integrity validation.</p>';
+            return;
+        }
+        if ($state['active_version']) self::objectTable(array($state['active_version']), null); else echo '<p>No applicable canonical schedule.</p>';
+        if ($state['versions']) { echo '<h3>Schedule history</h3>'; self::objectTable($state['versions'], null); }
+        $active = $state['active_version'];
+        self::formStart($active ? 'revise_canonical_lesson' : 'schedule_canonical_lesson');
+        echo '<input type="hidden" name="lesson_id" value="' . esc_attr((string) $lesson->id) . '">';
+        echo '<input type="hidden" name="expected_assignment_id" value="' . esc_attr((string) $lesson->teacher_assignment_id) . '">';
+        if ($active) echo '<input type="hidden" name="expected_schedule_version_id" value="' . esc_attr((string) $active->id) . '">';
+        self::input('schedule_timezone', 'Schedule timezone', true, 'text', 'Australia/Brisbane');
+        self::input('local_wall_date', 'Local date', true, 'date');
+        self::input('local_wall_time', 'Local time (HH:MM:SS)', true, 'text');
+        self::input('duration_minutes', 'Duration override (minutes, optional)');
+        self::input('reason_code', 'Reason code', true);
+        self::canonicalEvidenceFields();
+        if (current_user_can('dzn_override_canonical_lesson_schedule_availability')) {
+            echo '<p><label><input type="checkbox" name="availability_override" value="1"> Administrative availability override</label></p>';
+            self::input('override_reason_code', 'Override reason code');
+            self::select('override_evidence_channel', 'Override evidence channel', array('staff_record','authenticated_platform','document_reference'), 'staff_record');
+            self::input('override_evidence_reference', 'Override evidence reference');
+            self::input('override_evidence_at', 'Override evidence UTC', false, 'text', gmdate('Y-m-d H:i:s'));
+        }
+        submit_button($active ? 'Revise canonical schedule' : 'Create canonical schedule');
+        echo '</form>';
+        if (!$active) return;
+        self::formStart('release_canonical_lesson');
+        echo '<input type="hidden" name="lesson_id" value="' . esc_attr((string) $lesson->id) . '">';
+        echo '<input type="hidden" name="expected_schedule_version_id" value="' . esc_attr((string) $active->id) . '">';
+        self::input('reason_code', 'Reason code', true);
+        self::canonicalEvidenceFields();
+        submit_button('Release canonical schedule');
+        echo '</form>';
+    }
 }

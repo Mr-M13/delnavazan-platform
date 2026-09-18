@@ -77,6 +77,7 @@ final class TeacherAssignmentService {
             if ((int) $current->id !== $normalized['expected_assignment_id']) throw new \InvalidArgumentException('assignment_changed');
             if (!TeacherAssignmentAssessment::currentTeacher($teachers[$newTeacherId] ?? null)) throw new \InvalidArgumentException('teacher_not_current');
             $this->authorizeReplacementEvidence($normalized['route'], $newTeacherId);
+            if ((new \Delnavazan\Platform\Core\Application\CanonicalLessonScheduleGuard())->activeFutureExists('enrolment', $enrolmentId, gmdate('Y-m-d H:i:s'))) throw new \InvalidArgumentException('active_future_schedule_exists');
 
             $now = gmdate('Y-m-d H:i:s');
             $eventSequence = count($this->repository->events((int) $current->id)) + 1;

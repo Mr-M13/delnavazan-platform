@@ -406,3 +406,9 @@ Additive Schema 17→18 migration creating only `dzn_term_commands` and repairin
 ### Schema 19 — canonical Enrolment lifecycle authority
 
 `019_canonical_enrolment_lifecycle_authority` additively creates immutable `enrolment_lifecycle_commands` and repairs the dedicated administrator capability. It does not alter or backfill Enrolments, infer lifecycle, rewrite conversion evidence, or add canonical Lesson storage. Existing lifecycle history is strengthened by the explicit legal transition graph.
+
+### Schema 21 — canonical Lesson scheduling & Teacher capacity authority (Phase 2A.2-N candidate)
+
+`021_canonical_lesson_schedule_authority` is additive only. It creates `dzn_teacher_schedule_roots`, `dzn_canonical_lesson_schedule_versions`, `dzn_canonical_lesson_schedule_events` and `dzn_canonical_lesson_schedule_commands`, verifies their engines, columns and indexes, repairs the `dzn_manage_canonical_lesson_schedules` and `dzn_override_canonical_lesson_schedule_availability` administrator capabilities, and backfills one serialization root per existing Teacher.
+
+It performs **no** legacy schedule backfill, no reinterpretation, no authority translation and no dual-read: legacy `lesson_schedule_versions` rows belong to legacy Phase-1 Lessons only, and canonical Lessons provably hold no legacy scheduling projection (`current_schedule_version_id` is `NULL` at issuance and the legacy writer rejects canonical rows). Canonical scheduling history therefore begins empty. The rehearsal path verified in the runtime covers a fresh Schema 21 install, an exact Schema 20 → 21 upgrade with repeat safety, legacy preservation, capability repair and Teacher-root backfill.
