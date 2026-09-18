@@ -288,8 +288,18 @@ try {
 dzn_o_assert(count($obligationRows((int) $owed['lesson_id'])) === count($owedBefore), 'denied obligation write created an obligation row');
 dzn_o_assert($lessonState((int) $owed['lesson_id']) === $lessonBefore, 'denied obligation write changed canonical Lesson state');
 dzn_o_assert(count($obligations->outstandingForTerm((int) $academyChain['term_id'])) === $obligationsBefore, 'denied obligation write changed the canonical obligation aggregate');
-$duplicateOwe = $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'], null, array('reason_code' => 'synthetic_outcome', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('c', 64), 'evidence_at' => gmdate('Y-m-d H:i:s')));
-dzn_o_assert((int) $duplicateOwe === (int) $owedObligations[0]->id && count($obligationRows((int) $owed['lesson_id'])) === 1, 'authorized duplicate obligation assertion was not idempotent');
+// Exact same-kind replay of the real source evidence stays idempotent.
+$exactReplayEvidence = array('reason_code' => (string) $owedObligations[0]->reason_code, 'evidence_channel' => (string) $owedObligations[0]->evidence_channel, 'evidence_reference_digest' => (string) $owedObligations[0]->evidence_reference_digest, 'evidence_at' => (string) $owedObligations[0]->evidence_at);
+$duplicateOwe = $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'], null, $exactReplayEvidence);
+dzn_o_assert((int) $duplicateOwe === (int) $owedObligations[0]->id && count($obligationRows((int) $owed['lesson_id'])) === 1, 'exact same-kind obligation replay was not idempotent');
+$conflictingReplay = false;
+try { $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'], null, array('reason_code' => 'synthetic_outcome', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('c', 64), 'evidence_at' => gmdate('Y-m-d H:i:s'))); }
+catch (\InvalidArgumentException $exception) { $conflictingReplay = $exception->getMessage() === 'obligation_replay_conflict'; }
+dzn_o_assert($conflictingReplay && count($obligationRows((int) $owed['lesson_id'])) === 1, 'same-kind replay with conflicting evidence was accepted');
+$conflictingSource = false;
+try { $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'] + 100000, null, $exactReplayEvidence); }
+catch (\InvalidArgumentException $exception) { $conflictingSource = in_array($exception->getMessage(), array('obligation_replay_conflict', 'academy_obligation_source_missing'), true); }
+dzn_o_assert($conflictingSource && count($obligationRows((int) $owed['lesson_id'])) === 1, 'same-kind replay with a conflicting source identifier was accepted');
 $conflictOwe = false;
 try { $obligations->owe((int) $owed['lesson_id'], 'academy_cancellation', null, null, array('reason_code' => 'canonical_lesson_cancelled_academy_unavailable', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('d', 64), 'evidence_at' => gmdate('Y-m-d H:i:s'))); }
 catch (\InvalidArgumentException $exception) { $conflictOwe = $exception->getMessage() === 'obligation_source_conflict'; }

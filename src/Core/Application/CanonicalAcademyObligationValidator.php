@@ -69,6 +69,26 @@ final class CanonicalAcademyObligationValidator {
             if($kind==='teacher_non_delivery'){
                 if($sourceOutcome===null)return false;
                 if((int)($obligation->schedule_version_id??0)!==(int)($effective->schedule_version_id??0))return false;
+                // O-D8 lineage: the obligation is subordinate to the canonical reconciliation truth.
+                // An ordinary non-delivered occurrence carries no completion event; a reconciled one
+                // must name exactly the immutable completion event the effective outcome supersedes,
+                // and that event must still be the Lesson's latest canonical completed event.
+                $reconciledEvent=$effective->reconciles_completion_event_id===null?null:(int)$effective->reconciles_completion_event_id;
+                $storedEvent=$obligation->source_event_id===null?null:(int)$obligation->source_event_id;
+                if($reconciledEvent===null){
+                    if($storedEvent!==null)return false;
+                }else{
+                    if($storedEvent===null||$storedEvent!==$reconciledEvent)return false;
+                    if((string)($lesson->lifecycle_state??'')!=='completed')return false;
+                    $namedEvent=null;$latestCompletion=0;
+                    foreach($lifecycle as$item){
+                        if((string)($item->to_state??'')==='completed')$latestCompletion=max($latestCompletion,(int)($item->id??0));
+                        if((int)($item->id??0)===$reconciledEvent)$namedEvent=$item;
+                    }
+                    if(!$namedEvent||(string)($namedEvent->to_state??'')!=='completed')return false;
+                    if((int)($namedEvent->lesson_id??0)!==$lessonId)return false;
+                    if($latestCompletion!==$reconciledEvent)return false;
+                }
                 // The obligation carries the exact evidence of the source fact it was raised from.
                 if((string)($obligation->reason_code??'')!==(string)$effective->reason_code)return false;
                 if((string)($obligation->evidence_channel??'')!==(string)$effective->evidence_channel)return false;

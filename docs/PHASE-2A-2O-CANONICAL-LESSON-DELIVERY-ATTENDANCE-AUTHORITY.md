@@ -1,6 +1,6 @@
 # Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority
 
-Status: **CORRECTION ROUND 1 CANDIDATE — independent review failed on O-1/O-2, corrections applied, awaiting independent re-review**
+Status: **CORRECTION ROUND 2 CANDIDATE — independent re-review of round 1 failed on the O-D8 completion-event lineage defect and two lower findings, corrections applied, awaiting independent re-review**
 
 Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build
 `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`.
@@ -10,6 +10,14 @@ Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / bui
 > final independent review. See "Correction round 1" below. Schema 22, the migration and every
 > locked product decision are unchanged; the corrections are application-service validation,
 > capability enforcement and documentation only.
+>
+> **Correction round 2 (independent re-review findings on round 1).** Independent re-review of
+> candidate `c63c1327047bd76f3155788874ec6ea6ae7a38e0` (tree
+> `7fa33f0d406e25a403e0f2b5c7d4668923faaaca`) failed again: one HIGH defect in O-D8 completion-event
+> lineage, one MEDIUM gap in corruption coverage and one LOW idempotent-replay issue. See
+> "Correction round 2" below. Schema 22, migration `022_canonical_lesson_delivery_attendance_authority`,
+> the build identity and O-D1…O-D9 remain unchanged; the round-2 corrections are validation, test and
+> documentation work only.
 
 Phase O is provider-neutral. It records what actually happened to a canonical Lesson occurrence
 without becoming a provider integration, without changing Lesson lifecycle, scheduling, payment,
@@ -49,6 +57,19 @@ delivery.
 | **O-1 (HIGH)** — `CanonicalAcademyObligationService::owe()` was a public state-mutating seam that did not itself enforce `dzn_manage_canonical_lesson_delivery` | `owe()` now calls the Phase-O capability check as its first statement, before any source lookup, validation or canonical mutation. An unauthorized actor fails closed with `Unauthorized`, no obligation row is created, no evidence is persisted and no partial authority survives. The two legitimate callers (the Phase-O delivery authority's non-delivery path and the Phase-M advance-cancellation reconciliation) run after their own capability check and inside the caller's transaction, so authorized behaviour and atomicity are unchanged; an advance cancellation performed by a principal without the Phase-O capability now fails closed and rolls back completely. No capability was broadened and no new public authority was introduced. |
 | **O-2 (HIGH)** — `outstandingForTerm()`, `outstandingCountForTerm()` and `outstandingForEnrolment()` could return or count raw repository rows | All three now hydrate every selected obligation against its canonical source Lesson and validate it through `CanonicalAcademyObligationValidator`, which now also requires that the stored Term, Enrolment, Student, Course, Teacher and Teacher Assignment selectors **agree** with the source authority, that source lineage (outcome/event, schedule version, occurrence anchors) is intact, and that the obligation's evidence is byte-identical to the evidence of the source fact it was raised from. A single invalid row fails the whole aggregate closed (`canonical_obligation_integrity_conflict`); nothing is silently omitted. `outstandingCountForTerm()` is derived from the same validated aggregate as `outstandingForTerm()`; the raw SQL count seam was removed from the repository. To make a corrupted stored selector detectable rather than invisible, Term and Enrolment selectors now select the **union** of rows that claim the selector and rows whose source canonical Lesson belongs to it. |
 | **O-3 (LOW)** — documentation claimed 36 static/source contract tests | Corrected. See "Validation performed" below: 29 files match `tests/*contract*.php`, and PHP lint (`tests/static.php`) plus `sh -n` shell syntax checks are reported separately as syntax checks, not contract tests. |
+
+## Correction round 2
+
+Independent re-review of round 1 found that the round-1 documentation overstated aggregate corruption
+coverage ("source outcome/event lineage") where the teacher_non_delivery branch did **not** validate
+the historical completion-event lineage, and that the Teacher Assignment corruption case promised by
+round 1 was never added. Both are corrected here, together with the replay idempotency issue.
+
+| Finding | Correction |
+| --- | --- |
+| **HIGH — O-D8 completion-event lineage was not validated for `teacher_non_delivery`** | The validator now reconciles the obligation's `source_event_id` with the effective outcome's canonical reconciliation lineage. For an ordinary (non-reconciled) non-delivery the obligation must carry **no** completion-event lineage, and any stored event identifier is an integrity conflict. For an O-D8 reconciled completion the obligation must carry the exact event the effective outcome names, that event must exist in the Lesson's canonical lifecycle, belong to the same Lesson, be a `completed` event, and still be the Lesson's latest canonical completed event, with the Lesson itself in `completed` state. The obligation remains subordinate to the canonical Lesson/outcome/reconciliation facts — it never becomes the authority over completion, and the validation reuses the same hydrated lifecycle facts and rule the delivery authority applies rather than a second interpretation. |
+| **MEDIUM — missing corruption cases** | Added: Teacher Assignment identity to the aggregate identity matrix, and four O-D8 completion-lineage cases (wrong event identifier, completion event belonging to another Lesson, missing lineage where reconciliation requires it, and a wrong lifecycle-event type) plus the ordinary non-reconciled "spurious completion lineage" case. Every one of these is exercised through **all three** public aggregate seams — `outstandingForTerm()`, `outstandingCountForTerm()` and `outstandingForEnrolment()` — with repair proving recovery. |
+| **LOW — same-kind replay bypassed the source/evidence contract** | `owe()` no longer returns an existing same-kind obligation before validating the supplied authority. A same-kind call now validates the supplied source, requires the existing obligation to bind to the same canonical source identifiers (source outcome for non-delivery, source cancellation event for academy cancellation) and to match the immutable evidence exactly, and additionally revalidates the existing obligation's canonical aggregate. An exact legitimate replay remains idempotent (same row, no duplicate); conflicting replay intent fails closed with `obligation_replay_conflict`. The uniqueness semantics (`UNIQUE(source_lesson_id)`) and concurrency behaviour are unchanged. |
 
 ## Outcome vocabulary
 
@@ -170,14 +191,16 @@ outcome without changing canonical identity or introducing Google coupling into 
   completion, academy-funded remedy after the allowance cap is exhausted, advance-cancellation
   versus post-occurrence non-delivery, temporal refusals, review-required resolution, capability
   denial and digest-only evidence.
-- **Corruption runtime (35 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
+- **Corruption runtime (41 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
   occurrence start and end anchors, schedule-version binding, profile columns, actor, reason,
   channel, reference digest, observed time, applicable relationship, supersession target,
   provider-shaped evidence, command intent and command result) fail closed through the protected
-  read, the guard and Lesson completion, then recover; plus 17 academy-obligation classes verified
+  read, the guard and Lesson completion, then recover; plus 23 academy-obligation classes verified
   through the **aggregate reads** (`outstandingForTerm`, `outstandingCountForTerm`,
   `outstandingForEnrolment`) covering source Lesson relationship, Term, Enrolment, Student, Course
-  and Teacher identity, source outcome and cancellation-event lineage, schedule-version and
+  and Teacher identity, **Teacher Assignment identity**, source outcome and cancellation-event
+  lineage, O-D8 completion-event lineage (wrong identifier, cross-Lesson event, missing lineage,
+  wrong lifecycle-event type, and spurious lineage on an ordinary non-delivery), schedule-version and
   occurrence anchors, evidence channel, reference digest, observed time, actor, reason code and state
   classification. Each case proves all three reads reject the corrupted authority and that the count
   never reports it.

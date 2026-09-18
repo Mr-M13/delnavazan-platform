@@ -64,7 +64,7 @@ $occurrence = function (string $label, int $durationMinutes = 1) use (&$chain, $
 };
 /** Create every synthetic occurrence first, then wait once for all of them to end. */
 $occurrences = array();
-foreach (array('lesson','delivery_state','attendance_state','remedy_class','sequence','anchor','lineage','provider','recorded_by','reason_code','evidence_channel','evidence_reference_digest','evidence_at','supersession','command','obligation_nd') as $label) {
+foreach (array('lesson','delivery_state','attendance_state','remedy_class','sequence','anchor','lineage','provider','recorded_by','reason_code','evidence_channel','evidence_reference_digest','evidence_at','supersession','command','obligation_nd','od8_reconcile') as $label) {
     $occurrences[$label] = $occurrence('corrupt-' . $label);
 }
 $latest = 0;
@@ -238,6 +238,7 @@ $identityCases = array(
     'Student identity' => array('student_id', 'student_id=student_id+100000', 'student_id=student_id-100000'),
     'Course identity' => array('course_id', 'course_id=course_id+100000', 'course_id=course_id-100000'),
     'Teacher identity' => array('teacher_id', 'teacher_id=teacher_id+100000', 'teacher_id=teacher_id-100000'),
+    'Teacher Assignment identity' => array('teacher_assignment_id', 'teacher_assignment_id=teacher_assignment_id+100000', 'teacher_assignment_id=teacher_assignment_id-100000'),
 );
 foreach ($identityCases as $label => $spec) {
     $aggregateFailClosed($label, $cancellationObligation, $spec[0], "UPDATE {$p}canonical_academy_obligations SET {$spec[1]} WHERE id={$cancellationObligation}", "UPDATE {$p}canonical_academy_obligations SET {$spec[2]} WHERE id={$cancellationObligation}");
@@ -275,4 +276,46 @@ foreach ($nonDeliveryCases as $label => $spec) {
 }
 $aggregateFailClosed('source cancellation event lineage', $cancellationObligation, 'source_event_id', "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id+100000 WHERE id={$cancellationObligation}", "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id-100000 WHERE id={$cancellationObligation}");
 
-echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 1) . "\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";
+// ---------------------------------------------------------------------------
+// 9. Correction round 2 (HIGH): O-D8 completion-event lineage is validated, not merely compared.
+//    The obligation stays subordinate to the canonical reconciliation truth of the source Lesson.
+// ---------------------------------------------------------------------------
+$od8Lesson = $settled('od8_reconcile');
+$lessonService->complete($od8Lesson, 'authorised', dzn_oc_evidence('od8-complete'), dzn_oc_key('od8-complete'));
+$od8Evidence = dzn_oc_evidence('od8-reconcile') + array('reason_code' => 'reconciliation_confirmed_non_delivery');
+$delivery->reconcile($od8Lesson, $od8Evidence, dzn_oc_key('od8-reconcile'));
+$od8Obligation = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_academy_obligations WHERE source_lesson_id=%d", $od8Lesson));
+$od8CompletionEvent = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_lesson_lifecycle_events WHERE lesson_id=%d AND to_state='completed' ORDER BY event_sequence DESC LIMIT 1", $od8Lesson));
+dzn_oc_assert($od8Obligation > 0 && $od8CompletionEvent > 0, 'O-D8 reconciliation fixture did not establish the obligation and completion lineage');
+dzn_oc_assert(($wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_academy_obligations WHERE id=%d", $od8Obligation))->source_event_id ?? null) == $od8CompletionEvent, 'O-D8 obligation does not name its canonical completion event');
+dzn_oc_assert(count($obligations->outstandingForTerm((int) $cancelChain['term_id'])) >= 1, 'aggregate read unavailable for the O-D8 fixture');
+// Baseline: the valid O-D8 obligation is visible and counted through all three public aggregates.
+$od8Row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_academy_obligations WHERE id=%d", $od8Obligation));
+$od8Term = (int) $od8Row->term_id; $od8Enrolment = (int) $od8Row->enrolment_id;
+dzn_oc_assert(count(array_filter($obligations->outstandingForTerm($od8Term), static fn($row) => (int) $row->id === $od8Obligation)) === 1, 'valid O-D8 obligation missing from outstandingForTerm()');
+dzn_oc_assert($obligations->outstandingCountForTerm($od8Term) === count($obligations->outstandingForTerm($od8Term)), 'O-D8 count diverged from the validated aggregate');
+dzn_oc_assert(count(array_filter($obligations->outstandingForEnrolment($od8Enrolment), static fn($row) => (int) $row->id === $od8Obligation)) === 1, 'valid O-D8 obligation missing from outstandingForEnrolment()');
+// A completion event belonging to a DIFFERENT canonical Lesson, used for the cross-Lesson case.
+$otherLessonEvent = 0;
+$otherLesson = $settled('lesson');
+$lessonService->complete($otherLesson, 'authorised', dzn_oc_evidence('other-complete'), dzn_oc_key('other-complete'));
+$otherLessonEvent = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_lesson_lifecycle_events WHERE lesson_id=%d AND to_state='completed' ORDER BY event_sequence DESC LIMIT 1", $otherLesson));
+dzn_oc_assert($otherLessonEvent > 0 && $otherLessonEvent !== $od8CompletionEvent, 'cross-Lesson completion event fixture unavailable');
+$aggregateFailClosed('O-D8 wrong completion event identifier', $od8Obligation, 'source_event_id',
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id+100000 WHERE id={$od8Obligation}",
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id-100000 WHERE id={$od8Obligation}");
+$aggregateFailClosed('O-D8 completion event from another Lesson', $od8Obligation, 'source_event_id',
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id={$otherLessonEvent} WHERE id={$od8Obligation}",
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id={$od8CompletionEvent} WHERE id={$od8Obligation}");
+$aggregateFailClosed('O-D8 missing completion event lineage', $od8Obligation, 'source_event_id',
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id=NULL WHERE id={$od8Obligation}",
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id={$od8CompletionEvent} WHERE id={$od8Obligation}");
+// Ordinary (non-reconciled) non-delivery must carry NO completion-event lineage at all.
+$aggregateFailClosed('ordinary non-delivery with spurious completion lineage', $nonDeliveryObligation, 'source_event_id',
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id={$od8CompletionEvent} WHERE id={$nonDeliveryObligation}",
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id=NULL WHERE id={$nonDeliveryObligation}");
+$aggregateFailClosed('O-D8 completion event of the wrong lifecycle type', $od8Obligation, 'source_event_id',
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id=(SELECT id FROM (SELECT id FROM {$p}canonical_lesson_lifecycle_events WHERE lesson_id={$od8Lesson} AND to_state='authorised' ORDER BY event_sequence ASC LIMIT 1) t) WHERE id={$od8Obligation}",
+    "UPDATE {$p}canonical_academy_obligations SET source_event_id={$od8CompletionEvent} WHERE id={$od8Obligation}");
+
+echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 6) . "\nod8_completion_lineage_cases=4\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";

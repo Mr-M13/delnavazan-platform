@@ -49,9 +49,14 @@ final class CanonicalAcademyObligationService {
         if(!$lesson||(string)($lesson->record_model??'')!=='canonical_term_lesson_v1')throw new \InvalidArgumentException('canonical_lesson_required');
         // An occurrence already owed cannot be owed again under a different source kind: conflict is
         // resolved before the new source fact is trusted, so debt can never be double-established.
+        // A same-kind call is an idempotent replay only when the supplied source authority and
+        // immutable evidence are exactly the ones the existing canonical obligation records.
         $existing=$this->repository->forLesson($lessonId,true);
         foreach($existing as$obligation){
             if((string)$obligation->source_kind!==$kind)throw new \InvalidArgumentException('obligation_source_conflict');
+            $this->assertSource($lesson,$kind,$sourceOutcomeId,$sourceEventId);
+            $this->assertReplayMatches($obligation,$kind,$sourceOutcomeId,$sourceEventId,$evidence);
+            if(!CanonicalAcademyObligationValidator::validForLesson($lessonId,$this->repository,$this->lessons,$this->delivery))throw new \InvalidArgumentException('canonical_obligation_integrity_conflict');
             return (int)$obligation->id;
         }
         $this->assertSource($lesson,$kind,$sourceOutcomeId,$sourceEventId);
@@ -128,6 +133,25 @@ final class CanonicalAcademyObligationService {
             $accepted[]=$row;
         }
         return $accepted;
+    }
+
+    /**
+     * Same-kind replay contract: an idempotent success is only legitimate when the supplied source
+     * identity and immutable evidence exactly match the canonical obligation already recorded for
+     * this occurrence. Conflicting replay intent fails closed and never creates a second row.
+     */
+    private function assertReplayMatches(object $obligation,string $kind,?int $sourceOutcomeId,?int $sourceEventId,array $evidence):void{
+        $storedOutcome=$obligation->source_outcome_id===null?null:(int)$obligation->source_outcome_id;
+        $storedEvent=$obligation->source_event_id===null?null:(int)$obligation->source_event_id;
+        if($kind==='teacher_non_delivery'){
+            if($storedOutcome!==$sourceOutcomeId||$storedEvent!==$sourceEventId)throw new \InvalidArgumentException('obligation_replay_conflict');
+        }elseif($storedEvent!==$sourceEventId){
+            throw new \InvalidArgumentException('obligation_replay_conflict');
+        }
+        if((string)($obligation->reason_code??'')!==(string)($evidence['reason_code']??''))throw new \InvalidArgumentException('obligation_replay_conflict');
+        if((string)($obligation->evidence_channel??'')!==(string)($evidence['evidence_channel']??''))throw new \InvalidArgumentException('obligation_replay_conflict');
+        if(!hash_equals((string)($obligation->evidence_reference_digest??''),(string)($evidence['evidence_reference_digest']??'')))throw new \InvalidArgumentException('obligation_replay_conflict');
+        if((string)($obligation->evidence_at??'')!==(string)($evidence['evidence_at']??''))throw new \InvalidArgumentException('obligation_replay_conflict');
     }
 
     private function assertSource(object $lesson,string $kind,?int $sourceOutcomeId,?int $sourceEventId):void{

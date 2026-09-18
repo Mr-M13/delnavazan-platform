@@ -69,6 +69,15 @@ if(str_contains($obligationRepo,'outstandingCount'))throw new RuntimeException('
 if(!str_contains($obligationRepo,'o.source_lesson_id IN (SELECT l.id FROM'))throw new RuntimeException('Aggregate obligation selectors must also select by source Lesson so corrupted selectors cannot be omitted');
 foreach(array('!==(int)($lesson->student_id??0)','!==(int)($lesson->course_id??0)','!==(int)($lesson->teacher_id??0)','!==(int)($lesson->term_id??0)','!==(int)($lesson->enrolment_id??0)')as$n)if(!str_contains($obligationValidator,$n))throw new RuntimeException('Obligation validator does not require selector agreement: '.$n);
 
+// Correction round 2 — HIGH: the teacher_non_delivery branch must validate O-D8 completion-event
+// lineage rather than trusting the stored identifier, and same-kind replay must not bypass the
+// source/evidence contract.
+foreach(array('$reconciledEvent=$effective->reconciles_completion_event_id','$storedEvent=$obligation->source_event_id','if($reconciledEvent===null)','$latestCompletion','$storedEvent!==$reconciledEvent')as$n)if(!str_contains($obligationValidator,$n))throw new RuntimeException('O-D8 completion-event lineage is not validated on obligations: '.$n);
+if(!str_contains($obligationValidator,"(string)(\$namedEvent->to_state??'')!=='completed'"))throw new RuntimeException('O-D8 lineage validation must require the canonical completed lifecycle event');
+if(!str_contains($obligationService,'assertReplayMatches')||!str_contains($obligationService,"'obligation_replay_conflict'"))throw new RuntimeException('Same-kind obligation replay does not enforce the source/evidence contract');
+$corruptionRound2=file_get_contents($root.'/tests/phase-2a2o-corruption-runtime.php');
+foreach(array('Teacher Assignment identity','O-D8 wrong completion event identifier','O-D8 completion event from another Lesson','O-D8 missing completion event lineage','O-D8 completion event of the wrong lifecycle type','ordinary non-delivery with spurious completion lineage')as$n)if(!str_contains($corruptionRound2,$n))throw new RuntimeException('Correction round 2 corruption coverage is incomplete: '.$n);
+
 // Provider neutrality and excluded authority: no provider or finance coupling may enter Phase O.
 $phaseO=$service.$validator.$guard.$read.$repo;
 foreach(array('google','amelia','wp_remote','curl_','webhook','access_token','payment','refund','invoice','payroll','whatsapp')as$n)if(stripos($phaseO,$n)!==false)throw new RuntimeException('Phase O leaked excluded authority: '.$n);
