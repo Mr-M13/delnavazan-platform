@@ -51,7 +51,17 @@ $chain = function () use ($allocate, $enrolmentService, $termService, $assignmen
 /**
  * Issue and schedule a synthetic occurrence. A one-minute duration keeps the owner matrix tractable;
  * the schedule is released immediately so a chain's dedicated Teacher is never occupied twice.
+ *
+ * The lead is always chosen so the whole synthetic interval stays inside one UTC day: the test
+ * provisioner's full-day availability rules meet at midnight, where a genuine one-second coverage
+ * gap exists. This keeps the suite independent of the wall-clock time it is run at.
  */
+$fitLead = static function (int $durationMinutes, int $minLeadSeconds = 2): string {
+    $midnight = strtotime('tomorrow UTC');
+    $start = time() + $minLeadSeconds;
+    if ($start + $durationMinutes * 60 + 5 >= $midnight) $start = $midnight + 30;
+    return '@' . $start;
+};
 $occurred = function (array $chain, string $label, int $durationMinutes = 1, string $lead = '+2 seconds', bool $waitForEnd = true) use ($lessonService, $scheduleService, $wpdb, $p): array {
     $lessonId = (int) $lessonService->createStandard((int) $chain['term_id'], (int) $chain['assignment_id'], dzn_o_evidence($label), dzn_o_key($label))['lesson_id'];
     $wall = gmdate('Y-m-d H:i:s', strtotime($lead));
@@ -88,13 +98,14 @@ $termState = static function (int $termId) use ($wpdb, $p): string {
 // Fixture: three chains, five genuinely ended occurrences, one single settle wait.
 // ---------------------------------------------------------------------------
 $one = $chain(); $academyChain = $chain(); $reviewChain = $chain(); $termChain = $chain();
+// These six are settled by the single shared settle() wait below, never inside the helper.
 $occurrences = array(
-    'plain' => $occurred($one, 'plain-delivery'),
-    'no_show' => $occurred($one, 'student-no-show'),
-    'reconcile' => $occurred($one, 'reconcile-target'),
-    'owed' => $occurred($academyChain, 'teacher-non-delivery'),
-    'late' => $occurred($academyChain, 'late-cancel'),
-    'ambiguous' => $occurred($reviewChain, 'ambiguous'),
+    'plain' => $occurred($one, 'plain-delivery', 1, $fitLead(1, 5), false),
+    'no_show' => $occurred($one, 'student-no-show', 1, $fitLead(1, 5), false),
+    'reconcile' => $occurred($one, 'reconcile-target', 1, $fitLead(1, 5), false),
+    'owed' => $occurred($academyChain, 'teacher-non-delivery', 1, $fitLead(1, 5), false),
+    'late' => $occurred($academyChain, 'late-cancel', 1, $fitLead(1, 5), false),
+    'ambiguous' => $occurred($reviewChain, 'ambiguous', 1, $fitLead(1, 5), false),
 );
 $settle($occurrences);
 
@@ -168,8 +179,8 @@ dzn_o_rejected(fn() => $lessonService->createReplacement($academyChain['term_id'
 // ---------------------------------------------------------------------------
 // 6. O-D5/O-D9: advance cancellation responsibility.
 // ---------------------------------------------------------------------------
-$academyCancel = $occurred($academyChain, 'academy-advance-cancel', 1, '+2 hours', false);
-$studentCancel = $occurred($academyChain, 'student-advance-cancel', 1, '+2 hours', false);
+$academyCancel = $occurred($academyChain, 'academy-advance-cancel', 1, $fitLead(1, 600), false);
+$studentCancel = $occurred($academyChain, 'student-advance-cancel', 1, $fitLead(1, 600), false);
 $lessonService->cancel((int) $academyCancel['lesson_id'], 'authorised', dzn_o_evidence('academy-cancel') + array('reason_code' => 'academy_unavailable'), dzn_o_key('academy-cancel'));
 $academyObligation = $obligationRows((int) $academyCancel['lesson_id']);
 dzn_o_assert(count($academyObligation) === 1 && (string) $academyObligation[0]->source_kind === 'academy_cancellation', 'Teacher/academy advance cancellation must establish an academy obligation');
@@ -177,7 +188,7 @@ dzn_o_assert((string) $wpdb->get_var($wpdb->prepare("SELECT reason_code FROM {$p
 dzn_o_rejected(fn() => $lessonService->createReplacement($academyChain['term_id'], $academyChain['assignment_id'], (int) $academyCancel['lesson_id'], dzn_o_evidence('academy-replacement'), dzn_o_key('academy-replacement')), 'replacement_origin_not_eligible', 'academy obligation consumed the Phase-M replacement mechanism');
 $lessonService->cancel((int) $studentCancel['lesson_id'], 'authorised', dzn_o_evidence('student-cancel'), dzn_o_key('student-cancel'));
 dzn_o_assert($obligationRows((int) $studentCancel['lesson_id']) === array(), 'a Student-requested cancellation must never create an academy obligation');
-$advance = $occurred($academyChain, 'advance-non-delivery', 1, '+2 hours', false);
+$advance = $occurred($academyChain, 'advance-non-delivery', 1, $fitLead(1, 600), false);
 $lessonService->cancel((int) $advance['lesson_id'], 'authorised', dzn_o_evidence('advance') + array('reason_code' => 'attested_non_delivery'), dzn_o_key('advance'));
 dzn_o_assert($obligationRows((int) $advance['lesson_id']) === array(), 'historical Phase-M non-delivery attestation must not be reinterpreted as a Phase-O academy obligation');
 $late = $occurrences['late'];
@@ -187,10 +198,13 @@ dzn_o_rejected(fn() => $lessonService->cancel((int) $late['lesson_id'], 'authori
 // ---------------------------------------------------------------------------
 // 7. Temporal honesty: the occurrence must have ended, and the capacity buffer is not the wait.
 // ---------------------------------------------------------------------------
-$future = $occurred($academyChain, 'future-lesson', 1, '+45 minutes', false);
+$future = $occurred($academyChain, 'future-lesson', 1, $fitLead(45, 600), false);
 dzn_o_rejected(fn() => $delivery->record((int) $future['lesson_id'], 'authorised', $deliveryInput('student_no_show', 'future'), dzn_o_key('future-outcome')), 'occurrence_not_started', 'outcome recorded before the occurrence began');
-$unended = $occurred($academyChain, 'unended-lesson', 600, '+2 seconds', false);
-sleep(4);
+$minutesLeftToday = (int) floor((strtotime('tomorrow UTC') - time()) / 60);
+$unendedDuration = (int) max(5, min(600, $minutesLeftToday - 6));
+$unended = $occurred($academyChain, 'unended-lesson', $unendedDuration, $fitLead($unendedDuration), false);
+while (time() < strtotime((string) $unended['starts_at_utc'] . ' UTC') + 1) sleep(1);
+sleep(2);
 dzn_o_rejected(fn() => $delivery->record((int) $unended['lesson_id'], 'authorised', $deliveryInput('student_no_show', 'unended'), dzn_o_key('unended-outcome')), 'occurrence_not_ended', 'final no-show recorded before the governing occurrence ended');
 $unscheduled = (int) $lessonService->createStandard((int) $academyChain['term_id'], (int) $academyChain['assignment_id'], dzn_o_evidence('unscheduled'), dzn_o_key('unscheduled'))['lesson_id'];
 dzn_o_rejected(fn() => $delivery->record($unscheduled, 'authorised', $deliveryInput('student_no_show', 'unscheduled'), dzn_o_key('unscheduled-outcome')), 'schedule_required_for_delivery_outcome', 'outcome recorded for an occurrence that was never scheduled');
@@ -237,7 +251,7 @@ dzn_o_assert($lessonState((int) $ambiguous['lesson_id']) === 'completed', 'resol
 // 10. Academy obligation is independent of Term lifecycle and never silently disappears.
 // ---------------------------------------------------------------------------
 // The advance cancellation must genuinely precede its occurrence.
-$terminal = $occurred($termChain, 'term-close-obligation', 1, '+2 hours', false);
+$terminal = $occurred($termChain, 'term-close-obligation', 1, $fitLead(1, 600), false);
 $lessonService->cancel((int) $terminal['lesson_id'], 'authorised', dzn_o_evidence('term-close-cancel') + array('reason_code' => 'academy_unavailable'), dzn_o_key('term-close-cancel'));
 $termService->close((int) $termChain['term_id'], 'current', dzn_o_evidence('term-close'), dzn_o_key('term-close'));
 dzn_o_assert($termState((int) $termChain['term_id']) === 'closed', 'Term close did not complete for a terminal Lesson');
@@ -251,6 +265,10 @@ dzn_o_assert($obligations->outstandingCountForTerm((int) $termChain['term_id']) 
 $subscriber = wp_insert_user(array('user_login' => 'dzn-2a2o-sub-' . wp_generate_uuid4(), 'user_pass' => wp_generate_password(32, true, true), 'user_email' => 'sub-' . wp_generate_uuid4() . '@phase-2a2o.invalid', 'role' => 'subscriber'));
 dzn_o_assert(!is_wp_error($subscriber), 'Synthetic subscriber creation failed');
 $previousUser = get_current_user_id();
+// Capture the authorized baseline BEFORE switching principal, so the denied write can be compared.
+$owedBefore = $obligationRows((int) $owed['lesson_id']);
+$lessonBefore = $lessonState((int) $owed['lesson_id']);
+$obligationsBefore = count($obligations->outstandingForTerm((int) $academyChain['term_id']));
 wp_set_current_user((int) $subscriber);
 try {
     dzn_o_rejected(fn() => $delivery->record((int) $plain['lesson_id'], 'authorised', $deliveryInput('student_no_show', 'subscriber'), dzn_o_key('subscriber')), 'Unauthorized', 'non-administrator delivery recording');
@@ -260,7 +278,22 @@ try {
     $obligationDenied = false;
     try { $obligations->forLesson((int) $owed['lesson_id']); } catch (RuntimeException $exception) { $obligationDenied = $exception->getMessage() === 'Unauthorized'; }
     dzn_o_assert($obligationDenied, 'non-administrator academy obligation read');
+    // O-1: the public obligation WRITE seam must fail closed for a principal without the Phase-O
+    // capability, with no obligation row and no partial authority persisted.
+    $writeDenied = false;
+    try { $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'], null, array('reason_code' => 'unauthorized_attempt', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('a', 64), 'evidence_at' => gmdate('Y-m-d H:i:s'))); }
+    catch (RuntimeException $exception) { $writeDenied = $exception->getMessage() === 'Unauthorized'; }
+    dzn_o_assert($writeDenied, 'non-administrator academy obligation write seam was not capability-gated');
 } finally { wp_set_current_user($previousUser); }
+dzn_o_assert(count($obligationRows((int) $owed['lesson_id'])) === count($owedBefore), 'denied obligation write created an obligation row');
+dzn_o_assert($lessonState((int) $owed['lesson_id']) === $lessonBefore, 'denied obligation write changed canonical Lesson state');
+dzn_o_assert(count($obligations->outstandingForTerm((int) $academyChain['term_id'])) === $obligationsBefore, 'denied obligation write changed the canonical obligation aggregate');
+$duplicateOwe = $obligations->owe((int) $owed['lesson_id'], 'teacher_non_delivery', (int) $nonDelivery['outcome_id'], null, array('reason_code' => 'synthetic_outcome', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('c', 64), 'evidence_at' => gmdate('Y-m-d H:i:s')));
+dzn_o_assert((int) $duplicateOwe === (int) $owedObligations[0]->id && count($obligationRows((int) $owed['lesson_id'])) === 1, 'authorized duplicate obligation assertion was not idempotent');
+$conflictOwe = false;
+try { $obligations->owe((int) $owed['lesson_id'], 'academy_cancellation', null, null, array('reason_code' => 'canonical_lesson_cancelled_academy_unavailable', 'evidence_channel' => 'staff_record', 'evidence_reference_digest' => str_repeat('d', 64), 'evidence_at' => gmdate('Y-m-d H:i:s'))); }
+catch (\InvalidArgumentException $exception) { $conflictOwe = $exception->getMessage() === 'obligation_source_conflict'; }
+dzn_o_assert($conflictOwe && count($obligationRows((int) $owed['lesson_id'])) === 1, 'conflicting obligation source was accepted');
 $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_lesson_delivery_outcomes WHERE id=%d", (int) $nonDelivery['outcome_id']));
 dzn_o_assert(preg_match('/^[a-f0-9]{64}$/D', (string) $row->evidence_reference_digest) === 1, 'delivery evidence reference was not reduced to a keyed digest');
 dzn_o_assert((string) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_delivery_commands WHERE command_key_digest=%s", 'outcome-teacher-non-delivery')) === '0', 'raw command key persisted');

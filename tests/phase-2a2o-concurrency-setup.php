@@ -63,9 +63,17 @@ $teach = static function (int $enrolmentId) use ($wpdb, $p): int {
  * released up front so the chain's dedicated Teacher is never doubly occupied; the modes that race
  * schedule release keep their applicable version.
  */
-$occurred = function (array $chain, string $label, bool $preRelease = true) use ($lessonService, $scheduleService, $wpdb, $p, $evidence, $key): array {
+/** Keep every synthetic interval inside one UTC day (the provisioned full-day availability rules
+ *  meet at midnight, where a genuine one-second coverage gap exists). */
+$fitLead = static function (int $durationMinutes, int $minLeadSeconds = 2): string {
+    $midnight = strtotime('tomorrow UTC');
+    $start = time() + $minLeadSeconds;
+    if ($start + $durationMinutes * 60 + 5 >= $midnight) $start = $midnight + 30;
+    return '@' . $start;
+};
+$occurred = function (array $chain, string $label, bool $preRelease = true) use ($lessonService, $scheduleService, $wpdb, $p, $evidence, $key, $fitLead): array {
     $lessonId = (int) $lessonService->createStandard((int) $chain['term_id'], (int) $chain['assignment_id'], $evidence($label), $key($label))['lesson_id'];
-    $wall = gmdate('Y-m-d H:i:s', strtotime('+2 seconds'));
+    $wall = gmdate('Y-m-d H:i:s', strtotime($fitLead(1)));
     $scheduled = $scheduleService->schedule($lessonId, (int) $chain['assignment_id'], array('schedule_timezone' => 'UTC', 'local_wall_date' => substr($wall, 0, 10), 'local_wall_time' => substr($wall, 11), 'duration_minutes' => 1, 'reason_code' => 'synthetic_race_schedule') + $evidence('schedule-' . $label), $key('schedule-' . $label));
     $versionId = (int) $scheduled['schedule_version_id'];
     $starts = (string) $wpdb->get_var($wpdb->prepare("SELECT starts_at_utc FROM {$p}canonical_lesson_schedule_versions WHERE id=%d", $versionId));

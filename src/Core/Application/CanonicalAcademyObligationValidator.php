@@ -46,18 +46,43 @@ final class CanonicalAcademyObligationValidator {
             $kind=(string)($obligation->source_kind??'');
             if(!in_array($kind,self::KINDS,true)||!array_key_exists($kind,$expected))return false;
             if((int)($obligation->source_lesson_id??0)!==$lessonId)return false;
+            // Selector identities must agree with the validated source authority, never merely exist.
             if((int)($obligation->enrolment_id??0)!==(int)($lesson->enrolment_id??0))return false;
             if((int)($obligation->term_id??0)!==(int)($lesson->term_id??0))return false;
-            if((int)($obligation->student_id??0)<1||(int)($obligation->course_id??0)<1||(int)($obligation->teacher_id??0)<1)return false;
+            if((int)($obligation->student_id??0)!==(int)($lesson->student_id??0))return false;
+            if((int)($obligation->course_id??0)!==(int)($lesson->course_id??0))return false;
+            if((int)($obligation->teacher_id??0)!==(int)($lesson->teacher_id??0))return false;
+            if((int)($obligation->teacher_assignment_id??0)!==(int)($lesson->teacher_assignment_id??0))return false;
             if((string)($obligation->state??'')!=='owed')return false;
             if(!self::evidenceShape($obligation->reason_code??null,$obligation->evidence_channel??null,$obligation->evidence_reference_digest??null,$obligation->evidence_at??null))return false;
             if(!CanonicalLessonDeliveryValidator::utc($obligation->recorded_at??null)||(int)($obligation->recorded_by??0)<1||(int)($obligation->created_by??0)<1)return false;
             $sourceOutcome=$obligation->source_outcome_id===null?null:(int)$obligation->source_outcome_id;
             if($expected[$kind]!==null&&$sourceOutcome!==$expected[$kind])return false;
+            // Occurrence anchors, when stored, must agree with the governing schedule version.
+            if($obligation->schedule_version_id!==null){
+                $version=null;
+                foreach($outcomes as$outcome)if((int)($outcome->schedule_version_id??0)===(int)$obligation->schedule_version_id)$version=$outcome;
+                if(!$version)return false;
+                if((string)($obligation->occurrence_starts_at_utc??'')!==(string)$version->occurrence_starts_at_utc)return false;
+                if((string)($obligation->occurrence_ends_at_utc??'')!==(string)$version->occurrence_ends_at_utc)return false;
+            }elseif($kind==='teacher_non_delivery')return false;
             if($kind==='teacher_non_delivery'){
                 if($sourceOutcome===null)return false;
                 if((int)($obligation->schedule_version_id??0)!==(int)($effective->schedule_version_id??0))return false;
-            }elseif((string)($obligation->reason_code??'')!==self::ACADEMY_CANCELLATION_REASON)return false;
+                // The obligation carries the exact evidence of the source fact it was raised from.
+                if((string)($obligation->reason_code??'')!==(string)$effective->reason_code)return false;
+                if((string)($obligation->evidence_channel??'')!==(string)$effective->evidence_channel)return false;
+                if(!hash_equals((string)($obligation->evidence_reference_digest??''),(string)$effective->evidence_reference_digest))return false;
+                if((string)($obligation->evidence_at??'')!==(string)$effective->evidence_at)return false;
+            }else{
+                $sourceEvent=null;
+                foreach($lifecycle as$event)if((int)($event->id??0)===(int)($obligation->source_event_id??0))$sourceEvent=$event;
+                if(!$sourceEvent||(string)($sourceEvent->reason_code??'')!==self::ACADEMY_CANCELLATION_REASON)return false;
+                if((string)($obligation->reason_code??'')!==(string)$sourceEvent->reason_code)return false;
+                if((string)($obligation->evidence_channel??'')!==(string)$sourceEvent->evidence_channel)return false;
+                if(!hash_equals((string)($obligation->evidence_reference_digest??''),(string)$sourceEvent->evidence_reference_digest))return false;
+                if((string)($obligation->evidence_at??'')!==(string)$sourceEvent->occurred_at)return false;
+            }
         }
         return true;
     }

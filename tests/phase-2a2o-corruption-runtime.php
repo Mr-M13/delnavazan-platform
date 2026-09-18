@@ -1,7 +1,7 @@
 <?php
 /** Disposable Phase-O corruption regressions: every material delivery fact must fail closed. */
 if(getenv('DZN_PHASE_2A2O_RUNTIME_TEST')!=='corruption'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-O corruption runtime refused.\n");exit(1);}
-use Delnavazan\Platform\Core\Application\{CanonicalEnrolmentLifecycleService,CanonicalLessonAuthorityService,CanonicalLessonDeliveryGuard,CanonicalLessonDeliveryReadService,CanonicalLessonDeliveryService,CanonicalLessonScheduleService,CanonicalTermAuthorityService,TeacherAcceptingStateService,TeacherAssignmentService,TeacherAvailabilityService,TeacherService,TeachingEligibilityService};
+use Delnavazan\Platform\Core\Application\{CanonicalAcademyObligationService,CanonicalEnrolmentLifecycleService,CanonicalLessonAuthorityService,CanonicalLessonDeliveryGuard,CanonicalLessonDeliveryReadService,CanonicalLessonDeliveryService,CanonicalLessonScheduleService,CanonicalTermAuthorityService,TeacherAcceptingStateService,TeacherAssignmentService,TeacherAvailabilityService,TeacherService,TeachingEligibilityService};
 
 global $wpdb; $p = $wpdb->prefix . 'dzn_';
 function dzn_oc_assert(bool $ok, string $message): void { if (!$ok) throw new RuntimeException($message); }
@@ -43,12 +43,20 @@ $makeChain = function () use (&$sourceCursor, $sources, $enrolmentService, $term
     return array('term_id' => (int) $term['term_id'], 'assignment_id' => (int) $moved['assignment_id'], 'used' => 0);
 };
 $chain = null;
-$occurrence = function (string $label, int $durationMinutes = 1) use (&$chain, $makeChain, $lessonService, $scheduleService, $wpdb, $p): array {
+/** Keep every synthetic interval inside one UTC day (the provisioned full-day availability rules
+ *  meet at midnight, where a genuine one-second coverage gap exists). */
+$fitLead = static function (int $durationMinutes, int $minLeadSeconds = 2): string {
+    $midnight = strtotime('tomorrow UTC');
+    $start = time() + $minLeadSeconds;
+    if ($start + $durationMinutes * 60 + 5 >= $midnight) $start = $midnight + 30;
+    return '@' . $start;
+};
+$occurrence = function (string $label, int $durationMinutes = 1) use (&$chain, $makeChain, $lessonService, $scheduleService, $wpdb, $p, $fitLead): array {
     if ($chain === null || $chain['used'] >= 8) $chain = $makeChain();
     $chain['used']++;
     $termId = (int) $chain['term_id']; $assignmentId = (int) $chain['assignment_id'];
     $lessonId = (int) $lessonService->createStandard($termId, $assignmentId, dzn_oc_evidence($label), dzn_oc_key($label))['lesson_id'];
-    $wall = gmdate('Y-m-d H:i:s', strtotime('+2 seconds'));
+    $wall = gmdate('Y-m-d H:i:s', strtotime($fitLead($durationMinutes)));
     $scheduled = $scheduleService->schedule($lessonId, $assignmentId, array('schedule_timezone' => 'UTC', 'local_wall_date' => substr($wall, 0, 10), 'local_wall_time' => substr($wall, 11), 'duration_minutes' => $durationMinutes, 'reason_code' => 'synthetic_schedule') + dzn_oc_evidence('schedule-' . $label), dzn_oc_key('schedule-' . $label));
     $version = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_lesson_schedule_versions WHERE id=%d", (int) $scheduled['schedule_version_id']));
     $scheduleService->release($lessonId, array('expected_schedule_version_id' => (int) $version->id, 'reason_code' => 'synthetic_schedule_release') + dzn_oc_evidence('release-' . $label), dzn_oc_key('release-' . $label));
@@ -56,7 +64,7 @@ $occurrence = function (string $label, int $durationMinutes = 1) use (&$chain, $
 };
 /** Create every synthetic occurrence first, then wait once for all of them to end. */
 $occurrences = array();
-foreach (array('lesson','delivery_state','attendance_state','remedy_class','sequence','anchor','lineage','provider','recorded_by','reason_code','evidence_channel','evidence_reference_digest','evidence_at','supersession','command') as $label) {
+foreach (array('lesson','delivery_state','attendance_state','remedy_class','sequence','anchor','lineage','provider','recorded_by','reason_code','evidence_channel','evidence_reference_digest','evidence_at','supersession','command','obligation_nd') as $label) {
     $occurrences[$label] = $occurrence('corrupt-' . $label);
 }
 $latest = 0;
@@ -183,4 +191,88 @@ dzn_oc_assert($resultRejected, 'Corrupted command result replayed as success');
 dzn_oc_assert($wpdb->query("UPDATE {$p}canonical_lesson_delivery_commands SET result_outcome_id={$commandResult} WHERE id={$commandId}") !== false, 'Failed to repair delivery command result');
 $cases++;
 
-echo "corruption_cases=" . $cases . "\ncorrupted_delivery_fail_closed=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";
+// ---------------------------------------------------------------------------
+// 8. Correction round 1 (O-2): the aggregate academy-obligation reads must fail closed.
+//    Every selected obligation is hydrated and validated; a single corrupted row can never be
+//    served, counted or silently omitted from a Term or Enrolment aggregate.
+// ---------------------------------------------------------------------------
+$obligations = new CanonicalAcademyObligationService();
+// (a) an advance Teacher/academy cancellation owes an occurrence;
+$cancelChain = $makeChain();
+$cancelLesson = (int) $lessonService->createStandard((int) $cancelChain['term_id'], (int) $cancelChain['assignment_id'], dzn_oc_evidence('obligation-cancel'), dzn_oc_key('obligation-cancel'))['lesson_id'];
+$cancelWall = gmdate('Y-m-d H:i:s', strtotime($fitLead(1, 600)));
+$cancelSchedule = $scheduleService->schedule($cancelLesson, (int) $cancelChain['assignment_id'], array('schedule_timezone' => 'UTC', 'local_wall_date' => substr($cancelWall, 0, 10), 'local_wall_time' => substr($cancelWall, 11), 'duration_minutes' => 1, 'reason_code' => 'synthetic_schedule') + dzn_oc_evidence('obligation-cancel-schedule'), dzn_oc_key('obligation-cancel-schedule'));
+$scheduleService->release($cancelLesson, array('expected_schedule_version_id' => (int) $cancelSchedule['schedule_version_id'], 'reason_code' => 'synthetic_schedule_release') + dzn_oc_evidence('obligation-cancel-release'), dzn_oc_key('obligation-cancel-release'));
+$lessonService->cancel($cancelLesson, 'authorised', dzn_oc_evidence('obligation-cancel-command') + array('reason_code' => 'academy_unavailable'), dzn_oc_key('obligation-cancel-command'));
+// (b) an effective Teacher non-delivery outcome owes an occurrence (anchored to its schedule version).
+$nonDeliveryLesson = $settled('obligation_nd');
+$delivery->record($nonDeliveryLesson, 'authorised', array('outcome_code' => 'teacher_non_delivery', 'reason_code' => 'synthetic_outcome') + dzn_oc_evidence('obligation-nd-outcome'), dzn_oc_key('obligation-nd-outcome'));
+$cancellationObligation = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_academy_obligations WHERE source_lesson_id=%d", $cancelLesson));
+$nonDeliveryObligation = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_academy_obligations WHERE source_lesson_id=%d", $nonDeliveryLesson));
+dzn_oc_assert($cancellationObligation > 0 && $nonDeliveryObligation > 0, 'academy obligation fixtures were not established');
+dzn_oc_assert(count($obligations->outstandingForTerm((int) $cancelChain['term_id'])) === 1 && $obligations->outstandingCountForTerm((int) $cancelChain['term_id']) === 1, 'valid academy obligation is not exposed by the aggregate reads');
+$aggregateFailClosed = function (string $label, int $obligationId, string $column, string $damage, string $repair) use ($wpdb, $p, $obligations, &$cases): void {
+    $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_academy_obligations WHERE id=%d", $obligationId));
+    dzn_oc_assert($row !== null, 'academy obligation row unavailable: ' . $label);
+    $termId = (int) $row->term_id; $enrolmentId = (int) $row->enrolment_id;
+    $baseline = count($obligations->outstandingForTerm($termId));
+    dzn_oc_assert($wpdb->query($damage) !== false, 'Failed to damage academy obligation authority: ' . $label);
+    $reads = array(
+        'outstandingForTerm' => static fn() => $obligations->outstandingForTerm($termId),
+        'outstandingCountForTerm' => static fn() => $obligations->outstandingCountForTerm($termId),
+        'outstandingForEnrolment' => static fn() => $obligations->outstandingForEnrolment($enrolmentId),
+    );
+    foreach ($reads as $name => $read) {
+        $rejected = null;
+        try { $read(); } catch (Throwable $exception) { $rejected = $exception->getMessage(); }
+        dzn_oc_assert($rejected === 'canonical_obligation_integrity_conflict', 'Corrupted academy obligation (' . $label . ') was not rejected by ' . $name . ' (observed: ' . var_export($rejected, true) . ')');
+    }
+    dzn_oc_assert($wpdb->query($repair) !== false, 'Failed to repair academy obligation authority: ' . $label);
+    dzn_oc_assert(count($obligations->outstandingForTerm($termId)) === $baseline && $obligations->outstandingCountForTerm($termId) === $baseline, 'Repaired academy obligation aggregate is still unreadable: ' . $label);
+    $cases++;
+};
+$identityCases = array(
+    'source Lesson relationship' => array('source_lesson_id', 'source_lesson_id=source_lesson_id+100000', 'source_lesson_id=source_lesson_id-100000'),
+    'Term identity' => array('term_id', 'term_id=term_id+100000', 'term_id=term_id-100000'),
+    'Enrolment identity' => array('enrolment_id', 'enrolment_id=enrolment_id+100000', 'enrolment_id=enrolment_id-100000'),
+    'Student identity' => array('student_id', 'student_id=student_id+100000', 'student_id=student_id-100000'),
+    'Course identity' => array('course_id', 'course_id=course_id+100000', 'course_id=course_id-100000'),
+    'Teacher identity' => array('teacher_id', 'teacher_id=teacher_id+100000', 'teacher_id=teacher_id-100000'),
+);
+foreach ($identityCases as $label => $spec) {
+    $aggregateFailClosed($label, $cancellationObligation, $spec[0], "UPDATE {$p}canonical_academy_obligations SET {$spec[1]} WHERE id={$cancellationObligation}", "UPDATE {$p}canonical_academy_obligations SET {$spec[2]} WHERE id={$cancellationObligation}");
+}
+$simpleCases = array(
+    'evidence channel' => array("evidence_channel='provider_guess'", "evidence_channel='staff_record'"),
+    'evidence reference digest' => array("evidence_reference_digest=REPEAT('b',64)", null),
+    'evidence time' => array('evidence_at=evidence_at - INTERVAL 2 DAY', 'evidence_at=evidence_at + INTERVAL 2 DAY'),
+    'actor' => array('recorded_by=0', null),
+    'state classification' => array("state='settled'", "state='owed'"),
+    'reason code' => array("reason_code=''", null),
+);
+foreach ($simpleCases as $label => $spec) {
+    $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_academy_obligations WHERE id=%d", $cancellationObligation));
+    $column = match ($label) {
+        'evidence channel' => 'evidence_channel',
+        'evidence reference digest' => 'evidence_reference_digest',
+        'evidence time' => 'evidence_at',
+        'actor' => 'recorded_by',
+        'state classification' => 'state',
+        default => 'reason_code',
+    };
+    $original = (string) $row->{$column};
+    $repair = $spec[1] === null ? "UPDATE {$p}canonical_academy_obligations SET {$column}='" . esc_sql($original) . "' WHERE id={$cancellationObligation}" : "UPDATE {$p}canonical_academy_obligations SET {$spec[1]} WHERE id={$cancellationObligation}";
+    $aggregateFailClosed($label, $cancellationObligation, $column, "UPDATE {$p}canonical_academy_obligations SET {$spec[0]} WHERE id={$cancellationObligation}", $repair);
+}
+$nonDeliveryCases = array(
+    'source outcome lineage' => array('source_outcome_id=source_outcome_id+100000', 'source_outcome_id=source_outcome_id-100000'),
+    'schedule-version anchor' => array('schedule_version_id=schedule_version_id+100000', 'schedule_version_id=schedule_version_id-100000'),
+    'occurrence start anchor' => array('occurrence_starts_at_utc=occurrence_starts_at_utc - INTERVAL 1 DAY', 'occurrence_starts_at_utc=occurrence_starts_at_utc + INTERVAL 1 DAY'),
+    'occurrence end anchor' => array('occurrence_ends_at_utc=occurrence_ends_at_utc - INTERVAL 1 HOUR', 'occurrence_ends_at_utc=occurrence_ends_at_utc + INTERVAL 1 HOUR'),
+);
+foreach ($nonDeliveryCases as $label => $spec) {
+    $aggregateFailClosed($label, $nonDeliveryObligation, $label, "UPDATE {$p}canonical_academy_obligations SET {$spec[0]} WHERE id={$nonDeliveryObligation}", "UPDATE {$p}canonical_academy_obligations SET {$spec[1]} WHERE id={$nonDeliveryObligation}");
+}
+$aggregateFailClosed('source cancellation event lineage', $cancellationObligation, 'source_event_id', "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id+100000 WHERE id={$cancellationObligation}", "UPDATE {$p}canonical_academy_obligations SET source_event_id=source_event_id-100000 WHERE id={$cancellationObligation}");
+
+echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 1) . "\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";

@@ -13,9 +13,22 @@ final class CanonicalAcademyObligationRepository {
     private string $p;
     public function __construct(){global $wpdb;$this->p=$wpdb->prefix.'dzn_';}
     public function forLesson(int $lessonId,bool $lock=false):array{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_academy_obligations WHERE source_lesson_id=%d ORDER BY id{$suffix}",$lessonId))?:array();}
-    public function forTerm(int $termId):array{global $wpdb;return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_academy_obligations WHERE term_id=%d ORDER BY id",$termId))?:array();}
-    public function forEnrolment(int $enrolmentId):array{global $wpdb;return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_academy_obligations WHERE enrolment_id=%d ORDER BY id",$enrolmentId))?:array();}
-    public function outstandingCount(int $termId):int{global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->p}canonical_academy_obligations WHERE term_id=%d AND state='owed'",$termId));}
+    /**
+     * Obligations that either CLAIM the Term selector or whose SOURCE canonical Lesson belongs to
+     * the Term. The deliberate union means a corrupted stored selector is still selected — and then
+     * fails canonical validation — instead of being silently omitted from the aggregate.
+     */
+    public function forTerm(int $termId,bool $lock=false):array{
+        global $wpdb;$suffix=$lock?' FOR UPDATE':'';
+        $sql="SELECT o.* FROM {$this->p}canonical_academy_obligations o WHERE o.term_id=%d OR o.source_lesson_id IN (SELECT l.id FROM {$this->p}lessons l WHERE l.term_id=%d AND l.record_model='canonical_term_lesson_v1') ORDER BY o.id{$suffix}";
+        return $wpdb->get_results($wpdb->prepare($sql,$termId,$termId))?:array();
+    }
+    /** As forTerm(): the stored selector and the source Lesson relationship are both considered. */
+    public function forEnrolment(int $enrolmentId,bool $lock=false):array{
+        global $wpdb;$suffix=$lock?' FOR UPDATE':'';
+        $sql="SELECT o.* FROM {$this->p}canonical_academy_obligations o WHERE o.enrolment_id=%d OR o.source_lesson_id IN (SELECT l.id FROM {$this->p}lessons l WHERE l.enrolment_id=%d AND l.record_model='canonical_term_lesson_v1') ORDER BY o.id{$suffix}";
+        return $wpdb->get_results($wpdb->prepare($sql,$enrolmentId,$enrolmentId))?:array();
+    }
     public function obligation(int $id,bool $lock=false):?object{global $wpdb;$suffix=$lock?' FOR UPDATE':'';return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->p}canonical_academy_obligations WHERE id=%d{$suffix}",$id));}
     public function insert(array $data):int{
         global $wpdb;

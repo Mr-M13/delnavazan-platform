@@ -1,9 +1,15 @@
 # Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority
 
-Status: **IMPLEMENTATION CANDIDATE — owner verification complete, awaiting independent review**
+Status: **CORRECTION ROUND 1 CANDIDATE — independent review failed on O-1/O-2, corrections applied, awaiting independent re-review**
 
 Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build
 `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`.
+
+> **Correction round 1 (independent review findings O-1, O-2, O-3).** The first review candidate
+> `4f8af9067aa1ed463916d86b32a04f4193f44d23` (tree `8a79719e39496476debef4c67971648ab3447d57`) failed
+> final independent review. See "Correction round 1" below. Schema 22, the migration and every
+> locked product decision are unchanged; the corrections are application-service validation,
+> capability enforcement and documentation only.
 
 Phase O is provider-neutral. It records what actually happened to a canonical Lesson occurrence
 without becoming a provider integration, without changing Lesson lifecycle, scheduling, payment,
@@ -32,8 +38,17 @@ delivery.
   recorded time and actor;
 - digest-only durable command evidence with complete replay revalidation;
 - a protected integrity-checked read seam;
+- a capability-gated academy-obligation write seam and integrity-validated aggregate reads;
 - fail-closed cross-phase guards consumed by Lesson completion, Lesson cancellation reconciliation,
   replacement issuance and canonical scheduling.
+
+## Correction round 1
+
+| Finding | Correction |
+| --- | --- |
+| **O-1 (HIGH)** — `CanonicalAcademyObligationService::owe()` was a public state-mutating seam that did not itself enforce `dzn_manage_canonical_lesson_delivery` | `owe()` now calls the Phase-O capability check as its first statement, before any source lookup, validation or canonical mutation. An unauthorized actor fails closed with `Unauthorized`, no obligation row is created, no evidence is persisted and no partial authority survives. The two legitimate callers (the Phase-O delivery authority's non-delivery path and the Phase-M advance-cancellation reconciliation) run after their own capability check and inside the caller's transaction, so authorized behaviour and atomicity are unchanged; an advance cancellation performed by a principal without the Phase-O capability now fails closed and rolls back completely. No capability was broadened and no new public authority was introduced. |
+| **O-2 (HIGH)** — `outstandingForTerm()`, `outstandingCountForTerm()` and `outstandingForEnrolment()` could return or count raw repository rows | All three now hydrate every selected obligation against its canonical source Lesson and validate it through `CanonicalAcademyObligationValidator`, which now also requires that the stored Term, Enrolment, Student, Course, Teacher and Teacher Assignment selectors **agree** with the source authority, that source lineage (outcome/event, schedule version, occurrence anchors) is intact, and that the obligation's evidence is byte-identical to the evidence of the source fact it was raised from. A single invalid row fails the whole aggregate closed (`canonical_obligation_integrity_conflict`); nothing is silently omitted. `outstandingCountForTerm()` is derived from the same validated aggregate as `outstandingForTerm()`; the raw SQL count seam was removed from the repository. To make a corrupted stored selector detectable rather than invisible, Term and Enrolment selectors now select the **union** of rows that claim the selector and rows whose source canonical Lesson belongs to it. |
+| **O-3 (LOW)** — documentation claimed 36 static/source contract tests | Corrected. See "Validation performed" below: 29 files match `tests/*contract*.php`, and PHP lint (`tests/static.php`) plus `sh -n` shell syntax checks are reported separately as syntax checks, not contract tests. |
 
 ## Outcome vocabulary
 
@@ -145,17 +160,27 @@ outcome without changing canonical identity or introducing Google coupling into 
 
 ## Validation performed (disposable MariaDB 11.4 runtime; no production, NIU, Theme, Amelia or external system contacted)
 
-- 36 static/source contract tests pass, including the Phase O contract; PHP lint and shell syntax checks pass.
+- **Contract tests:** 29 files match `tests/*contract*.php` and all pass, including the Phase O
+  contract (`tests/phase-2a2o-contract.php`).
+- **Syntax/lint checks (not contract tests):** `tests/static.php` PHP-lints every file under `src/`
+  and `sh -n` parses every committed shell harness; both pass. The earlier "36 contract tests" claim
+  in this document was a miscount with no defined basis and is superseded by this breakdown.
 - Authority runtime: ordinary delivery without any attendance row, student no-show, exact replay,
   conflicting assertion, correction and supersession lineage, Teacher non-delivery blocking
   completion, academy-funded remedy after the allowance cap is exhausted, advance-cancellation
   versus post-occurrence non-delivery, temporal refusals, review-required resolution, capability
   denial and digest-only evidence.
-- Corruption runtime: 18 material fact classes (Lesson relationship, outcome sequence, occurrence
-  start and end anchors, schedule-version binding, profile columns, actor, reason, channel, reference
-  digest, observed time, applicable relationship, supersession target, provider-shaped evidence,
-  command intent and command result) fail closed through the protected read, the guard and Lesson
-  completion, then recover.
+- **Corruption runtime (35 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
+  occurrence start and end anchors, schedule-version binding, profile columns, actor, reason,
+  channel, reference digest, observed time, applicable relationship, supersession target,
+  provider-shaped evidence, command intent and command result) fail closed through the protected
+  read, the guard and Lesson completion, then recover; plus 17 academy-obligation classes verified
+  through the **aggregate reads** (`outstandingForTerm`, `outstandingCountForTerm`,
+  `outstandingForEnrolment`) covering source Lesson relationship, Term, Enrolment, Student, Course
+  and Teacher identity, source outcome and cancellation-event lineage, schedule-version and
+  occurrence anchors, evidence channel, reference digest, observed time, actor, reason code and state
+  classification. Each case proves all three reads reject the corrupted authority and that the count
+  never reports it.
 - Failure injection: outcome insert, supersession, obligation establishment, command evidence and
   lock-boundary injections all roll back completely with no orphan evidence, no half-superseded
   authority, no phantom entitlement and no falsely replayable command.

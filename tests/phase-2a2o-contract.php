@@ -52,6 +52,23 @@ if(!str_contains($obligationRepo,'source_lesson'))throw new RuntimeException('Ac
 if(!str_contains($authorityRepo,'CanonicalAcademyObligationService'))throw new RuntimeException('Advance cancellation does not establish the academy obligation');
 if(!str_contains($service,'schedule_version_id')||!str_contains($service,'reconciles_completion_event_id'))throw new RuntimeException('Outcome provenance does not bind the exact schedule version and reconciliation lineage');
 
+// Correction round 1 — O-1: the public obligation write seam enforces the Phase-O capability itself,
+// before any validation or canonical mutation.
+$oweStart=strpos($obligationService,'public function owe(');
+$capabilityAt=strpos($obligationService,'$this->capability();');
+$firstInsert=strpos($obligationService,'->insert(');
+$firstLookup=strpos($obligationService,'->lesson(');
+if($oweStart===false||$capabilityAt===false||$firstInsert===false)throw new RuntimeException('Academy obligation write seam is not capability-gated');
+if($capabilityAt<$oweStart||$capabilityAt>$firstInsert)throw new RuntimeException('Academy obligation capability check must precede persistence');
+if($firstLookup!==false&&$capabilityAt>$firstLookup)throw new RuntimeException('Academy obligation capability check must precede source validation');
+
+// Correction round 1 — O-2: aggregate obligation reads validate every selected row and the count
+// derives from the same validated authority.
+foreach(array('private function validated','validated($this->repository->forTerm($termId))','validated($this->repository->forEnrolment($enrolmentId))')as$n)if(!str_contains($obligationService,$n))throw new RuntimeException('Aggregate obligation read is not integrity-validated: '.$n);
+if(str_contains($obligationRepo,'outstandingCount'))throw new RuntimeException('A raw obligation count seam must not exist');
+if(!str_contains($obligationRepo,'o.source_lesson_id IN (SELECT l.id FROM'))throw new RuntimeException('Aggregate obligation selectors must also select by source Lesson so corrupted selectors cannot be omitted');
+foreach(array('!==(int)($lesson->student_id??0)','!==(int)($lesson->course_id??0)','!==(int)($lesson->teacher_id??0)','!==(int)($lesson->term_id??0)','!==(int)($lesson->enrolment_id??0)')as$n)if(!str_contains($obligationValidator,$n))throw new RuntimeException('Obligation validator does not require selector agreement: '.$n);
+
 // Provider neutrality and excluded authority: no provider or finance coupling may enter Phase O.
 $phaseO=$service.$validator.$guard.$read.$repo;
 foreach(array('google','amelia','wp_remote','curl_','webhook','access_token','payment','refund','invoice','payroll','whatsapp')as$n)if(stripos($phaseO,$n)!==false)throw new RuntimeException('Phase O leaked excluded authority: '.$n);

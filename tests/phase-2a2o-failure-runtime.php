@@ -36,9 +36,17 @@ for ($weekday = 1; $weekday <= 7; $weekday++) {
 (new TeachingEligibilityService())->setEligibility(array('teacher_id' => $teacherId, 'course_id' => $courseId, 'status' => 'active', 'reason_code' => 'synthetic_failure'));
 $moved = $assignmentService->replace($enrolmentId, $teacherId, array('expected_assignment_id' => (int) $assignment['assignment_id'], 'route' => 'staff_attestation', 'evidence_channel' => 'phone', 'evidence_reference' => 'isolated-failure-' . $teacherId, 'evidence_at' => gmdate('Y-m-d H:i:s')), dzn_of_key('isolate'));
 $assignmentId = (int) $moved['assignment_id'];
-$occurrence = function (string $label) use ($lessonService, $scheduleService, $wpdb, $p, $term, $assignmentId): array {
+/** Keep every synthetic interval inside one UTC day (the provisioned full-day availability rules
+ *  meet at midnight, where a genuine one-second coverage gap exists). */
+$fitLead = static function (int $durationMinutes, int $minLeadSeconds = 2): string {
+    $midnight = strtotime('tomorrow UTC');
+    $start = time() + $minLeadSeconds;
+    if ($start + $durationMinutes * 60 + 5 >= $midnight) $start = $midnight + 30;
+    return '@' . $start;
+};
+$occurrence = function (string $label) use ($lessonService, $scheduleService, $wpdb, $p, $term, $assignmentId, $fitLead): array {
     $lessonId = (int) $lessonService->createStandard((int) $term['term_id'], $assignmentId, dzn_of_evidence($label), dzn_of_key($label))['lesson_id'];
-    $wall = gmdate('Y-m-d H:i:s', strtotime('+2 seconds'));
+    $wall = gmdate('Y-m-d H:i:s', strtotime($fitLead(1)));
     $scheduled = $scheduleService->schedule($lessonId, $assignmentId, array('schedule_timezone' => 'UTC', 'local_wall_date' => substr($wall, 0, 10), 'local_wall_time' => substr($wall, 11), 'duration_minutes' => 1, 'reason_code' => 'synthetic_schedule') + dzn_of_evidence('schedule-' . $label), dzn_of_key('schedule-' . $label));
     $version = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_lesson_schedule_versions WHERE id=%d", (int) $scheduled['schedule_version_id']));
     $scheduleService->release($lessonId, array('expected_schedule_version_id' => (int) $version->id, 'reason_code' => 'synthetic_schedule_release') + dzn_of_evidence('release-' . $label), dzn_of_key('release-' . $label));

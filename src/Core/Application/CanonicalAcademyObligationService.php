@@ -41,15 +41,20 @@ final class CanonicalAcademyObligationService {
      * transaction, after the source fact is durable in that transaction.
      */
     public function owe(int $lessonId,string $kind,?int $sourceOutcomeId,?int $sourceEventId,array $evidence):int{
+        // O-D7: the write seam enforces the Phase-O administrator capability itself, before any
+        // validation or canonical mutation, so an unauthorized actor can never establish debt.
+        $this->capability();
         if(!in_array($kind,CanonicalAcademyObligationValidator::kinds(),true))throw new \InvalidArgumentException('Controlled academy obligation source required');
         $lesson=$this->lessons->lesson($lessonId,true);
         if(!$lesson||(string)($lesson->record_model??'')!=='canonical_term_lesson_v1')throw new \InvalidArgumentException('canonical_lesson_required');
-        $this->assertSource($lesson,$kind,$sourceOutcomeId,$sourceEventId);
+        // An occurrence already owed cannot be owed again under a different source kind: conflict is
+        // resolved before the new source fact is trusted, so debt can never be double-established.
         $existing=$this->repository->forLesson($lessonId,true);
         foreach($existing as$obligation){
             if((string)$obligation->source_kind!==$kind)throw new \InvalidArgumentException('obligation_source_conflict');
             return (int)$obligation->id;
         }
+        $this->assertSource($lesson,$kind,$sourceOutcomeId,$sourceEventId);
         $channel=(string)($evidence['evidence_channel']??'');
         if(!in_array($channel,self::CHANNELS,true))throw new \InvalidArgumentException('Controlled evidence channel required');
         $at=(string)($evidence['evidence_at']??'');
@@ -85,21 +90,44 @@ final class CanonicalAcademyObligationService {
         return $this->repository->forLesson($lessonId);
     }
 
-    /** Protected read: outstanding obligations for a Term. They survive Term closure unchanged. */
+    /**
+     * Protected read: outstanding obligations for a Term. They survive Term closure unchanged.
+     *
+     * Every selected obligation is hydrated against its canonical source Lesson and validated
+     * through the canonical academy-obligation validator; a single invalid row fails the whole
+     * aggregate closed rather than being silently omitted.
+     */
     public function outstandingForTerm(int $termId):array{
         $this->capability();
-        return array_values(array_filter($this->repository->forTerm($termId),static fn($row)=>(string)$row->state==='owed'));
+        return $this->validated($this->repository->forTerm($termId));
     }
 
+    /** The count is derived from the same integrity-validated aggregate authority, never a raw count. */
     public function outstandingCountForTerm(int $termId):int{
         $this->capability();
-        return $this->repository->outstandingCount($termId);
+        return count($this->validated($this->repository->forTerm($termId)));
     }
 
-    /** Protected read: outstanding obligations for an Enrolment. */
+    /** Protected read: outstanding obligations for an Enrolment, validated identically. */
     public function outstandingForEnrolment(int $enrolmentId):array{
         $this->capability();
-        return array_values(array_filter($this->repository->forEnrolment($enrolmentId),static fn($row)=>(string)$row->state==='owed'));
+        return $this->validated($this->repository->forEnrolment($enrolmentId));
+    }
+
+    /**
+     * Fail-closed canonical hydration for aggregate reads: each row is validated against its source
+     * Lesson (identity, source lineage, anchors, evidence, actor and state), so corrupted authority
+     * can never be served or counted, and no partial apparently-valid aggregate is returned.
+     */
+    private function validated(array $rows):array{
+        $accepted=array();
+        foreach($rows as$row){
+            $lessonId=(int)($row->source_lesson_id??0);
+            if($lessonId<1||!CanonicalAcademyObligationValidator::validForLesson($lessonId,$this->repository,$this->lessons,$this->delivery))throw new \InvalidArgumentException('canonical_obligation_integrity_conflict');
+            if((string)($row->state??'')!=='owed')continue;
+            $accepted[]=$row;
+        }
+        return $accepted;
     }
 
     private function assertSource(object $lesson,string $kind,?int $sourceOutcomeId,?int $sourceEventId):void{
