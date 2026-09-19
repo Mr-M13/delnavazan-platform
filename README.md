@@ -8,12 +8,12 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Authoritative main | `b0687fec98748144f96e3fc56f7e4fb53e01f673` (Phase N closeout commit; docs-only closeout hash is recorded in the task closeout) |
-| Platform / schema | 0.1.0 / 21 authoritative on `main` |
-| Migrations | 001–021 authoritative; latest `021_canonical_lesson_schedule_authority` |
-| Latest merged slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority (complete / independently reviewed / merged / closed) |
-| Active Platform candidate | Phase 2A.2-O canonical Lesson delivery & attendance outcome authority — Schema 22, unmerged, owner-verified, awaiting independent review |
-| Next boundary | Independent review of the Phase O candidate; delivery/attendance cutover, payment, notification and provider integration remain outside current authority |
+| Authoritative main | `f5b43741f4b404fd102330aeb75d58ed8b3e2976` (Phase-O implementation merge; the docs-only closeout hash is recorded in the task closeout) |
+| Platform / schema | 0.1.0 / 22 authoritative on `main` |
+| Migrations | 001–022 authoritative; latest `022_canonical_lesson_delivery_attendance_authority` |
+| Latest merged slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority (complete / independently reviewed after correction rounds 1–3 / merged / closed) |
+| Previous merged slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority (Schema 21) |
+| Next boundary | **No next slice is authorised.** The next Platform slice requires an explicit product/architecture decision; delivery/attendance cutover, provider integration, payment, notification and Finance remain outside current authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

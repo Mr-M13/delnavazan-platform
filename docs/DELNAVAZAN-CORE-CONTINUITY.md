@@ -1,6 +1,6 @@
 # Delnavazan Core — Living Project Continuity Record
 
-**Continuity snapshot:** 17 September 2026
+**Continuity snapshot:** 19 September 2026
 **Purpose:** Durable handover for a new CD/ChatGPT session or implementation agent. Source, migrations and locked domain contracts remain authoritative; this record supplies the current state, boundaries and next action without relying on chat history.
 
 ## 1. Current state
@@ -12,15 +12,19 @@
 | Phase 2A.2-M approved candidate | `f44b502509f5dcb9b5d0281cfda4329407abd3bf`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
-| Schema | 21 |
-| Migrations | 001–021; latest `021_canonical_lesson_schedule_authority` |
-| Build identity | `phase2a2n-canonical-lesson-schedule-authority-20260917.1` |
-| Latest completed slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority |
-| Merge state | Phase N independent re-review PASS; exact approved tree merged as `08138270f4bd32e5829ef0f5a18a316f6780607d` |
-| Closeout baseline | `08138270f4bd32e5829ef0f5a18a316f6780607d`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
+| Current authoritative main | `f5b43741f4b404fd102330aeb75d58ed8b3e2976` (implementation merge; the docs-only Phase-O closeout commit is recorded in the task closeout because a commit cannot embed its own hash) |
+| Schema | 22 |
+| Migrations | 001–022; latest `022_canonical_lesson_delivery_attendance_authority` |
+| Build identity | `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1` |
+| Latest completed slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority |
+| Phase 2A.2-O approved candidate | `f5b43741f4b404fd102330aeb75d58ed8b3e2976`; tree `7182101fcaf9855f8834cd08bc2e7a4a0311791c` |
+| Phase 2A.2-O implementation merge | `f5b43741f4b404fd102330aeb75d58ed8b3e2976` (fast-forward; the implementation-merge SHA equals the approved candidate because main required no merge commit) |
+| Phase 2A.2-N merge state | Phase N independent re-review PASS; exact approved tree merged as `08138270f4bd32e5829ef0f5a18a316f6780607d` |
+| Closeout baseline (pre-O) | `08138270f4bd32e5829ef0f5a18a316f6780607d`; the docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own hash |
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
-| Next Platform action after N merge | Authorised as Phase 2A.2-O (see the Phase 2A.2-O candidate section below): canonical Lesson delivery & attendance outcome authority. Attendance cutover, payment, renewal, notification and provider integration remain outside Platform authority |
+| Current 2A.2-O state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3) |
+| Next Platform action | **Requires explicit product/architecture authorisation.** No next Platform slice is approved by this record; do not begin Phase P or any later slice on the strength of this document |
 
 The completed coordination chain is:
 
@@ -38,8 +42,9 @@ The completed coordination chain is:
 12. **2A.2-L** — Canonical Term Creation & Lifecycle Authority: explicit capability-protected creation, bounded transitions, durable idempotency and Enrolment-first concurrency control.
 13. **2A.2-M0** — Canonical Enrolment Lifecycle Authority: explicit activate/pause/resume/close commands, durable idempotency, protected integrity reads and subordinate closure guards.
 14. **2A.2-M** — Canonical Lesson Authority: bounded standard/replacement issuance and terminal completion/cancellation, immutable Term/Enrolment/Assignment/Teacher provenance, append-only lifecycle evidence and idempotent command evidence.
+15. **2A.2-O** — Canonical Lesson Delivery & Attendance Outcome Authority: provider-neutral exceptional delivery/attendance outcomes, append-only correction, explicit historical-completion reconciliation (O-D8), controlled advance academy-cancellation debt (O-D9) and a distinct immutable academy-obligation authority that never consumes the Phase-M replacement allowance.
 
-Main is authoritative at Schema 21 / Phase N. Canonical Lesson scheduling and Teacher capacity authority are now authoritative alongside the completed Enrolment, Term, Assignment and Lesson authority chain. Attendance, delivery, payment, renewal, notification, communication-provider, calendar/Meet, Amelia and payroll authority remain outside Platform scope.
+Main is authoritative at Schema 22 / Phase O. Canonical Lesson identity and lifecycle, canonical scheduling and Teacher capacity (Phase N), and Phase-O delivery/attendance outcome authority are now authoritative alongside the completed Enrolment, Term, Assignment and Lesson authority chain. Attendance cutover, provider/Meet integration, payment, renewal, notification, calendar, Amelia and payroll authority remain outside Platform scope.
 
 ## Completed Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority
 
@@ -241,13 +246,46 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-Historical roadmap note (superseded 2026-09-18): this section previously recorded Phase 2A.2-L, then the Phase 2A.2-M0/M boundaries, as the next Platform action. Those slices are complete and merged; the paragraph is retained only as provenance and is **not** the current next action.
+**No next Platform slice is authorised.** Phase 2A.2-O is merged and closed, and the next bounded slice requires an explicit product/architecture decision from the owner before any reconnaissance, branch or implementation begins. This record does not design or authorise Phase P, a delivery/attendance cutover, provider integration, payment/Finance work or any later phase.
 
-## Phase 2A.2-O candidate — canonical Lesson delivery & attendance outcome authority
+Historical roadmap note (superseded): this section previously recorded Phase 2A.2-L, then the Phase 2A.2-M0/M boundaries, and finally the Phase-O candidate, as the next action. Those slices are complete and merged; the earlier wording is retained only as provenance and is **not** the current next action.
 
-Authoritative base: post-Phase-N `main` at `b0687fec98748144f96e3fc56f7e4fb53e01f673` (Phase 2A.2-N is **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** at Schema 21). Phase O is implemented on branch `phase-2a2o-canonical-lesson-delivery-attendance-authority` at Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`. It is **NOT merged, NOT deployed and NOT claimed complete**; the next Platform action is independent re-review of the correction round 3 candidate.
+## Completed Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority
 
-### Correction round 3 status (independent re-review of round 2 failed — HIGH/MEDIUM)
+**COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED.** Authoritative pre-merge base was post-Phase-N `main` at `b0687fec98748144f96e3fc56f7e4fb53e01f673`. The final independently approved candidate `f5b43741f4b404fd102330aeb75d58ed8b3e2976`, tree `7182101fcaf9855f8834cd08bc2e7a4a0311791c`, was fast-forward merged into `main` (the implementation-merge SHA equals the approved candidate because no merge commit was required), so Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1` are authoritative. No deployment occurred; production, Theme/NIU, Amelia, Google/calendar, Meta and Stripe were untouched.
+
+Phase O is **provider-neutral**. It records what actually happened to a canonical Lesson occurrence with no provider coupling, no payment or payroll effect, no notification authority and no public surface.
+
+### Locked product decisions O-D1 … O-D9
+
+| Decision | Locked meaning |
+| --- | --- |
+| O-D1 | Canonical Lesson `completed` means the occurrence was actually delivered. No new Lesson lifecycle state was added. |
+| O-D2 | Exception-based recording: ordinary delivery is the absence of an outcome row, so no routine attendance record is required per Lesson. |
+| O-D3 | A student no-show may coexist with delivered/completed — it is a distinct attendance fact, the Lesson is consumed, and no automatic academy remedy is created. |
+| O-D4 | Teacher/academy non-delivery creates an academy obligation that is distinct from the Phase-M replacement. |
+| O-D5 | Advance cancellation remains distinct from post-occurrence non-delivery and can never describe the same event. |
+| O-D6 | Corrections remain append-only: they supersede history, never rewrite or reopen Lesson lifecycle, and never move money. |
+| O-D7 | Canonical Phase-O mutation authority requires the Phase-O administrator capability (`dzn_manage_canonical_lesson_delivery`), enforced inside the public write seam before any lookup or mutation. |
+| O-D8 | The historical completion event is preserved immutably while the effective delivery truth may be explicitly reconciled to Teacher/academy non-delivery; the academy obligation is bound to canonical completion lineage. Nothing reopens, reschedules, materialises or pays automatically. |
+| O-D9 | A controlled advance Teacher/academy cancellation (`academy_unavailable`) may establish academy debt; a generic Student cancellation does not. |
+
+### Canonical lifecycle authority (Round-3 architecture)
+
+Academy-obligation authority does **not** define Lesson completion. `CanonicalAcademyObligationValidator` consumes `CanonicalLessonAuthorityValidator::valid()` before accepting any obligation lineage; the delivery validator consumes it whenever a reconciliation pointer exists; and the reconciliation command consumes it instead of scanning raw lifecycle rows. Completion is bound to the canonical chain's terminal event, which follows from the validated legal progression rather than from selected row fields or a latest-completed-ID scan. The call is one-way (Lesson authority references no Phase-O authority), so there is no recursion, no competing lifecycle authority and no lock-order change; a malformed source Lesson lifecycle causes obligation protected reads to fail closed.
+
+### Security / integrity closeout
+
+- The public obligation write seam (`CanonicalAcademyObligationService::owe()`) self-enforces `dzn_manage_canonical_lesson_delivery` before any lookup, validation or mutation; an unauthorized principal fails closed with no obligation row and no partial authority.
+- Same-kind replay validates the supplied source and immutable evidence: exact legitimate replay is idempotent with a single row, while conflicting evidence or source identifiers fail closed (`obligation_replay_conflict`) and a conflicting source kind fails closed (`obligation_source_conflict`).
+- Aggregate Term/Enrolment obligation reads validate every selected obligation through canonical authority, discover rows by the union of the stored selector and the source-Lesson relationship so a corrupted selector cannot disappear silently, and fail the whole aggregate closed on any invalid row; the Term count derives from the same validated authority and no raw SQL count seam exists.
+- Round-3 sequencing keeps guards and reads honest inside the Phase-M transaction: the append-only lifecycle event and any academy obligation are written before the advance-cancellation guards, so guards validate the exact state the transaction will commit, and a rejection rolls everything back together with its precise reason.
+
+### Historical correction records (superseded by the final merge)
+
+The three sub-sections below record correction rounds that are now complete. They are historical provenance: the candidate SHAs they name are superseded by the merged candidate `f5b43741f4b404fd102330aeb75d58ed8b3e2976`, and no active work remains from them.
+
+#### Correction round 3 (independent re-review of round 2 failed — HIGH/MEDIUM)
 
 Round-2 candidate `5b18f20d576e5446cee6cecc0b21d010fb62ffa1` (tree `af035208b7096dad12e60b768e928372fb094778`) failed independent re-review. The round-3 correction is a descendant of that candidate and remains validation, test and documentation work; Schema 22, the migration, the build identity, O-D1…O-D9 and the round-1/2 fixes are preserved.
 
@@ -255,7 +293,7 @@ Round-2 candidate `5b18f20d576e5446cee6cecc0b21d010fb62ffa1` (tree `af035208b709
 - **MEDIUM — referenced-event corruption coverage:** the referenced completion event itself is now corrupted by tests (`from_state`, `event_sequence`, and an injected structurally noncanonical completed row that Lesson authority rejects), each exercised through all three public aggregate seams with repair proving recovery. The earlier claim that the referenced event was already proven canonical was an overclaim and is corrected.
 - **Sequencing:** the append-only lifecycle event and any academy obligation are written before the advance-cancellation guards inside the caller's transaction, so the guards validate the exact committed state; the guard also runs at the service seam before mutation. Rejections roll back the event, obligation and lifecycle update together and retain their precise reasons (`delivery_outcome_exists`, `occurrence_already_started_use_delivery_outcome`).
 
-### Correction round 2 status (independent re-review of round 1 failed — HIGH/MEDIUM/LOW)
+#### Correction round 2 (independent re-review of round 1 failed — HIGH/MEDIUM/LOW)
 
 Round-1 candidate `c63c1327047bd76f3155788874ec6ea6ae7a38e0` (tree `7fa33f0d406e25a403e0f2b5c7d4668923faaaca`) failed independent re-review. The round-2 correction is a descendant of that candidate and remains validation, test and documentation work; Schema 22, the migration, the build identity, O-D1…O-D9 and the round-1 fixes are all preserved.
 
@@ -263,7 +301,7 @@ Round-1 candidate `c63c1327047bd76f3155788874ec6ea6ae7a38e0` (tree `7fa33f0d406e
 - **MEDIUM — corruption coverage:** Teacher Assignment identity was added to the aggregate identity matrix, and four O-D8 completion-lineage corruption cases (wrong identifier, completion event belonging to another Lesson, missing lineage where reconciliation requires it, wrong lifecycle-event type) plus a spurious-lineage case on an ordinary non-reconciled non-delivery are now exercised through all three public aggregate seams with repair proving recovery. The round-1 claim that aggregate corruption coverage already included complete source event lineage and Teacher Assignment was an overclaim and is corrected.
 - **LOW — idempotent replay:** `owe()` validates the supplied source and the existing obligation's binding and immutable evidence before reporting an idempotent success; exact legitimate replay stays idempotent with no duplicate row, and conflicting replay intent fails closed with `obligation_replay_conflict`. Uniqueness and concurrency semantics are unchanged.
 
-### Correction round 1 status (independent review failed O-1/O-2/O-3)
+#### Correction round 1 (independent review failed O-1/O-2/O-3)
 
 The first owner-verified candidate `4f8af9067aa1ed463916d86b32a04f4193f44d23` (tree `8a79719e39496476debef4c67971648ab3447d57`) failed final independent review. The correction is a descendant of that reviewed candidate and changes only application-service validation, capability enforcement, tests and documentation — Schema 22, the migration, the build identity and O-D1…O-D9 are unchanged.
 

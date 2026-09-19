@@ -24,11 +24,11 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration — Schema 21
+## Current authoritative migration — Schema 22
 
-Schema 21 / `021_canonical_lesson_schedule_authority` is authoritative. It retains Schema 20's canonical Lesson issuance and terminal lifecycle, legacy `legacy_phase1` isolation, immutable Assignment/Teacher provenance, append-only lifecycle and digest-only command evidence, and adds one applicable canonical schedule version per scheduled Lesson with per-Teacher serialization and derived occupancy. It creates no delivery, attendance, payment, notification, calendar, Amelia or provider authority.
+Schema 22 / `022_canonical_lesson_delivery_attendance_authority` is authoritative. It retains Schema 21's canonical Lesson scheduling, Teacher capacity and terminal lifecycle, legacy `legacy_phase1` isolation, immutable Assignment/Teacher provenance, append-only lifecycle and digest-only command evidence, and adds the Phase-O delivery/attendance outcome and academy-obligation authority described below. It creates no payment, notification, calendar, Amelia or provider authority.
 
-### Schema 22 — canonical Lesson delivery & attendance outcome authority (Phase 2A.2-O candidate, unmerged)
+### Schema 22 — canonical Lesson delivery & attendance outcome authority (Phase 2A.2-O, merged and closed)
 
 `022_canonical_lesson_delivery_attendance_authority` is additive only. It creates `dzn_canonical_lesson_delivery_outcomes` (append-only outcome history with one applicable outcome per Lesson, bound to the exact canonical schedule version, occurrence start/end and any reconciled completion event), `dzn_canonical_lesson_delivery_commands` (digest-only durable command evidence) and `dzn_canonical_academy_obligations` (immutable academy-owed occurrences, `UNIQUE(source_lesson_id)`, independent of Term lifecycle). It adds no column to `dzn_lessons`, never reclassifies a Phase-M replacement, and performs **no** legacy attendance backfill, no dual-read and no provider or Amelia coupling. The verifier runs after migration 022, on current-schema verification, and unconditionally before the schema option may advance whenever migration 022 is already recorded.
 

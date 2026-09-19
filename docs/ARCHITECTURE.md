@@ -4,9 +4,9 @@
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override (2026-09-18):** Platform 0.1.0 `main` is authoritative at Schema 21 after the Phase 2A.2-N canonical Lesson scheduling and Teacher capacity merge and closeout. Phases 2A.2-A through N are complete, independently reviewed where consequential, merged and closed. An unmerged Schema-22 candidate (`phase-2a2o-canonical-lesson-delivery-attendance-authority`) adds provider-neutral canonical Lesson delivery/attendance outcomes; it is implemented and owner-verified, awaiting independent review. Attendance cutover, payment, renewal, notification and provider integration remain outside Platform authority. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+> **Current-state override (2026-09-19):** Platform 0.1.0 `main` is authoritative at Schema 22 after the Phase 2A.2-O canonical Lesson delivery/attendance outcome merge and closeout. Phases 2A.2-A through O are complete, independently reviewed where consequential, merged and closed. Canonical authority therefore covers Lesson identity/lifecycle, canonical scheduling and Teacher capacity (Phase N), and provider-neutral exceptional delivery/attendance outcomes with a distinct academy-obligation debt authority (Phase O). Attendance cutover, Google/Meet and calendar evidence, Amelia, payment/Finance, renewal, notification and payroll remain outside Platform authority. **No next slice is authorised.** Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
-> Historical note: the paragraph above previously recorded the Phase 2A.2-L / Schema 18 and Phase 2A.2-M / Schema 20 states. Those states are historical provenance; the current authoritative state is Schema 21 on `main` with the Phase O candidate at Schema 22.
+> Historical note: this override previously recorded the Phase 2A.2-L / Schema 18, Phase 2A.2-M / Schema 20 and Phase 2A.2-N / Schema 21 states, and later an unmerged Schema-22 Phase-O candidate. Those states are historical provenance; the current authoritative state is Schema 22 on `main`.
 
 ### Phase 2A.2-J architectural seam
 

@@ -1,6 +1,12 @@
 # Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority
 
-Status: **CORRECTION ROUND 3 CANDIDATE — independent re-review of round 2 failed on canonical Lesson lifecycle reuse and referenced-event corruption coverage, corrections applied, awaiting independent re-review**
+Status: **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED**
+
+Final independently approved candidate `f5b43741f4b404fd102330aeb75d58ed8b3e2976`, tree
+`7182101fcaf9855f8834cd08bc2e7a4a0311791c`, was fast-forward merged into `main`; the
+implementation-merge SHA equals the approved candidate because no merge commit was required. The
+docs-only closeout commit is recorded in the task closeout because a commit cannot embed its own
+hash. No deployment occurred.
 
 Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build
 `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`.
@@ -217,6 +223,13 @@ overlap, duration), it can be ingested as evidence against the same boundary and
 outcome without changing canonical identity or introducing Google coupling into the domain.
 
 ## Validation performed (disposable MariaDB 11.4 runtime; no production, NIU, Theme, Amelia or external system contacted)
+
+**Evidence provenance.** Final independent review independently reproduced: Git identity and
+ancestry checks, `git diff --check`, 29/29 `tests/*contract*.php`, PHP lint, shell syntax,
+Schema/migration identity and the Round-3 commit-scope inspection. The runtime evidence below is the
+implementation owner's on a disposable MariaDB/WordPress harness; it was not re-executed by the
+independent reviewer and is reported as owner evidence, not as independently reproduced runtime
+evidence.
 
 - **Contract tests:** 29 files match `tests/*contract*.php` and all pass, including the Phase O
   contract (`tests/phase-2a2o-contract.php`).
