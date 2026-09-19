@@ -351,6 +351,8 @@ foreach (array(
 }
 dzn_oc_assert($wpdb->query("DELETE FROM {$p}canonical_lesson_lifecycle_events WHERE uid='{$injectedUid}'") === 1, 'Failed to remove the injected lifecycle event');
 dzn_oc_assert(count($obligations->outstandingForTerm($injectionTerm)) === $injectionBaseline && $obligations->outstandingCountForTerm($injectionTerm) === $injectionBaseline, 'Repaired Lesson lifecycle did not restore the obligation aggregate');
-$cases += 3;
+// The two $aggregateFailClosed() calls above already counted themselves; only the injected row is
+// counted here.
+$cases += 1;
 
 echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 9) . "\nod8_completion_lineage_cases=4\nreferenced_lifecycle_event_cases=3\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\ncanonical_lifecycle_reuse_enforced=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";

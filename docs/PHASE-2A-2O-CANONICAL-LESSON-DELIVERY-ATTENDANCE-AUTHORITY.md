@@ -228,11 +228,11 @@ outcome without changing canonical identity or introducing Google coupling into 
   completion, academy-funded remedy after the allowance cap is exhausted, advance-cancellation
   versus post-occurrence non-delivery, temporal refusals, review-required resolution, capability
   denial and digest-only evidence.
-- **Corruption runtime (46 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
+- **Corruption runtime (44 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
   occurrence start and end anchors, schedule-version binding, profile columns, actor, reason,
   channel, reference digest, observed time, applicable relationship, supersession target,
   provider-shaped evidence, command intent and command result) fail closed through the protected
-  read, the guard and Lesson completion, then recover; plus 28 academy-obligation classes verified
+  read, the guard and Lesson completion, then recover; plus 26 academy-obligation classes verified
   through the **aggregate reads** (`outstandingForTerm`, `outstandingCountForTerm`,
   `outstandingForEnrolment`) covering source Lesson relationship, Term, Enrolment, Student, Course
   and Teacher identity, **Teacher Assignment identity**, source outcome and cancellation-event
