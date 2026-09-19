@@ -12,7 +12,8 @@
 | Phase 2A.2-M approved candidate | `f44b502509f5dcb9b5d0281cfda4329407abd3bf`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
-| Current authoritative main | `f5b43741f4b404fd102330aeb75d58ed8b3e2976` (implementation merge; the docs-only Phase-O closeout commit is recorded in the task closeout because a commit cannot embed its own hash) |
+| Current authoritative main | `7b9aea68fddd651cd614f279f77e78b104885c4d` (post-Phase-O maintenance merge; Phase-O closeout and Phase-P notes are recorded in their task closeouts) |
+| Active Platform candidate | Phase 2A.2-P canonical attendance intake & review authority — Schema 23, unmerged, owner-verified, awaiting independent review (see [PHASE-2A-2P-CANONICAL-ATTENDANCE-INTAKE.md](PHASE-2A-2P-CANONICAL-ATTENDANCE-INTAKE.md)) |
 | Schema | 22 |
 | Migrations | 001–022; latest `022_canonical_lesson_delivery_attendance_authority` |
 | Build identity | `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1` |
@@ -24,6 +25,7 @@
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-O state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3) |
+| Current 2A.2-P state | **REVIEW CANDIDATE — implemented, owner-verified, NOT merged, NOT deployed** |
 | Next Platform action | **Requires explicit product/architecture authorisation.** No next Platform slice is approved by this record; do not begin Phase P or any later slice on the strength of this document |
 
 The completed coordination chain is:

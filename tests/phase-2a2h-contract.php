@@ -25,7 +25,10 @@ foreach (['014_canonical_enrolment_foundation', 'install_canonical_enrolment_fou
 foreach (['UNIQUE ', 'student_course_applicable', 'student_id,course_id,applicable_slot', 'accepted_service_arrangement_id', 'MODIFY teacher_id bigint unsigned NULL'] as $fragment) {
     if (!str_contains($migration, $fragment)) throw new RuntimeException('Missing canonical identity/uniqueness boundary: ' . $fragment);
 }
-if (str_contains(substr($migration, strpos($migration, 'CREATE TABLE {$p}enrolment_lifecycle_events')), 'updated_at datetime')) throw new RuntimeException('Lifecycle history is mutable');
+$lifecycleStart = strpos($migration, 'CREATE TABLE {$p}enrolment_lifecycle_events');
+$lifecycleEnd = strpos($migration, 'private static function ', $lifecycleStart);
+$lifecycleSlice = substr($migration, $lifecycleStart, $lifecycleEnd === false ? null : $lifecycleEnd - $lifecycleStart);
+if (str_contains($lifecycleSlice, 'updated_at datetime')) throw new RuntimeException('Lifecycle history is mutable');
 foreach (['none', 'canonical_applicable', 'canonical_closed_history', 'legacy_review_required', 'already_linked_source', 'data_integrity_conflict'] as $classification) {
     if (!str_contains($service, "'{$classification}'")) throw new RuntimeException('Missing applicability classification: ' . $classification);
 }

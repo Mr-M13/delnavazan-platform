@@ -14,7 +14,9 @@ $authorityValidator=file_get_contents($root.'/src/Core/Application/CanonicalLess
 $schedule=file_get_contents($root.'/src/Core/Application/CanonicalLessonScheduleService.php');
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<22)throw new RuntimeException('Missing Phase O schema identity');
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2o-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase O build identity');
+// Phase O+ tolerance: later Platform slices advance the build identity (for example Phase 2A.2-P),
+// so this asserts a canonical Platform build identity rather than pinning the Phase-O string.
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2[a-z0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing compatible Phase O+ build identity');
 
 // Migration, storage, verifier wiring and capability.
 foreach(array('022_canonical_lesson_delivery_attendance_authority','install_canonical_lesson_delivery_attendance_authority','verify_canonical_lesson_delivery_authority_schema','canonical_lesson_delivery_outcomes','canonical_lesson_delivery_commands','canonical_academy_obligations','lesson_applicable_outcome','lesson_outcome_sequence','schedule_version_id','occurrence_ends_at_utc','reconciles_completion_event_id','dzn_manage_canonical_lesson_delivery')as$n)if(!str_contains($migration.$plugin,$n))throw new RuntimeException('Missing Phase O migration contract: '.$n);

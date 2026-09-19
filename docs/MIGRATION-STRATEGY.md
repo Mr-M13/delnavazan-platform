@@ -24,7 +24,11 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration — Schema 22
+## Current authoritative migration — Schema 22 (authoritative on `main`)
+
+### Schema 23 — canonical attendance intake & review authority (Phase 2A.2-P candidate, unmerged)
+
+`023_canonical_attendance_intake_authority` is additive only: it creates the Phase-P cutover policy, case, evidence, decision, anomaly and command tables, performs no historical attendance import, no dual-read and no reinterpretation of Phase-O data, and its verifier rejects provider-specific storage.
 
 Schema 22 / `022_canonical_lesson_delivery_attendance_authority` is authoritative. It retains Schema 21's canonical Lesson scheduling, Teacher capacity and terminal lifecycle, legacy `legacy_phase1` isolation, immutable Assignment/Teacher provenance, append-only lifecycle and digest-only command evidence, and adds the Phase-O delivery/attendance outcome and academy-obligation authority described below. It creates no payment, notification, calendar, Amelia or provider authority.
 

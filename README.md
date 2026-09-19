@@ -8,12 +8,13 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Authoritative main | `f5b43741f4b404fd102330aeb75d58ed8b3e2976` (Phase-O implementation merge; the docs-only closeout hash is recorded in the task closeout) |
-| Platform / schema | 0.1.0 / 22 authoritative on `main` |
+| Authoritative main | `7b9aea68fddd651cd614f279f77e78b104885c4d` (post-Phase-O maintenance merge; the Phase-O closeout and Phase-P notes are recorded in their task closeouts) |
+| Platform / schema | 0.1.0 / 22 authoritative on `main`; Phase 2A.2-P candidate at Schema 23 |
 | Migrations | 001–022 authoritative; latest `022_canonical_lesson_delivery_attendance_authority` |
 | Latest merged slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority (complete / independently reviewed after correction rounds 1–3 / merged / closed) |
 | Previous merged slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority (Schema 21) |
-| Next boundary | **No next slice is authorised.** The next Platform slice requires an explicit product/architecture decision; delivery/attendance cutover, provider integration, payment, notification and Finance remain outside current authority |
+| Active Platform candidate | Phase 2A.2-P canonical attendance intake & review authority — Schema 23, unmerged, owner-verified, awaiting independent review |
+| Next boundary | **No next slice is authorised beyond the Phase P candidate.** The next Platform slice requires an explicit product/architecture decision; delivery/attendance cutover, provider integration, payment, notification and Finance remain outside current authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
