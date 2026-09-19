@@ -1,9 +1,8 @@
 # Phase 2A.2-P — Canonical Attendance Intake & Review Authority
 
-Status: **CORRECTION ROUND 3 CANDIDATE — implemented and owner-verified, NOT merged, NOT deployed,
-awaiting final independent re-review.**
+Status: **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED — NOT deployed.**
 
-Schema 23 (candidate only) / migration `023_canonical_attendance_intake_authority` / build
+Schema 23 (authoritative on `main`) / migration `023_canonical_attendance_intake_authority` / build
 `phase2a2p-canonical-attendance-intake-20260919.1`, from authoritative base
 `7b9aea68fddd651cd614f279f77e78b104885c4d` (Phase O merged and closed at Schema 22).
 
@@ -20,10 +19,10 @@ through the established application services.
 | `eda3df2a24f5de67dcbba1dbe6e4ae863b325e13` | `53af4c29cfb63dd21aad9fe99b2ef0e1d9d768aa` | Partial correction — fixed P-9 (cutover replay transaction leak), P-11 (continuity contradiction) and only part of P-1 (removed `resolved`/`verified` defaults). **Historical provenance only; not reviewable.** |
 | `629310e835a4cad3bc25d5406280944c2b6e6145` | `49b93a71afefbe0471fe57dafc8961cef4de6f31` | Correction Round 1 — **final independent re-review FAIL** on three remaining authority defects: P-8 concurrent ingest duplicate-command recovery could pass a null expected digest, P-7 equal cutover instants could fall back to highest database ID, and the protected read returned a superseded schedule occurrence instead of failing closed. |
 | `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9` | `a554f8ac3cc026770ea55a4edc2ebb2dce7697c1` | Correction Round 2 — **final independent re-review FAIL** on R3-1 (exact cutover-policy replay became non-idempotent after cutover passage), R3-2 (nullable expected-digest bypass remained on the replay primitive) and R3-3 (exact-concurrency response assertion was incomplete). |
-| Correction Round 3 (this candidate) | see continuity | Corrects R3-1, R3-2 and R3-3 in place on the existing branch. |
+| `30fe1f11c425ad7066408f20ca57e2ca084841d6` | `34c111c01932f14552ada366f911f9b404111692` | Correction Round 3 — **final independent re-review PASS**; fast-forward merged into `main`. |
 
-No prior commit was amended, rebased, squashed or rewritten. Every Round-3 correction is a descendant
-of `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9`.
+No commit was amended, rebased, squashed or rewritten. Every correction round is an append-only
+descendant chain from the original candidate.
 
 ## Locked owner policy implemented
 

@@ -3,6 +3,12 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-P — Canonical Attendance Intake & Review Authority — merged and closed — 2026-09-20
+
+- Final independently approved candidate `30fe1f11c425ad7066408f20ca57e2ca084841d6`, tree `34c111c01932f14552ada366f911f9b404111692`, was **fast-forward merged into `main`** from authoritative pre-merge main `7b9aea68fddd651cd614f279f77e78b104885c4d`. The implementation-merge SHA equals the approved candidate because no merge commit was required. Schema 23 / migration `023_canonical_attendance_intake_authority` / build `phase2a2p-canonical-attendance-intake-20260919.1` are now authoritative on `main`. **No deployment occurred**; production, Theme/NIU, Google/provider credentials, Stripe/payment, notification and portal surfaces were untouched.
+- Phase P passed final independent re-review after three correction rounds (original `6a6a4ce` failed; `eda3df2` is historical incomplete; `629310e` failed; `0d6f0f3` failed; `30fe1f1` passed). No production attendance cutover was activated and no provider integration was implemented.
+- Phase P is provider-neutral attendance intake/evidence/assessment/review authority only: canonical delivery/attendance truth remains with Phase O, and Lesson completion remains with Lesson authority. No Google API/OAuth/webhook/credential, calendar, Amelia, payment, notification, Teacher Portal or Student Portal integration was introduced.
+
 ## Phase 2A.2-P — Canonical Attendance Intake & Review Authority — Correction Round 3 candidate, unmerged — 2026-09-20
 
 - **Correction Round 3 (this candidate)** corrects the three final independent re-review findings on Round-2 candidate `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9` (tree `a554f8ac3cc026770ea55a4edc2ebb2dce7697c1`). All changes are descendants of `0d6f0f3`; no commit was amended, rebased or rewritten. Schema remains 23 / `023_canonical_attendance_intake_authority`; build remains `phase2a2p-canonical-attendance-intake-20260919.1`. **Not merged, not deployed.**

@@ -8,13 +8,13 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Authoritative main | `7b9aea68fddd651cd614f279f77e78b104885c4d` (post-Phase-O maintenance merge; the Phase-O closeout and Phase-P notes are recorded in their task closeouts) |
-| Platform / schema | 0.1.0 / 22 authoritative on `main`; Phase 2A.2-P candidate at Schema 23 |
-| Migrations | 001–022 authoritative; latest `022_canonical_lesson_delivery_attendance_authority` |
-| Latest merged slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority (complete / independently reviewed after correction rounds 1–3 / merged / closed) |
-| Previous merged slice | Phase 2A.2-N — Canonical Lesson Scheduling & Teacher Capacity Authority (Schema 21) |
-| Active Platform candidate | Phase 2A.2-P canonical attendance intake & review authority — **Correction Round 3 candidate** (Schema 23, unmerged, owner-verified, awaiting final independent re-review). Original candidate `6a6a4ce`, Round-1 candidate `629310e` and Round-2 candidate `0d6f0f3` all failed independent review; `eda3df2a` is historical provenance only |
-| Next boundary | **Final independent re-review of the Phase-P Correction Round 3 candidate.** Beyond that, no next slice is authorised: the next Platform slice requires an explicit product/architecture decision, and delivery/attendance cutover, provider integration, payment, notification and Finance remain outside current authority |
+| Authoritative main | Phase 2A.2-P implementation merge at `30fe1f11c425ad7066408f20ca57e2ca084841d6` (fast-forward of the independently approved Phase-P candidate); docs-only closeout follows in continuity |
+| Platform / schema | 0.1.0 / **23 authoritative on `main`** |
+| Migrations | 001–023 authoritative; latest `023_canonical_attendance_intake_authority` |
+| Latest merged slice | Phase 2A.2-P — Canonical Attendance Intake & Review Authority (complete / independently reviewed after correction rounds 1–3 / merged / closed) |
+| Previous merged slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority (Schema 22) |
+| Active Platform candidate | None |
+| Next boundary | **No next slice is authorised.** The next Platform slice requires an explicit product/architecture decision; production attendance cutover, provider integration (Google/Meet, OAuth, webhooks, credentials), payment, notification, Finance, Teacher Portal and Student Portal integration remain outside current authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 
