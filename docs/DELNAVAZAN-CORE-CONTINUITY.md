@@ -25,7 +25,7 @@
 | Current 2A.2-M state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-O state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3) |
-| Current 2A.2-P state | **REVIEW CANDIDATE — implemented, owner-verified, NOT merged, NOT deployed** |
+| Current 2A.2-P state | **CORRECTION ROUND 1 IN PROGRESS — reviewed candidate `6a6a4ce` failed independent review (P-1…P-11); the corrected candidate is NOT merge-ready.** Implementation continues on `phase-2a2p-canonical-attendance-intake`; Phase P remains unmerged, undeployed, Schema 23 candidate-only, with Phase O still canonical truth, no Google integration and no production cutover. Next action: complete the correction findings, then independent re-review. |
 | Next Platform action | **Requires explicit product/architecture authorisation.** No next Platform slice is approved by this record; do not begin Phase P or any later slice on the strength of this document |
 
 The completed coordination chain is:

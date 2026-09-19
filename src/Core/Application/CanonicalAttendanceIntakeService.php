@@ -56,7 +56,7 @@ final class CanonicalAttendanceIntakeService {
         $payload=CanonicalAttendanceIdempotency::payload($facts);
         $this->repository->begin();
         try{
-            if($winner=$this->repository->command($digest))return $this->replayCommand($winner,$payload,'record_cutover_policy');
+            if($winner=$this->repository->command($digest)){ $this->repository->commit(); return $this->replayCommand($winner,$payload,'record_cutover_policy'); }
             $now=gmdate('Y-m-d H:i:s');
             $id=$this->repository->insertCutoverPolicy(array(
                 'uid'=>Identifier::uid(),'policy_version'=>self::POLICY_VERSION,'cutover_utc'=>$cutoverUtc,
@@ -393,10 +393,16 @@ final class CanonicalAttendanceIntakeService {
         if(!in_array($providerCode,self::PROVIDER_CODES,true))throw new \InvalidArgumentException('Controlled provider code required');
         $role=(string)($input['participant_role']??'');
         if(!in_array($role,CanonicalAttendanceValidator::PARTICIPANT_ROLES,true))throw new \InvalidArgumentException('Controlled participant role required');
-        $identity=(string)($input['participant_identity_state']??'resolved');
+        // P-1 (partial): intake must never self-assert a verified/resolved participant. Callers must
+        // supply an explicit identity state and, for a resolved participant, the exact canonical ID.
+        $identity=(string)($input['participant_identity_state']??'');
         if(!in_array($identity,CanonicalAttendanceValidator::IDENTITY_STATES,true))throw new \InvalidArgumentException('Controlled participant identity state required');
-        $verification=(string)($input['verification_state']??'verified');
+        $verification=(string)($input['verification_state']??'');
         if(!in_array($verification,CanonicalAttendanceValidator::VERIFICATION_STATES,true))throw new \InvalidArgumentException('Controlled verification state required');
+        if($identity==='resolved'){
+            if($role==='teacher'&&(int)($input['resolved_teacher_id']??0)<1)throw new \InvalidArgumentException('Resolved Teacher identity requires the canonical Teacher ID');
+            if($role==='student'&&(int)($input['resolved_student_id']??0)<1)throw new \InvalidArgumentException('Resolved Student identity requires the canonical Student ID');
+        }
         $observed=(string)($input['observed_at']??'');
         if(!CanonicalAttendanceValidator::utc($observed)||$observed>gmdate('Y-m-d H:i:s'))throw new \InvalidArgumentException('Valid past-or-present UTC observed time required');
         $join=$input['join_at_utc']??null;$leave=$input['leave_at_utc']??null;
