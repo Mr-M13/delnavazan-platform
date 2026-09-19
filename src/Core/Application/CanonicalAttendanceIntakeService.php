@@ -59,7 +59,6 @@ final class CanonicalAttendanceIntakeService {
     public function recordCutoverPolicy(string $cutoverUtc,string $key):array{
         $this->requireCapability(self::REVIEW_CAPABILITY);
         if(!CanonicalAttendanceValidator::utc($cutoverUtc))throw new \InvalidArgumentException('Valid UTC cutover instant required');
-        if((int)strtotime($cutoverUtc.' UTC')<=(int)strtotime(gmdate('Y-m-d H:i:s').' UTC'))throw new \InvalidArgumentException('cutover_instant_not_prospective');
         $actor=$this->actor();
         $digest=CanonicalAttendanceIdempotency::key($key);
         $facts=array('domain'=>'canonical_attendance_v1','operation'=>'record_cutover_policy','policy_version'=>self::POLICY_VERSION,'cutover_utc'=>$cutoverUtc,'rule_version'=>CanonicalAttendanceRule::RULE_VERSION);
@@ -67,6 +66,9 @@ final class CanonicalAttendanceIntakeService {
         $this->repository->begin();
         try{
             if($winner=$this->repository->command($digest)){ $this->repository->commit(); return $this->replayCommand($winner,$payload,'record_cutover_policy'); }
+            // Prospective-only applies to a genuinely NEW command; an exact replay of an already
+            // recorded durable command is resolved above and never re-validated against the wall clock.
+            if((int)strtotime($cutoverUtc.' UTC')<=(int)strtotime(gmdate('Y-m-d H:i:s').' UTC'))throw new \InvalidArgumentException('cutover_instant_not_prospective');
             // One immutable policy per cutover instant: a different command identity attempting the
             // same instant is a genuine authority conflict, never a silent database-id tie-break.
             if($this->repository->policyForInstant($cutoverUtc,true))throw new \InvalidArgumentException('duplicate_cutover_instant');
@@ -681,8 +683,8 @@ final class CanonicalAttendanceIntakeService {
         ));
     }
 
-    private function replayCommand(object $command,?string $payload,string $operation):array{
-        if($payload!==null&&!hash_equals((string)$command->command_payload_digest,$payload))throw new IdempotencyConflictException('Idempotency conflict');
+    private function replayCommand(object $command,string $payload,string $operation):array{
+        if(!hash_equals((string)$command->command_payload_digest,$payload))throw new IdempotencyConflictException('Idempotency conflict');
         if((string)$command->command_domain!=='canonical_attendance_v1'||(string)$command->operation!==$operation)throw new \RuntimeException('Contaminated canonical attendance command');
         return array(
             'case_id'=>$command->case_id===null?null:(int)$command->case_id,

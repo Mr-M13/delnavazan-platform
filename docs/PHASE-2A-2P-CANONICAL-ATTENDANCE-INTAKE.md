@@ -1,6 +1,6 @@
 # Phase 2A.2-P — Canonical Attendance Intake & Review Authority
 
-Status: **CORRECTION ROUND 2 CANDIDATE — implemented and owner-verified, NOT merged, NOT deployed,
+Status: **CORRECTION ROUND 3 CANDIDATE — implemented and owner-verified, NOT merged, NOT deployed,
 awaiting final independent re-review.**
 
 Schema 23 (candidate only) / migration `023_canonical_attendance_intake_authority` / build
@@ -19,10 +19,11 @@ through the established application services.
 | `6a6a4ce8249f79df0371753479587e5d9c1fcd27` | `f17ef71c989ae8449108bb4ccd279b2daec4026a` | Original Phase-P candidate — **independent review FAIL (P-1…P-11)**. |
 | `eda3df2a24f5de67dcbba1dbe6e4ae863b325e13` | `53af4c29cfb63dd21aad9fe99b2ef0e1d9d768aa` | Partial correction — fixed P-9 (cutover replay transaction leak), P-11 (continuity contradiction) and only part of P-1 (removed `resolved`/`verified` defaults). **Historical provenance only; not reviewable.** |
 | `629310e835a4cad3bc25d5406280944c2b6e6145` | `49b93a71afefbe0471fe57dafc8961cef4de6f31` | Correction Round 1 — **final independent re-review FAIL** on three remaining authority defects: P-8 concurrent ingest duplicate-command recovery could pass a null expected digest, P-7 equal cutover instants could fall back to highest database ID, and the protected read returned a superseded schedule occurrence instead of failing closed. |
-| Correction Round 2 (this candidate) | see continuity | Corrects R1/P-8, R2/P-7 and R3 in place on the existing branch. |
+| `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9` | `a554f8ac3cc026770ea55a4edc2ebb2dce7697c1` | Correction Round 2 — **final independent re-review FAIL** on R3-1 (exact cutover-policy replay became non-idempotent after cutover passage), R3-2 (nullable expected-digest bypass remained on the replay primitive) and R3-3 (exact-concurrency response assertion was incomplete). |
+| Correction Round 3 (this candidate) | see continuity | Corrects R3-1, R3-2 and R3-3 in place on the existing branch. |
 
-No prior commit was amended, rebased, squashed or rewritten. Every Round-2 correction is a descendant
-of `629310e835a4cad3bc25d5406280944c2b6e6145`.
+No prior commit was amended, rebased, squashed or rewritten. Every Round-3 correction is a descendant
+of `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9`.
 
 ## Locked owner policy implemented
 
@@ -111,7 +112,10 @@ recovery) are all covered by executable runtime tests.
 `UNIQUE KEY cutover_instant(cutover_utc)`, the verifier requires that unique index, and the application
 authority rejects a second policy at the same instant before insert. Exact replay of the same command
 identity stays idempotent; a different command identity attempting the same instant fails
-deterministically. Applicability is deterministic from the occurrence instant and **never** uses the
+deterministically. **Prospective-only validation applies to a genuinely new command**: the canonical
+command digest is resolved against the durable command authority first, so an exact completed cutover
+command remains idempotently replayable even after its wall-clock instant has passed, while a new
+command attempting a backdated/passed instant still fails. Applicability is deterministic from the occurrence instant and **never** uses the
 database insertion id: the newest passed cutover is selected, and if corrupted/legacy data contains
 several policies at the same newest instant the lookup fails closed (`cutover_policy_ambiguous`)
 rather than silently picking one by id. Every admitted case freezes the exact `cutover_policy_id` (with
@@ -124,8 +128,10 @@ production cutover was performed.
 
 Every duplicate-key recovery path reconstructs the **complete** incoming command facts through the same
 canonical digest-construction path as the normal command, and compares that expected digest against
-`winner.command_payload_digest`; no path passes a null/omitted expected digest, and no helper weakens
-`replayCommand()` to accommodate recovery. Reusing one command key with a changed payload, provider
+`winner.command_payload_digest`; no path passes a null/omitted expected digest. The replay primitive
+itself is `replayCommand(object $command, string $payload, string $operation)` and compares the
+expected digest **unconditionally**, so there is no nullable or sentinel bypass and no helper can
+weaken it to accommodate recovery. Reusing one command key with a changed payload, provider
 event, provider account, join/leave interval, observation instant, provenance, another Lesson, another
 operation or another expected case version fails closed with `Idempotency conflict` — never an
 idempotent replay. An exact cutover-policy replay commits and **closes** its transaction (verified
@@ -237,11 +243,11 @@ Phase P exposes the authority seam they will later use.
 | Shell syntax (`sh -n`, 10 shell harnesses) | pass |
 | Source contracts (`tests/*contract*.php`) | **30/30 pass** (the earlier "29" figure predates the Phase-P contract file; the "36" figure was a miscount and must not be quoted) |
 | Overlap rule runtime | pass (worked 20-minute example, 19:59 failure, split/duplicate intervals, pre-start and post-grace exclusion) |
-| Authority runtime | pass (automatic settlement, below-threshold review, human claims, administrative adjudication, Term closure/late evidence, idempotency and capability, **8-case provider-identity matrix**, cross-context replay, **5 settlement-convergence boundaries**, cutover-policy authority including duplicate-instant rejection and ambiguity fail-closed, same-occurrence duplicate-command context matrix, case/schedule validation, protected read fail-closed on superseded schedule, cutover transaction state, capability repair, no-policy fail-closed) |
+| Authority runtime | pass (automatic settlement, below-threshold review, human claims, administrative adjudication, Term closure/late evidence, idempotency and capability, **8-case provider-identity matrix**, cross-context replay, **5 settlement-convergence boundaries**, cutover-policy authority including duplicate-instant rejection and ambiguity fail-closed, same-occurrence duplicate-command context matrix, **post-cutover exact cutover-command replay**, case/schedule validation, protected read fail-closed on superseded schedule, cutover transaction state, capability repair, no-policy fail-closed) |
 | Corruption runtime | **30 fail-closed cases with repair/recovery** |
 | Failure-injection runtime | 3 write boundaries + convergence replay + durable payload conflict |
 | Migration runtime | fresh Schema 23, 22→23 rehearsal, repeat, partial capability repair, no backfill, no production cutover, provider-neutral storage, **9 malformed-storage cases** (including non-unique cutover instant), retained-023 fail-closed |
-| Concurrency runner | **13 deterministic gated modes**: same event/same payload, same event/changed payload, claim vs adjudication, adjudication vs adjudication (exactly one winner, the other `stale_case_version`), one command key across two Lessons (exactly one winner), and seven same-Lesson/schedule command-key races (exact replay plus changed payload/event/account/interval/observation/provenance), plus unrelated Lessons |
+| Concurrency runner | **13 deterministic gated modes**: same event/same payload, same event/changed payload, claim vs adjudication, adjudication vs adjudication (exactly one winner, the other `stale_case_version`), one command key across two Lessons (exactly one winner), and seven same-Lesson/schedule command-key races — the exact case now also proves exactly one creation, exactly one `idempotent` response, the same case and the same evidence identifier — plus unrelated Lessons |
 | Adjacent regressions | Phase-O authority/corruption/failure/migration, Phase-N authority/corruption/failure/migration, Phase-M authority/corruption/failure, Phase-M0 authority + protected read, Phase-L authority, Migrator RuntimeException regression |
 
 No deployment, production, NIU, Theme, Amelia or external-system change occurred. Nothing was merged.

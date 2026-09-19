@@ -105,6 +105,13 @@ foreach(array('replayIngestCommand','replayClaimCommand')as$fn){
     if(!str_contains($body,'CanonicalAttendanceIdempotency::payload('))throw new RuntimeException($fn.' must reconstruct the complete incoming payload digest');
     if(!str_contains($body,"replayCommand(\$winner,\$expected"))throw new RuntimeException($fn.' must compare the reconstructed expected digest through the canonical replay path');
 }
+// R3-2: the replay primitive itself must compare unconditionally and expose no nullable/sentinel bypass.
+$replayStart=strpos($intake,'private function replayCommand(');
+if($replayStart===false)throw new RuntimeException('replayCommand primitive is missing');
+$replayEnd=strpos($intake,'private function ',$replayStart+1);
+$replayBody=$replayEnd===false?substr($intake,$replayStart):substr($intake,$replayStart,$replayEnd-$replayStart);
+if(!str_contains($replayBody,'private function replayCommand(object $command,string $payload,string $operation):array'))throw new RuntimeException('replayCommand must require a non-null expected digest');
+if(str_contains($replayBody,'?string $payload')||str_contains($replayBody,'$payload!==null')||str_contains($replayBody,'$payload !== null'))throw new RuntimeException('replayCommand must never contain a nullable or conditional expected-digest bypass');
 
 // P-10 + protected read: identity, policy and decision-chain validation before presenting review data.
 foreach(array("const CAPABILITY='dzn_view_canonical_attendance_review'",'CanonicalLessonDeliveryValidator::effective','CanonicalAcademyObligationRepository','canonical_attendance_integrity_conflict','evidence_set_digest','schedule_version_conflict','cutover','conflict_count','recorded_overlap_seconds')as$n)if(!str_contains($read,$n))throw new RuntimeException('Missing Phase P protected read contract: '.$n);

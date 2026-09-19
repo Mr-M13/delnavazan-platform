@@ -590,4 +590,21 @@ $afterRestore=$ingest($noPolicy,'teacher',0,60,'no-policy-teacher',null,null,nul
 dzn_p_assert((int)$afterRestore['case_id']>0,'a restored prospective policy must admit the occurrence');
 dzn_p_assert((int)$requireCase((int)$noPolicy['lesson_id'],(int)$noPolicy['version_id'])->cutover_policy_id===(int)$restored['policy_id'],'the restored case must bind the restored policy row');
 
-echo "automatic_settlement=pass\nbelow_threshold_review=pass\nhuman_claims=pass\nadministrative_adjudication=pass\nterm_closure_and_late_evidence=pass\nidempotency_and_capability=pass\nprovider_identity_authority=pass cases=".count($identityResults)."\ncross_context_replay=pass\nsettlement_convergence_boundaries=pass cases=5\ncutover_policy_authority=pass\nduplicate_command_recovery=pass\ncase_schedule_validation=pass\ncutover_transaction_state=pass\ncapability_repair=pass\nno_policy_fail_closed=pass\nprotected_read=pass\nPhase 2A.2-P authority runtime passed\n";
+// ---------------------------------------------------------------------------
+// 16. R3-1: an exact completed cutover command must stay idempotent after the wall-clock instant
+// passes; prospective validation applies only to a genuinely new command.
+// ---------------------------------------------------------------------------
+$boundaryKey=dzn_p_key('cutover-boundary');
+$boundaryInstant=gmdate('Y-m-d H:i:s',strtotime('+2 seconds'));
+$boundaryFirst=$intake->recordCutoverPolicy($boundaryInstant,$boundaryKey);
+dzn_p_assert((int)$boundaryFirst['policy_id']>0,'the boundary cutover policy must be recorded while still prospective');
+$boundaryTarget=strtotime($boundaryInstant.' UTC')+1;while(time()<$boundaryTarget)usleep(100000);
+$boundaryReplay=$intake->recordCutoverPolicy($boundaryInstant,$boundaryKey);
+dzn_p_assert(!empty($boundaryReplay['idempotent']),'an exact cutover-policy replay must remain idempotent after the instant passes');
+dzn_p_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_cutover_policies WHERE cutover_utc=%s",$boundaryInstant))===1,'an exact cutover-policy replay must not create a second policy row');
+dzn_p_rejected(fn()=>$intake->recordCutoverPolicy($boundaryInstant,dzn_p_key('cutover-boundary-new')),'cutover_instant_not_prospective','a genuinely new command at an already-passed cutover instant');
+$changedBoundary=false;
+try{$intake->recordCutoverPolicy(gmdate('Y-m-d H:i:s',strtotime('+9 seconds')),$boundaryKey);}catch(\Throwable$e){$changedBoundary=$e->getMessage()==='Idempotency conflict';}
+dzn_p_assert($changedBoundary,'a changed payload under the original cutover command key must fail idempotency conflict');
+
+echo "automatic_settlement=pass\nbelow_threshold_review=pass\nhuman_claims=pass\nadministrative_adjudication=pass\nterm_closure_and_late_evidence=pass\nidempotency_and_capability=pass\nprovider_identity_authority=pass cases=".count($identityResults)."\ncross_context_replay=pass\nsettlement_convergence_boundaries=pass cases=5\ncutover_policy_authority=pass\nduplicate_command_recovery=pass\ncase_schedule_validation=pass\ncutover_transaction_state=pass\ncapability_repair=pass\nno_policy_fail_closed=pass\npost_cutover_exact_replay=pass\nprotected_read=pass\nPhase 2A.2-P authority runtime passed\n";

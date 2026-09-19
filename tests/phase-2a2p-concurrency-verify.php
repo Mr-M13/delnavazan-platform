@@ -10,6 +10,14 @@ $evidenceCount=static function(int $lessonId) use($wpdb,$p):int{return(int)$wpdb
 $providerCount=static function(int $lessonId) use($wpdb,$p):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_evidence WHERE lesson_id=%d AND evidence_kind='provider_interval'",$lessonId));};
 $caseFor=static function(int $lessonId) use($wpdb,$p):?object{return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cases WHERE lesson_id=%d ORDER BY id LIMIT 1",$lessonId));};
 $outcome=static function(int $lessonId) use($wpdb,$p):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_delivery_outcomes WHERE lesson_id=%d",$lessonId));};
+$gate=(string)getenv('DZN_PHASE_2A2P_GATE_DIR');
+$workerResult=static function(string $worker) use($gate):array{
+    $raw=trim((string)@file_get_contents($gate.'/'.$worker.'.result'));
+    if($raw==='')throw new RuntimeException('Phase-P race worker result unavailable: '.$worker);
+    $decoded=json_decode($raw,true);
+    if(!is_array($decoded))throw new RuntimeException('Phase-P race worker result malformed: '.$worker);
+    return $decoded;
+};
 $first=(int)$state['first']['lesson_id'];$second=(int)$state['second']['lesson_id'];
 switch($mode){
     case 'same_event_same_payload':
@@ -37,6 +45,16 @@ switch($mode){
         dzn_pv_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}canonical_attendance_commands")>=1,'the winning command must be durably recorded');
         break;
     case 'command_key_exact':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_pv_assert($w1['ok']===true&&$w2['ok']===true,'an exact concurrent command replay must be accepted by both workers');
+        $idempotent1=!empty($w1['result']['idempotent']);$idempotent2=!empty($w2['result']['idempotent']);
+        dzn_pv_assert($idempotent1!==$idempotent2,'exactly one exact concurrent response must be the non-idempotent creation');
+        dzn_pv_assert((int)$w1['result']['case_id']===(int)$w2['result']['case_id'],'both exact responses must resolve to the same attendance case');
+        $evidence1=$w1['result']['evidence_id']??null;$evidence2=$w2['result']['evidence_id']??null;
+        dzn_pv_assert($evidence1!==null&&$evidence2!==null&&(int)$evidence1===(int)$evidence2,'both exact responses must reference the same durable evidence identifier');
+        dzn_pv_assert($providerCount($first)===1,'an exact concurrent command replay must never add a second evidence row');
+        dzn_pv_assert($outcome($first)===0,'an exact concurrent command replay must not create canonical truth');
+        break;
     case 'command_key_changed_payload':
     case 'command_key_changed_event':
     case 'command_key_changed_account':
