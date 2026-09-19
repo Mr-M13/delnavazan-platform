@@ -3,6 +3,11 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Post-Phase-O maintenance — malformed Migrator RuntimeException construction — merged — 2026-09-19
+
+- Bounded maintenance merged into `main` as `08d0d26a94b6f33f20000ca64726f732bf9fa46d` (tree `002ade4586bbb431f44f09891210a36df9da0334`), closing the residual defect reported in the Phase 2A.2-N entry below: the malformed `throw new\RuntimeException(...)` construction in `Migrator` is corrected to `throw new \RuntimeException(...)` at all eleven remaining failure-path sites (`install_enrolment_conversion_authority`, `install_teacher_assignment_foundation`, `verify_enrolment_conversion_schema`, `verify_teacher_assignment_schema`), which previously produced a fatal PHP `Error` instead of the intended controlled rejection.
+- Regression coverage: `tests/schema-contract.php` now rejects any malformed construction in the migrator and pins the corrected failure-path counts (1/1/4/5); `tests/migrator-runtimeexception-runtime.php` proves representative install and verify failure paths throw `\RuntimeException`. Schema remains 22, latest migration remains `022_canonical_lesson_delivery_attendance_authority`, build identity is unchanged, no migration 023 exists, and no Platform authority, business policy or Phase-M/N/O semantics changed.
+
 ## Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority — merged and closed — 2026-09-19
 
 - Final independently approved candidate `f5b43741f4b404fd102330aeb75d58ed8b3e2976`, tree `7182101fcaf9855f8834cd08bc2e7a4a0311791c`, from authoritative pre-merge main `b0687fec98748144f96e3fc56f7e4fb53e01f673`, was **fast-forward merged into `main`**; the implementation-merge SHA equals the approved candidate because no merge commit was required. Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1` are authoritative. **No deployment occurred**; production, NIU, Theme, Amelia, Google/calendar, Meta and Stripe were untouched.
