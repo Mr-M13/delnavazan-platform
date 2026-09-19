@@ -1,6 +1,6 @@
 # Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority
 
-Status: **CORRECTION ROUND 2 CANDIDATE — independent re-review of round 1 failed on the O-D8 completion-event lineage defect and two lower findings, corrections applied, awaiting independent re-review**
+Status: **CORRECTION ROUND 3 CANDIDATE — independent re-review of round 2 failed on canonical Lesson lifecycle reuse and referenced-event corruption coverage, corrections applied, awaiting independent re-review**
 
 Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / build
 `phase2a2o-canonical-lesson-delivery-attendance-authority-20260918.1`.
@@ -18,6 +18,13 @@ Schema 22 / migration `022_canonical_lesson_delivery_attendance_authority` / bui
 > "Correction round 2" below. Schema 22, migration `022_canonical_lesson_delivery_attendance_authority`,
 > the build identity and O-D1…O-D9 remain unchanged; the round-2 corrections are validation, test and
 > documentation work only.
+>
+> **Correction round 3 (independent re-review of round 2).** The round-2 candidate
+> `5b18f20d576e5446cee6cecc0b21d010fb62ffa1` (tree `af035208b7096dad12e60b768e928372fb094778`) also
+> failed: the O-D8 completion-event check was still a **local approximation** of canonical completion
+> inside academy-obligation authority, and the referenced lifecycle event itself was not corrupted by
+> any test. See "Correction round 3" below. Schema 22, migration
+> `022_canonical_lesson_delivery_attendance_authority`, the build identity and O-D1…O-D9 are unchanged.
 
 Phase O is provider-neutral. It records what actually happened to a canonical Lesson occurrence
 without becoming a provider integration, without changing Lesson lifecycle, scheduling, payment,
@@ -70,6 +77,36 @@ round 1 was never added. Both are corrected here, together with the replay idemp
 | **HIGH — O-D8 completion-event lineage was not validated for `teacher_non_delivery`** | The validator now reconciles the obligation's `source_event_id` with the effective outcome's canonical reconciliation lineage. For an ordinary (non-reconciled) non-delivery the obligation must carry **no** completion-event lineage, and any stored event identifier is an integrity conflict. For an O-D8 reconciled completion the obligation must carry the exact event the effective outcome names, that event must exist in the Lesson's canonical lifecycle, belong to the same Lesson, be a `completed` event, and still be the Lesson's latest canonical completed event, with the Lesson itself in `completed` state. The obligation remains subordinate to the canonical Lesson/outcome/reconciliation facts — it never becomes the authority over completion, and the validation reuses the same hydrated lifecycle facts and rule the delivery authority applies rather than a second interpretation. |
 | **MEDIUM — missing corruption cases** | Added: Teacher Assignment identity to the aggregate identity matrix, and four O-D8 completion-lineage cases (wrong event identifier, completion event belonging to another Lesson, missing lineage where reconciliation requires it, and a wrong lifecycle-event type) plus the ordinary non-reconciled "spurious completion lineage" case. Every one of these is exercised through **all three** public aggregate seams — `outstandingForTerm()`, `outstandingCountForTerm()` and `outstandingForEnrolment()` — with repair proving recovery. |
 | **LOW — same-kind replay bypassed the source/evidence contract** | `owe()` no longer returns an existing same-kind obligation before validating the supplied authority. A same-kind call now validates the supplied source, requires the existing obligation to bind to the same canonical source identifiers (source outcome for non-delivery, source cancellation event for academy cancellation) and to match the immutable evidence exactly, and additionally revalidates the existing obligation's canonical aggregate. An exact legitimate replay remains idempotent (same row, no duplicate); conflicting replay intent fails closed with `obligation_replay_conflict`. The uniqueness semantics (`UNIQUE(source_lesson_id)`) and concurrency behaviour are unchanged. |
+
+## Correction round 3
+
+Round-2 validation decided canonical completion with a **local approximation** — scanning the raw
+lifecycle rows for `to_state = 'completed'` and taking the maximum event id — which is not a
+canonicality proof: a row can keep those fields while `from_state`, the event sequence, the
+append-only chain structure or the injected-row legality is corrupted. Academy-obligation authority
+must never maintain a second definition of canonical Lesson completion, so completion is now decided
+by Lesson authority alone.
+
+**Architecture chosen — direct, one-way reuse (no cycle).** `CanonicalLessonAuthorityValidator::valid()`
+references **no** Phase-O authority (verified: zero occurrences of the delivery or obligation
+validators), so calling it from academy-obligation validation introduces no circular or recursive
+validation and no competing lifecycle authority. The alternative — extracting a shared lifecycle
+primitive — was unnecessary because the existing authority is already a pure, non-mutating,
+repository-hydrated gate.
+
+| Finding | Correction |
+| --- | --- |
+| **HIGH — academy-obligation authority established completion locally** | `CanonicalAcademyObligationValidator::valid()` now consumes `CanonicalLessonAuthorityValidator::valid()` before accepting any obligation lineage, and both Phase-O consumers do the same: the obligation validator when obligations exist, and the delivery validator whenever a reconciliation pointer exists, plus the delivery service's reconciliation command itself. Completion is then bound to the canonical chain's **terminal event** — a consequence of the validated legal progression, not a local maximum-id scan. The obligation remains subordinate: it never decides whether a malformed Lesson lifecycle is acceptable. |
+| **MEDIUM — referenced lifecycle event was never corrupted by a test** | Added three cases that corrupt the **referenced** completion event while keeping the obligation pointer, lesson id and `to_state` intact: `from_state`, `event_sequence`, and an injected structurally noncanonical same-Lesson completed row (with an explicit assertion that Lesson authority itself rejects it). Each is exercised through `outstandingForTerm()`, `outstandingCountForTerm()` and `outstandingForEnrolment()` with repair proving recovery. The Round-2 wording that claimed the referenced event was already "the Lesson's latest canonical completed event" was an overclaim and is corrected here. |
+
+**Sequencing fix found during Round-3 verification.** The Phase-M cancellation service updates the
+Lesson lifecycle row and then appends its lifecycle event, so a guard that validated the aggregate in
+between compared a post-transition row with a pre-transition chain. The append-only event and (for
+academy cancellations) the academy obligation are therefore written first inside the same transaction,
+and the advance-cancellation guards — evaluated on the fully consistent post-state — reject with the
+precise reason (`delivery_outcome_exists`, `occurrence_already_started_use_delivery_outcome`) while any
+rejection still rolls the event, the obligation and the lifecycle update back together. The guard is
+also invoked at the service seam before any mutation, so no partial authority can survive.
 
 ## Outcome vocabulary
 
@@ -191,19 +228,20 @@ outcome without changing canonical identity or introducing Google coupling into 
   completion, academy-funded remedy after the allowance cap is exhausted, advance-cancellation
   versus post-occurrence non-delivery, temporal refusals, review-required resolution, capability
   denial and digest-only evidence.
-- **Corruption runtime (41 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
+- **Corruption runtime (46 cases):** 18 delivery fact classes (Lesson relationship, outcome sequence,
   occurrence start and end anchors, schedule-version binding, profile columns, actor, reason,
   channel, reference digest, observed time, applicable relationship, supersession target,
   provider-shaped evidence, command intent and command result) fail closed through the protected
-  read, the guard and Lesson completion, then recover; plus 23 academy-obligation classes verified
+  read, the guard and Lesson completion, then recover; plus 28 academy-obligation classes verified
   through the **aggregate reads** (`outstandingForTerm`, `outstandingCountForTerm`,
   `outstandingForEnrolment`) covering source Lesson relationship, Term, Enrolment, Student, Course
   and Teacher identity, **Teacher Assignment identity**, source outcome and cancellation-event
   lineage, O-D8 completion-event lineage (wrong identifier, cross-Lesson event, missing lineage,
-  wrong lifecycle-event type, and spurious lineage on an ordinary non-delivery), schedule-version and
-  occurrence anchors, evidence channel, reference digest, observed time, actor, reason code and state
-  classification. Each case proves all three reads reject the corrupted authority and that the count
-  never reports it.
+  wrong lifecycle-event type, and spurious lineage on an ordinary non-delivery), **corruption of the
+  referenced canonical lifecycle event itself** (`from_state`, `event_sequence`, injected
+  noncanonical completed row), schedule-version and occurrence anchors, evidence channel, reference
+  digest, observed time, actor, reason code and state classification. Each case proves all three
+  reads reject the corrupted authority and that the count never reports it.
 - Failure injection: outcome insert, supersession, obligation establishment, command evidence and
   lock-boundary injections all roll back completely with no orphan evidence, no half-superseded
   authority, no phantom entitlement and no falsely replayable command.

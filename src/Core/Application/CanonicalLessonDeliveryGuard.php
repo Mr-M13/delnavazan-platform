@@ -49,6 +49,16 @@ final class CanonicalLessonDeliveryGuard {
     }
 
     /**
+     * Phase 2A.2-O reconciliation: an advance cancellation that carries non-delivery meaning may
+     * neither duplicate an existing delivery fact nor be recorded after the occurrence has started.
+     * Evaluated on the stable pre-mutation aggregate so the caller receives the precise reason.
+     */
+    public function assertAdvanceCancellationAllowed(int $lessonId):void{
+        if($this->hasOutcome($lessonId))throw new \InvalidArgumentException('delivery_outcome_exists');
+        if($this->occurrenceStarted($lessonId,gmdate('Y-m-d H:i:s'))===true)throw new \InvalidArgumentException('occurrence_already_started_use_delivery_outcome');
+    }
+
+    /**
      * O-D4/O-D8/O-D9: the academy owes the purchased occurrence for this Lesson. The obligation is
      * DISTINCT canonical authority and is never a Phase-M replacement; it survives Term closure.
      */

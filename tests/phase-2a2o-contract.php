@@ -72,8 +72,14 @@ foreach(array('!==(int)($lesson->student_id??0)','!==(int)($lesson->course_id??0
 // Correction round 2 — HIGH: the teacher_non_delivery branch must validate O-D8 completion-event
 // lineage rather than trusting the stored identifier, and same-kind replay must not bypass the
 // source/evidence contract.
-foreach(array('$reconciledEvent=$effective->reconciles_completion_event_id','$storedEvent=$obligation->source_event_id','if($reconciledEvent===null)','$latestCompletion','$storedEvent!==$reconciledEvent')as$n)if(!str_contains($obligationValidator,$n))throw new RuntimeException('O-D8 completion-event lineage is not validated on obligations: '.$n);
-if(!str_contains($obligationValidator,"(string)(\$namedEvent->to_state??'')!=='completed'"))throw new RuntimeException('O-D8 lineage validation must require the canonical completed lifecycle event');
+foreach(array('$reconciledEvent=$effective->reconciles_completion_event_id','$storedEvent=$obligation->source_event_id','if($reconciledEvent===null)','$storedEvent!==$reconciledEvent')as$n)if(!str_contains($obligationValidator,$n))throw new RuntimeException('O-D8 completion-event lineage is not validated on obligations: '.$n);
+// Correction round 3 — HIGH: canonical completion is decided by Lesson authority, never re-derived
+// locally. Both Phase-O consumers must consume the canonical Lesson/lifecycle validation path, and
+// the local max-id completion approximation must be gone.
+if(!str_contains($obligationValidator,'CanonicalLessonAuthorityValidator::valid($lesson,$lifecycle'))throw new RuntimeException('Academy obligation validation does not consume canonical Lesson authority');
+$deliveryValidatorSource=file_get_contents($root.'/src/Core/Application/CanonicalLessonDeliveryValidator.php');
+if(!str_contains($deliveryValidatorSource,'CanonicalLessonAuthorityValidator::valid($lesson,$lifecycle'))throw new RuntimeException('Delivery reconciliation lineage does not consume canonical Lesson authority');
+foreach(array($obligationValidator,$deliveryValidatorSource)as$consumer)foreach(array('latestCompletion','max($completionEventId')as$approximation)if(str_contains($consumer,$approximation))throw new RuntimeException('Local completion approximation still present: '.$approximation);
 if(!str_contains($obligationService,'assertReplayMatches')||!str_contains($obligationService,"'obligation_replay_conflict'"))throw new RuntimeException('Same-kind obligation replay does not enforce the source/evidence contract');
 $corruptionRound2=file_get_contents($root.'/tests/phase-2a2o-corruption-runtime.php');
 foreach(array('Teacher Assignment identity','O-D8 wrong completion event identifier','O-D8 completion event from another Lesson','O-D8 missing completion event lineage','O-D8 completion event of the wrong lifecycle type','ordinary non-delivery with spurious completion lineage')as$n)if(!str_contains($corruptionRound2,$n))throw new RuntimeException('Correction round 2 corruption coverage is incomplete: '.$n);

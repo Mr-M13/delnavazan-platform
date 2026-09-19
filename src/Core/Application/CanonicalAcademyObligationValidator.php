@@ -27,13 +27,24 @@ final class CanonicalAcademyObligationValidator {
         if(!$lesson)return false;
         $outcomes=$delivery->outcomesForLesson($lessonId,$lock);
         $lifecycle=$lessons->events($lessonId,$lock);
-        return self::valid($lesson,$repository->forLesson($lessonId,$lock),$outcomes,$lifecycle);
+        return self::valid($lesson,$repository->forLesson($lessonId,$lock),$outcomes,$lifecycle,$lessons);
     }
 
-    /** Pure validation over hydrated rows. */
-    public static function valid(object $lesson,array $obligations,array $outcomes,array $lifecycle):bool{
+    /**
+     * Pure validation over hydrated rows.
+     *
+     * Canonical Lesson completion is decided by Lesson authority, never re-derived here. The source
+     * Lesson aggregate (identity, provenance, replacement lineage and the append-only lifecycle
+     * chain) must be canonical before any obligation lineage is accepted. The call is one-way —
+     * Lesson authority never consults academy-obligation authority — so there is no cycle, no
+     * recursive validation and no lock-order change; only reads are performed.
+     */
+    public static function valid(object $lesson,array $obligations,array $outcomes,array $lifecycle,?CanonicalLessonAuthorityRepository $lessons=null):bool{
         $lessonId=(int)($lesson->id??0);
         if($lessonId<1||(string)($lesson->record_model??'')!==self::MODEL)return false;
+        // The gate runs exactly when completion lineage is being accepted, never for a Lesson that
+        // carries no obligation. Lesson authority remains the only decider of canonical completion.
+        if($obligations&&!CanonicalLessonAuthorityValidator::valid($lesson,$lifecycle,$lessons))return false;
         $effective=CanonicalLessonDeliveryValidator::effective($outcomes);
         $academyCancellation=false;
         foreach($lifecycle as$event)if((string)($event->to_state??'')==='cancelled'&&(string)($event->reason_code??'')===self::ACADEMY_CANCELLATION_REASON)$academyCancellation=true;
@@ -80,14 +91,13 @@ final class CanonicalAcademyObligationValidator {
                 }else{
                     if($storedEvent===null||$storedEvent!==$reconciledEvent)return false;
                     if((string)($lesson->lifecycle_state??'')!=='completed')return false;
-                    $namedEvent=null;$latestCompletion=0;
-                    foreach($lifecycle as$item){
-                        if((string)($item->to_state??'')==='completed')$latestCompletion=max($latestCompletion,(int)($item->id??0));
-                        if((int)($item->id??0)===$reconciledEvent)$namedEvent=$item;
-                    }
-                    if(!$namedEvent||(string)($namedEvent->to_state??'')!=='completed')return false;
-                    if((int)($namedEvent->lesson_id??0)!==$lessonId)return false;
-                    if($latestCompletion!==$reconciledEvent)return false;
+                    // The canonical chain validated above proves one legal progression from
+                    // `authorised`, so the completed event is necessarily the chain's terminal event.
+                    // Bind to that canonical fact rather than scanning raw rows for a maximum id.
+                    $terminal=$lifecycle[count($lifecycle)-1];
+                    if((int)($terminal->id??0)!==$reconciledEvent)return false;
+                    if((string)($terminal->to_state??'')!=='completed')return false;
+                    if((int)($terminal->lesson_id??0)!==$lessonId)return false;
                 }
                 // The obligation carries the exact evidence of the source fact it was raised from.
                 if((string)($obligation->reason_code??'')!==(string)$effective->reason_code)return false;

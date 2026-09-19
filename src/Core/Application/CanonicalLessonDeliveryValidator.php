@@ -114,15 +114,23 @@ final class CanonicalLessonDeliveryValidator {
         // O-D1/O-D8: `completed` means delivered, so a known non-delivery or unresolved occurrence
         // may only coexist with a completed Lesson through the explicit append-only reconciliation
         // lineage that names the immutable historical completion event it supersedes.
-        $completionEventId=0;
-        foreach($lifecycle as$event)if((string)($event->to_state??'')==='completed')$completionEventId=max($completionEventId,(int)($event->id??0));
         $reconciled=$last->reconciles_completion_event_id===null?null:(int)$last->reconciles_completion_event_id;
+        // Canonical Lesson lifecycle authority is consumed whenever reconciliation lineage exists,
+        // so completion is never established from a local approximation. A Lesson with no
+        // reconciliation lineage is untouched by this gate, which keeps the Phase-M lifecycle
+        // transition window (row updated before its append-only event) free of false conflicts.
+        $terminal=null;
+        if($reconciled!==null){
+            if(!CanonicalLessonAuthorityValidator::valid($lesson,$lifecycle))return false;
+            $terminal=$lifecycle[count($lifecycle)-1];
+        }
         if(self::blocksCompletion($effective)&&(string)($lesson->lifecycle_state??'')==='completed'){
-            if($reconciled===null||$completionEventId<1||$reconciled!==$completionEventId)return false;
+            if($reconciled===null||(int)($terminal->id??0)!==$reconciled||(string)($terminal->to_state??'')!=='completed')return false;
         }
         if($reconciled!==null){
             if((string)($lesson->lifecycle_state??'')!=='completed')return false;
             if($effective!=='teacher_non_delivery')return false;
+            if((int)($terminal->id??0)!==$reconciled)return false;
         }
         // O-D5: one real-world event has exactly one authoritative meaning. A post-occurrence
         // non-delivery outcome may never coexist with the replacement-eligible cancellation reason

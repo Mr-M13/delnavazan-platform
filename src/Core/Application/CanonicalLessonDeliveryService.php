@@ -104,9 +104,11 @@ final class CanonicalLessonDeliveryService {
                 if($state!=='completed')throw new \InvalidArgumentException('lesson_not_completed_for_reconciliation');
                 if($state!==(string)$intent['expected_lesson_state'])throw new \InvalidArgumentException('stale_lesson_state');
                 if((string)$profile['delivery_state']!=='not_delivered')throw new \InvalidArgumentException('Controlled delivery outcome code required');
-                $completionEventId=0;
-                foreach($lifecycle as$event)if((string)($event->to_state??'')==='completed')$completionEventId=max($completionEventId,(int)$event->id);
-                if($completionEventId<1)throw new \InvalidArgumentException('completion_event_missing');
+                // Canonical completion is established by Lesson authority, never re-derived here.
+                if(!CanonicalLessonAuthorityValidator::valid($lesson,$lifecycle,$this->lessons))throw new \InvalidArgumentException('canonical_lesson_integrity_conflict');
+                $terminalCompletion=$lifecycle[count($lifecycle)-1];
+                if((string)($terminalCompletion->to_state??'')!=='completed')throw new \InvalidArgumentException('completion_event_missing');
+                $completionEventId=(int)$terminalCompletion->id;
                 $effective=CanonicalLessonDeliveryValidator::effective($outcomes);
                 if($effective&&(string)$effective->outcome_code==='teacher_non_delivery')throw new \InvalidArgumentException('already_reconciled_non_delivery');
                 $version=$this->applicableVersionFor($effective,$versions);

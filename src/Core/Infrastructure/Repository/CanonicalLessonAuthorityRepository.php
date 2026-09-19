@@ -31,15 +31,17 @@ final class CanonicalLessonAuthorityRepository {
         $reason=(string)($data['reason_code']??'');
         $cancelled=($data['to_state']??null)==='cancelled';
         $advance=array('canonical_lesson_cancelled_replacement_eligible','canonical_lesson_cancelled_academy_unavailable');
-        if($cancelled&&in_array($reason,$advance,true)){
-            $guard=new \Delnavazan\Platform\Core\Application\CanonicalLessonDeliveryGuard();
-            if($guard->hasOutcome((int)$data['lesson_id']))throw new \InvalidArgumentException('delivery_outcome_exists');
-            if($guard->occurrenceStarted((int)$data['lesson_id'],gmdate('Y-m-d H:i:s'))===true)throw new \InvalidArgumentException('occurrence_already_started_use_delivery_outcome');
-        }
+        // The append-only event is written first so every guard below validates the aggregate exactly
+        // as this transaction will commit it: the Phase-M service updates the Lesson lifecycle row
+        // before its lifecycle event exists, so validating in between would compare a post-transition
+        // row against a pre-transition chain. A guard failure rolls the event back with the row in the
+        // caller's transaction, so no partial authority can survive.
         $eventId=$this->insert('canonical_lesson_lifecycle_events',$data,'Canonical Lesson lifecycle evidence persistence failed');
         // O-D9: a Teacher/academy advance cancellation owes the purchased occurrence as DISTINCT
         // canonical authority. A Student-requested cancellation uses the generic reason and
-        // therefore never creates an obligation.
+        // therefore never creates an obligation. The obligation is written before the guards below
+        // so that they validate the complete post-state, and a rejected cancellation rolls the
+        // obligation back with the event in the caller's transaction.
         if($cancelled&&$reason==='canonical_lesson_cancelled_academy_unavailable'){
             (new \Delnavazan\Platform\Core\Application\CanonicalAcademyObligationService())->owe((int)$data['lesson_id'],'academy_cancellation',null,$eventId,array(
                 'reason_code'=>$reason,
@@ -47,6 +49,11 @@ final class CanonicalLessonAuthorityRepository {
                 'evidence_reference_digest'=>(string)($data['evidence_reference_digest']??''),
                 'evidence_at'=>(string)($data['occurred_at']??''),
             ));
+        }
+        if($cancelled&&in_array($reason,$advance,true)){
+            $guard=new \Delnavazan\Platform\Core\Application\CanonicalLessonDeliveryGuard();
+            if($guard->hasOutcome((int)$data['lesson_id']))throw new \InvalidArgumentException('delivery_outcome_exists');
+            if($guard->occurrenceStarted((int)$data['lesson_id'],gmdate('Y-m-d H:i:s'))===true)throw new \InvalidArgumentException('occurrence_already_started_use_delivery_outcome');
         }
         return $eventId;
     }

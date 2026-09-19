@@ -318,4 +318,39 @@ $aggregateFailClosed('O-D8 completion event of the wrong lifecycle type', $od8Ob
     "UPDATE {$p}canonical_academy_obligations SET source_event_id=(SELECT id FROM (SELECT id FROM {$p}canonical_lesson_lifecycle_events WHERE lesson_id={$od8Lesson} AND to_state='authorised' ORDER BY event_sequence ASC LIMIT 1) t) WHERE id={$od8Obligation}",
     "UPDATE {$p}canonical_academy_obligations SET source_event_id={$od8CompletionEvent} WHERE id={$od8Obligation}");
 
-echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 6) . "\nod8_completion_lineage_cases=4\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";
+// ---------------------------------------------------------------------------
+// 10. Correction round 3 (HIGH): canonical completion is decided by Lesson authority, so
+//     corrupting the REFERENCED completion event itself must fail the obligation aggregate closed.
+// ---------------------------------------------------------------------------
+$aggregateFailClosed('referenced completion event from_state', $od8Obligation, 'from_state',
+    "UPDATE {$p}canonical_lesson_lifecycle_events SET from_state='cancelled' WHERE id={$od8CompletionEvent}",
+    "UPDATE {$p}canonical_lesson_lifecycle_events SET from_state='authorised' WHERE id={$od8CompletionEvent}");
+$aggregateFailClosed('referenced completion event event_sequence', $od8Obligation, 'event_sequence',
+    "UPDATE {$p}canonical_lesson_lifecycle_events SET event_sequence=event_sequence+5 WHERE id={$od8CompletionEvent}",
+    "UPDATE {$p}canonical_lesson_lifecycle_events SET event_sequence=event_sequence-5 WHERE id={$od8CompletionEvent}");
+// Structurally noncanonical injected completion row: Lesson authority must reject it and the
+// obligation aggregate must fail closed — proving the obligation consumes canonical lifecycle
+// authority instead of a local completion approximation.
+$injectedUid = substr(str_replace('-', '', wp_generate_uuid4()), 0, 26);
+$injectedAt = gmdate('Y-m-d H:i:s');
+$od8RowForInjection = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_academy_obligations WHERE id=%d", $od8Obligation));
+$injectionTerm = (int) $od8RowForInjection->term_id; $injectionEnrolment = (int) $od8RowForInjection->enrolment_id;
+$injectionBaseline = count($obligations->outstandingForTerm($injectionTerm));
+$injected = $wpdb->query("INSERT INTO {$p}canonical_lesson_lifecycle_events (uid,lesson_id,event_sequence,from_state,to_state,reason_code,evidence_channel,evidence_reference_digest,occurred_at,recorded_at,recorded_by,created_at,created_by) SELECT '{$injectedUid}',lesson_id,event_sequence+1,'completed','completed','synthetic_injected','staff_record',REPEAT('a',64),'{$injectedAt}','{$injectedAt}',recorded_by,'{$injectedAt}',created_by FROM {$p}canonical_lesson_lifecycle_events WHERE id={$od8CompletionEvent}");
+dzn_oc_assert($injected === 1, 'Failed to inject a structurally noncanonical completed lifecycle event');
+$canonicalLessons = new \Delnavazan\Platform\Core\Infrastructure\Repository\CanonicalLessonAuthorityRepository();
+dzn_oc_assert(!\Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityValidator::valid($canonicalLessons->lesson($od8Lesson), $canonicalLessons->events($od8Lesson)), 'Lesson authority accepted a structurally noncanonical injected completion event');
+foreach (array(
+    'outstandingForTerm' => static fn() => $obligations->outstandingForTerm($injectionTerm),
+    'outstandingCountForTerm' => static fn() => $obligations->outstandingCountForTerm($injectionTerm),
+    'outstandingForEnrolment' => static fn() => $obligations->outstandingForEnrolment($injectionEnrolment),
+) as $injectionSeam => $injectionRead) {
+    $injectionRejected = null;
+    try { $injectionRead(); } catch (Throwable $exception) { $injectionRejected = $exception->getMessage(); }
+    dzn_oc_assert($injectionRejected === 'canonical_obligation_integrity_conflict', 'Injected noncanonical completion event was not rejected by ' . $injectionSeam . ' (observed: ' . var_export($injectionRejected, true) . ')');
+}
+dzn_oc_assert($wpdb->query("DELETE FROM {$p}canonical_lesson_lifecycle_events WHERE uid='{$injectedUid}'") === 1, 'Failed to remove the injected lifecycle event');
+dzn_oc_assert(count($obligations->outstandingForTerm($injectionTerm)) === $injectionBaseline && $obligations->outstandingCountForTerm($injectionTerm) === $injectionBaseline, 'Repaired Lesson lifecycle did not restore the obligation aggregate');
+$cases += 3;
+
+echo "corruption_cases=" . $cases . "\nobligation_aggregate_cases=" . (count($identityCases) + count($simpleCases) + count($nonDeliveryCases) + 9) . "\nod8_completion_lineage_cases=4\nreferenced_lifecycle_event_cases=3\ncorrupted_delivery_fail_closed=pass\nobligation_aggregate_fail_closed=pass\ncanonical_lifecycle_reuse_enforced=pass\nprovider_evidence_not_authority=pass\nsupersession_lineage_enforced=pass\ncommand_evidence_enforced=pass\nPhase 2A.2-O corruption runtime passed\n";
