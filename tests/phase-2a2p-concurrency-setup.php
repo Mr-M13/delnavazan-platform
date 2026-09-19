@@ -91,6 +91,34 @@ switch($mode){
         $state['keys']=array('w1'=>$crossKey,'w2'=>$crossKey);
         $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>null);
         break;
+    case 'command_key_exact':
+    case 'command_key_changed_payload':
+    case 'command_key_changed_event':
+    case 'command_key_changed_account':
+    case 'command_key_changed_interval':
+    case 'command_key_changed_observed':
+    case 'command_key_changed_provenance':
+        $altAccount='race-acct-alt-'.$suffix;
+        $identity->record(array('provider_code'=>'google_meet','provider_account_key'=>$altAccount,'participant_role'=>'teacher','participant_id'=>(int)$first['teacher_id'],'state'=>'verified','provenance_reference'=>'race-prov-alt','evidence_reference'=>'race-ref-alt'),$key('map-alt'));
+        $sharedKey=$key('command-'.$mode);
+        $state['actions']=array('w1'=>array('action'=>'ingest','target'=>'first'),'w2'=>array('action'=>'ingest','target'=>'first'));
+        $state['accounts']=array('w1'=>$sharedAccount,'w2'=>$sharedAccount);
+        $state['references']=array('w1'=>'race-shared','w2'=>'race-shared');
+        $state['event_keys']=array('w1'=>'race-cmd-event-'.$suffix,'w2'=>'race-cmd-event-'.$suffix);
+        $state['payload_keys']=array('w1'=>'race-cmd-payload-'.$suffix,'w2'=>'race-cmd-payload-'.$suffix);
+        $state['keys']=array('w1'=>$sharedKey,'w2'=>$sharedKey);
+        $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>null);
+        $state['overrides']=array('w2'=>match($mode){
+            'command_key_exact'=>array(),
+            'command_key_changed_payload'=>array('provider_payload_key'=>'race-cmd-payload-changed-'.$suffix),
+            'command_key_changed_event'=>array('provider_event_key'=>'race-cmd-event-changed-'.$suffix),
+            'command_key_changed_account'=>array('provider_account_key'=>$altAccount),
+            'command_key_changed_interval'=>array('leave_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($first['start'].' UTC')+90)),
+            'command_key_changed_observed'=>array('observed_at'=>gmdate('Y-m-d H:i:s',strtotime($state['at'].' UTC')+1)),
+            'command_key_changed_provenance'=>array('provenance_reference'=>'prov-race-shared-alt'),
+            default=>array(),
+        });
+        break;
     case 'unrelated_lessons':
         $state['actions']=array('w1'=>array('action'=>'claim','target'=>'first'),'w2'=>array('action'=>'claim','target'=>'second'));
         $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>null);

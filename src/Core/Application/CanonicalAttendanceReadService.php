@@ -40,7 +40,10 @@ final class CanonicalAttendanceReadService {
         if(!$version||!CanonicalLessonScheduleValidator::validForLesson($lessonId,$this->schedules,$this->lessons))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
         $versions=$this->schedules->versionsForLesson($lessonId);
         $latest=$versions?$versions[count($versions)-1]:null;
-        $scheduleVersionCurrent=$latest!==null&&(int)$latest->id===$scheduleVersionId;
+        // The protected current-attendance read must fail closed unless the case is bound to the
+        // exact CURRENT schedule version for this Lesson, exactly like reassessment, adjudication and
+        // settlement. A stale historical aggregate is retained but never presented as current truth.
+        if(!$latest||(int)$latest->id!==(int)$case->schedule_version_id)throw new \InvalidArgumentException('schedule_version_conflict');
         $policy=$this->repository->policy((int)$case->cutover_policy_id);
         $evidence=$this->repository->evidenceForCase((int)$case->id);
         $decisions=$this->repository->decisionsForCase((int)$case->id);
@@ -107,7 +110,7 @@ final class CanonicalAttendanceReadService {
                 'lesson_id'=>$lessonId,'lesson_state'=>(string)$lesson->lifecycle_state,
                 'enrolment_id'=>(int)$case->enrolment_id,'enrolment_state'=>(string)$this->enrolmentState((int)$case->enrolment_id),
                 'term_id'=>(int)$case->term_id,'term_state'=>$term,
-                'schedule_version_id'=>$scheduleVersionId,'schedule_version_current'=>$scheduleVersionCurrent,
+                'schedule_version_id'=>$scheduleVersionId,
                 'occurrence_start_utc'=>(string)$case->occurrence_start_utc,'occurrence_end_utc'=>(string)$case->occurrence_end_utc,
                 'qualifying_window_end_utc'=>(string)$case->window_end_utc,
                 'expected_student_id'=>(int)$case->student_id,'expected_teacher_id'=>(int)$case->teacher_id,

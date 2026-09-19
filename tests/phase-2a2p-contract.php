@@ -86,20 +86,28 @@ if(!str_contains($intake,'recordSettlementResult'))throw new RuntimeException('S
 // P-7: prospective cutover authority.
 if(!str_contains($intake,'cutover_instant_not_prospective'))throw new RuntimeException('A cutover instant must be prospective at activation');
 if(!str_contains($repo,'applicablePolicy')||!str_contains($repo,'cutover_utc<='))throw new RuntimeException('Cutover applicability must be deterministic from the occurrence instant');
-if(str_contains($repo,'canonical_attendance_cutover_policies ORDER BY id DESC LIMIT 1'))throw new RuntimeException('Cutover policy must not be selected by highest database ID alone');
+if(str_contains($repo,'cutover_utc DESC,id DESC')||str_contains($repo,'cutover_utc DESC, id DESC'))throw new RuntimeException('Cutover policy must never use the database insertion id as an authority tie-breaker');
+if(!str_contains($repo,'policyForInstant')||!str_contains($repo,'cutover_policy_ambiguous'))throw new RuntimeException('Cutover applicability must be unambiguous and fail closed on duplicate instants');
+if(!str_contains($intake,'duplicate_cutover_instant'))throw new RuntimeException('A second policy at the same cutover instant must be rejected');
+if(!str_contains($migration,'UNIQUE KEY cutover_instant(cutover_utc)')&&!str_contains($migration,"'cutover_instant',true"))throw new RuntimeException('Migration 023 must enforce one immutable cutover policy per instant');
 if(!str_contains($validator,"'policy'")&&!str_contains($validator,'$policy'))throw new RuntimeException('The validator must validate the cutover policy binding');
 foreach(array('->threshold_seconds','->pre_grace_seconds','->post_grace_seconds','->cutover_utc')as$n)if(!str_contains($validator,$n))throw new RuntimeException('The validator must freeze the cutover policy constants: '.$n);
 if(!str_contains($validator,'rule_version')||!str_contains($validator,'CanonicalAttendanceRule::RULE_VERSION'))throw new RuntimeException('The validator must validate the case rule version');
 
-// P-8: duplicate-key recovery always compares the expected payload.
-if(substr_count($intake,'replayCommand($winner,null')>0&&!str_contains($intake,'replayIngestCommand'))throw new RuntimeException('Duplicate command recovery must compare the expected payload, never assume it');
+// P-8: duplicate-key recovery always compares the expected payload, with no null-digest bypass.
+if(str_contains($intake,'replayCommand($winner,null'))throw new RuntimeException('Duplicate command recovery must never pass a null expected payload/context digest');
 foreach(array('replayIngestCommand','replayClaimCommand','replayAdjudicationCommand','replayReassessCommand')as$n)if(!str_contains($intake,$n))throw new RuntimeException('Duplicate command recovery is missing: '.$n);
-if(str_contains($intake,"return \$this->replayCommand(\$winner,null,'submit_claim');"))throw new RuntimeException('Claim replay must compare the expected payload');
-if(str_contains($intake,"return \$this->replayCommand(\$winner,null,'adjudicate');"))throw new RuntimeException('Adjudication replay must compare the expected payload');
-if(str_contains($intake,"return \$this->replayCommand(\$winner,null,'reassess');"))throw new RuntimeException('Reassessment replay must compare the expected payload');
+foreach(array('replayIngestCommand','replayClaimCommand')as$fn){
+    $start=strpos($intake,'private function '.$fn);
+    if($start===false)throw new RuntimeException('Missing duplicate-command recovery helper: '.$fn);
+    $end=strpos($intake,'private function ',$start+1);
+    $body=$end===false?substr($intake,$start):substr($intake,$start,$end-$start);
+    if(!str_contains($body,'CanonicalAttendanceIdempotency::payload('))throw new RuntimeException($fn.' must reconstruct the complete incoming payload digest');
+    if(!str_contains($body,"replayCommand(\$winner,\$expected"))throw new RuntimeException($fn.' must compare the reconstructed expected digest through the canonical replay path');
+}
 
 // P-10 + protected read: identity, policy and decision-chain validation before presenting review data.
-foreach(array("const CAPABILITY='dzn_view_canonical_attendance_review'",'CanonicalLessonDeliveryValidator::effective','CanonicalAcademyObligationRepository','canonical_attendance_integrity_conflict','evidence_set_digest','schedule_version_current','cutover','conflict_count','recorded_overlap_seconds')as$n)if(!str_contains($read,$n))throw new RuntimeException('Missing Phase P protected read contract: '.$n);
+foreach(array("const CAPABILITY='dzn_view_canonical_attendance_review'",'CanonicalLessonDeliveryValidator::effective','CanonicalAcademyObligationRepository','canonical_attendance_integrity_conflict','evidence_set_digest','schedule_version_conflict','cutover','conflict_count','recorded_overlap_seconds')as$n)if(!str_contains($read,$n))throw new RuntimeException('Missing Phase P protected read contract: '.$n);
 if(str_contains($read,'INSERT INTO')||str_contains($read,'UPDATE '))throw new RuntimeException('The protected read must never mutate state');
 if(str_contains($read,'->begin()'))throw new RuntimeException('The protected read must not open a write transaction or take write locks');
 if(stripos($read,'provider_payload')!==false&&!str_contains($read,'No raw provider payload'))throw new RuntimeException('Protected read must never expose raw provider payloads');

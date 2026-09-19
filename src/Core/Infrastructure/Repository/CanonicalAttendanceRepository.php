@@ -98,11 +98,29 @@ final class CanonicalAttendanceRepository {
     public function policy(int $policyId,bool $lock=false):?object{
         return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE id=%d".($lock?' FOR UPDATE':''),$policyId);
     }
+    /** One immutable cutover policy per exact cutover instant. */
+    public function policyForInstant(string $cutoverUtc,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE cutover_utc=%s".($lock?' FOR UPDATE':''),$cutoverUtc);
+    }
+    /** @return array<int,object> policies whose cutover has passed for this occurrence, newest cutover first. */
+    public function policiesAtOrBefore(string $occurrenceStartUtc,bool $lock=false):array{
+        global $wpdb;$suffix=$lock?' FOR UPDATE':'';
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE cutover_utc<=%s ORDER BY cutover_utc DESC{$suffix}",$occurrenceStartUtc))?:array();
+    }
     public function applicablePolicy(string $occurrenceStartUtc,bool $lock=false):?object{
-        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE cutover_utc<=%s ORDER BY cutover_utc DESC,id DESC LIMIT 1".($lock?' FOR UPDATE':''),$occurrenceStartUtc);
+        $rows=$this->policiesAtOrBefore($occurrenceStartUtc,$lock);
+        if(!$rows)return null;
+        // No database-insertion-id tie-breaker is ever permitted: if corrupted/legacy data contains
+        // several policies at the same newest cutover instant, applicability is ambiguous and must
+        // fail closed rather than silently pick one by id.
+        $max=(string)$rows[0]->cutover_utc;
+        $matching=array();
+        foreach($rows as$row)if((string)$row->cutover_utc===$max)$matching[]=$row;
+        if(count($matching)>1)throw new \RuntimeException('cutover_policy_ambiguous');
+        return $matching[0];
     }
     public function latestPolicy():?object{
-        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies ORDER BY cutover_utc DESC,id DESC LIMIT 1");
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies ORDER BY cutover_utc DESC LIMIT 1");
     }
     public function insertCutoverPolicy(array $data):int{return $this->insert('canonical_attendance_cutover_policies',$data,'Canonical attendance cutover policy persistence failed');}
 
@@ -145,7 +163,7 @@ final class CanonicalAttendanceRepository {
     public function duplicate(\Throwable $e):?string{
         if(!preg_match("/Duplicate entry .* for key ['`](?:[^'`.]+\\.)?([^'`]+)['`]/i",$e->getMessage(),$m))return null;
         $key=strtolower($m[1]);
-        return in_array($key,array('command_key_digest','provider_event_key_digest','case_occurrence','decision_sequence','uid'),true)?$key:null;
+        return in_array($key,array('command_key_digest','provider_event_key_digest','case_occurrence','decision_sequence','uid','cutover_instant','provider_identity'),true)?$key:null;
     }
     /** Read-only transaction-state diagnostic: zero means no transaction is open on this connection. */
     public function openTransactions():int{

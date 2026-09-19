@@ -32,13 +32,15 @@ try{
             $eventKey=(string)($state['event_keys'][$worker]??('race-event-'.$worker));
             $payloadKey=(string)($state['payload_keys'][$worker]??('race-payload-'.$worker));
             $accountKey=(string)($state['accounts'][$worker]??('race-acct-'.$worker));
-            return $intake->ingestProviderEvidence((int)$occurrence['lesson_id'],(int)$occurrence['version_id'],array(
+            $input=array(
                 'provider_code'=>'google_meet','provider_account_key'=>$accountKey,
                 'provider_event_key'=>$eventKey,'provider_payload_key'=>$payloadKey,
                 'participant_role'=>'teacher',
                 'join_at_utc'=>$occurrence['start'],'leave_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($occurrence['start'].' UTC')+60),
                 'observed_at'=>$at,'provenance_reference'=>'prov-'.$reference,'evidence_reference'=>'ref-'.$reference,
-            ),$key);
+            );
+            if(isset($state['overrides'][$worker])&&is_array($state['overrides'][$worker]))$input=array_merge($input,$state['overrides'][$worker]);
+            return $intake->ingestProviderEvidence((int)$occurrence['lesson_id'],(int)$occurrence['version_id'],$input,$key);
         })(),
         'claim'=>$intake->submitClaim((int)$occurrence['lesson_id'],(int)$occurrence['version_id'],array('claim_kind'=>'review_request','reason_code'=>'race_claim','observed_at'=>$at,'evidence_reference'=>'claim-'.$reference),$key),
         'adjudicate'=>$intake->adjudicate((int)$state['case_id'],array('adjudication'=>(string)($entry['adjudication']??'record_no_change'),'expected_case_version'=>(int)($state['case_version']??0)),$key),

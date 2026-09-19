@@ -76,6 +76,7 @@ $failClosed('nullable command digest',fn()=>$wpdb->query("ALTER TABLE {$p}canoni
 $failClosed('non-transactional intake table',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_decisions ENGINE=MyISAM"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_decisions ENGINE=InnoDB"));
 $failClosed('provider-specific column',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_evidence ADD COLUMN google_meet_code varchar(64) NULL"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_evidence DROP COLUMN google_meet_code"));
 $failClosed('nullable cutover-policy binding',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_cases MODIFY cutover_policy_id bigint unsigned NULL"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_cases MODIFY cutover_policy_id bigint unsigned NOT NULL"));
+$failClosed('non-unique cutover instant',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_cutover_policies DROP INDEX cutover_instant"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_attendance_cutover_policies ADD UNIQUE KEY cutover_instant(cutover_utc)"));
 
 // 5. Retained-023 / stale-version activation path.
 dzn_pm_assert(in_array('023_canonical_attendance_intake_authority',(array)get_option('dzn_platform_completed_migrations',array()),true),'Retained-023 regression requires migration 023 to stay recorded');
@@ -90,4 +91,4 @@ Migrator::maybe_upgrade();
 dzn_pm_assert((string)get_option('dzn_platform_schema_version')===(string)DZN_PLATFORM_SCHEMA_VERSION,'Repaired retained-023 storage did not recover');
 dzn_pm_assert(count(array_keys((array)get_option('dzn_platform_completed_migrations',array()),'023_canonical_attendance_intake_authority',true))===1,'Recovery must keep migration 023 recorded exactly once');
 
-echo "fresh_schema_23=pass\nschema_22_to_23_upgrade=pass\nrepeat_migration=pass\npartial_capability_repair=pass\nno_backfill=pass\nno_production_cutover=pass\nprovider_neutral_storage=pass\nmalformed_storage_fail_closed=pass cases=8\nretained_023_preactivation_fail_closed=pass\nPhase 2A.2-P migration runtime passed\n";
+echo "fresh_schema_23=pass\nschema_22_to_23_upgrade=pass\nrepeat_migration=pass\npartial_capability_repair=pass\nno_backfill=pass\nno_production_cutover=pass\nprovider_neutral_storage=pass\ncutover_instant_uniqueness=pass\nmalformed_storage_fail_closed=pass cases=9\nretained_023_preactivation_fail_closed=pass\nPhase 2A.2-P migration runtime passed\n";

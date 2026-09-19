@@ -67,6 +67,9 @@ final class CanonicalAttendanceIntakeService {
         $this->repository->begin();
         try{
             if($winner=$this->repository->command($digest)){ $this->repository->commit(); return $this->replayCommand($winner,$payload,'record_cutover_policy'); }
+            // One immutable policy per cutover instant: a different command identity attempting the
+            // same instant is a genuine authority conflict, never a silent database-id tie-break.
+            if($this->repository->policyForInstant($cutoverUtc,true))throw new \InvalidArgumentException('duplicate_cutover_instant');
             $now=gmdate('Y-m-d H:i:s');
             $id=$this->repository->insertCutoverPolicy(array(
                 'uid'=>Identifier::uid(),'policy_version'=>self::POLICY_VERSION,'cutover_utc'=>$cutoverUtc,
@@ -82,6 +85,7 @@ final class CanonicalAttendanceIntakeService {
         }catch(\Throwable$e){
             $this->repository->rollback();
             if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayCommand($winner,$payload,'record_cutover_policy');
+            if($this->repository->duplicate($e)==='cutover_instant')throw new \InvalidArgumentException('duplicate_cutover_instant');
             throw $e;
         }
     }
@@ -127,7 +131,7 @@ final class CanonicalAttendanceIntakeService {
             return array('case_id'=>(int)$case->id,'evidence_id'=>$evidenceId,'assessment'=>$assessment,'settlement'=>$settlement,'created'=>$created);
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayIngestCommand($winner,$lessonId,$scheduleVersionId);
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayIngestCommand($winner,$lessonId,$scheduleVersionId,$intent);
             throw $e;
         }
     }
@@ -704,12 +708,13 @@ final class CanonicalAttendanceIntakeService {
     // Duplicate-key recovery: the expected payload and context are always compared, never assumed.
     // ---------------------------------------------------------------------
 
-    private function replayIngestCommand(object $winner,int $lessonId,int $scheduleVersionId):array{
+    private function replayIngestCommand(object $winner,int $lessonId,int $scheduleVersionId,array $intent):array{
         if((string)$winner->operation!=='ingest_provider_evidence'||$winner->case_id===null)throw new IdempotencyConflictException('Idempotency conflict');
         if((int)$winner->lesson_id!==$lessonId||(int)($winner->schedule_version_id??0)!==$scheduleVersionId)throw new IdempotencyConflictException('Idempotency conflict');
         $case=$this->repository->caseById((int)$winner->case_id);
         if(!$case)throw new IdempotencyConflictException('Idempotency conflict');
-        return $this->replayCommand($winner,null,'ingest_provider_evidence');
+        $expected=CanonicalAttendanceIdempotency::payload($this->evidenceFacts($case,$intent));
+        return $this->replayCommand($winner,$expected,'ingest_provider_evidence');
     }
 
     private function replayClaimCommand(object $winner,int $lessonId,int $scheduleVersionId,array $intent):array{
@@ -717,14 +722,8 @@ final class CanonicalAttendanceIntakeService {
         if((int)$winner->lesson_id!==$lessonId||(int)($winner->schedule_version_id??0)!==$scheduleVersionId)throw new IdempotencyConflictException('Idempotency conflict');
         $case=$this->repository->caseById((int)$winner->case_id);
         if(!$case)throw new IdempotencyConflictException('Idempotency conflict');
-        return array(
-            'case_id'=>(int)$case->id,'operation'=>'submit_claim','idempotent'=>true,
-            'evidence_id'=>$winner->result_evidence_id===null?null:(int)$winner->result_evidence_id,
-            'decision_id'=>$winner->result_decision_id===null?null:(int)$winner->result_decision_id,
-            'state'=>(string)$winner->result_state,
-            'payload_digest'=>(string)$winner->command_payload_digest,
-            'expected_payload_digest'=>CanonicalAttendanceIdempotency::payload($this->claimFacts($case,$intent)),
-        );
+        $expected=CanonicalAttendanceIdempotency::payload($this->claimFacts($case,$intent));
+        return $this->replayCommand($winner,$expected,'submit_claim');
     }
 
     private function replayAdjudicationCommand(object $winner,int $caseId,string $outcome,int $expected):array{

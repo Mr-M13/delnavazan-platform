@@ -456,6 +456,27 @@ dzn_p_assert((int)$laterPolicy['policy_id']!==$settleCaseId,'a later policy must
 $unchanged=$requireCase((int)$settle['lesson_id'],(int)$settle['version_id']);
 dzn_p_assert((int)$unchanged->cutover_policy_id===$settleCaseId,'a later policy must never reinterpret an existing case');
 dzn_p_assert($read->forOccurrence((int)$settle['lesson_id'],(int)$settle['version_id'])['cutover']['policy_id']===$settleCaseId,'a settled occurrence must keep its original policy binding');
+// R2: one immutable policy per cutover instant; exact replay stays idempotent; a second policy at the
+// same instant fails deterministically and applicability never uses the database insertion id.
+$duplicateInstant=gmdate('Y-m-d H:i:s',strtotime('+10 seconds'));
+$duplicateKey=dzn_p_key('cutover-dup');
+$firstCutover=$intake->recordCutoverPolicy($duplicateInstant,$duplicateKey);
+dzn_p_assert((int)$firstCutover['policy_id']>0,'the first policy at a prospective cutover instant must succeed');
+$replayedCutover=$intake->recordCutoverPolicy($duplicateInstant,$duplicateKey);
+dzn_p_assert(!empty($replayedCutover['idempotent']),'the exact cutover-policy replay must succeed idempotently');
+dzn_p_rejected(fn()=>$intake->recordCutoverPolicy($duplicateInstant,dzn_p_key('cutover-dup-b')),'duplicate_cutover_instant','a second distinct policy at the same cutover instant');
+// D/E: even corrupted/legacy data with duplicate maximum cutover instants must fail closed, never
+// silently select by database id.
+$maxInstant=(string)$wpdb->get_var("SELECT MAX(cutover_utc) FROM {$p}canonical_attendance_cutover_policies");
+dzn_p_assert($maxInstant!=='','a cutover policy fixture is required for the ambiguity regression');
+dzn_p_assert($wpdb->query("ALTER TABLE {$p}canonical_attendance_cutover_policies DROP INDEX cutover_instant")!==false,'Failed to simulate a non-unique cutover instant');
+$duplicateUid=\Delnavazan\Platform\Core\Support\Identifier::uid();
+dzn_p_assert($wpdb->query($wpdb->prepare("INSERT INTO {$p}canonical_attendance_cutover_policies (uid,policy_version,cutover_utc,rule_version,threshold_seconds,pre_grace_seconds,post_grace_seconds,created_at,created_by) VALUES (%s,'canonical_attendance_cutover_v1',%s,'canonical_attendance_overlap_v1',1200,0,900,%s,1)",$duplicateUid,$maxInstant,gmdate('Y-m-d H:i:s')))===1,'Failed to inject a duplicate cutover instant');
+$ambiguous=null;
+try{(new \Delnavazan\Platform\Core\Infrastructure\Repository\CanonicalAttendanceRepository())->applicablePolicy(gmdate('Y-m-d H:i:s',strtotime($maxInstant.' UTC')+1));}catch(\Throwable$e){$ambiguous=$e->getMessage();}
+dzn_p_assert($ambiguous==='cutover_policy_ambiguous','duplicate maximum cutover instants must be rejected as ambiguous, not decided by id');
+dzn_p_assert($wpdb->query($wpdb->prepare("DELETE FROM {$p}canonical_attendance_cutover_policies WHERE uid=%s",$duplicateUid))===1,'Failed to remove the injected duplicate cutover instant');
+dzn_p_assert($wpdb->query("ALTER TABLE {$p}canonical_attendance_cutover_policies ADD UNIQUE KEY cutover_instant(cutover_utc)")!==false,'Failed to restore the cutover-instant uniqueness');
 
 // ---------------------------------------------------------------------------
 // 11. P-8 duplicate command recovery: expected payload and context are always compared.
@@ -471,9 +492,21 @@ dzn_p_assert(!empty($dupReplay['idempotent'])&&(int)$dupReplay['evidence_id']===
 $dupCross=false;
 try{$ingest($dupB,'teacher',0,600,'dup-b-teacher','acct-dup-b-teacher','event-dup-b-'.$runSuffix,'payload-dup-b-'.$runSuffix,$dupKey);}catch(\Throwable$e){$dupCross=$e->getMessage()==='Idempotency conflict';}
 dzn_p_assert($dupCross,'the same command key in a different Lesson context must fail closed');
-$dupChanged=false;
-try{$ingest($dupA,'teacher',0,900,'dup-a-teacher','acct-dup-a-teacher','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix.'-changed',$dupKey);}catch(\Throwable$e){$dupChanged=$e->getMessage()==='Idempotency conflict';}
-dzn_p_assert($dupChanged,'the same command key with a changed payload must fail closed');
+// The same command key on the SAME Lesson and schedule version must compare the complete incoming
+// context; a changed payload, event, account, interval, observation or provenance must never be
+// acknowledged as an exact replay.
+$dupVariants=array(
+    'changed payload'=>array('teacher',0,600,'dup-a-teacher','acct-dup-a-teacher','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix.'-changed',$dupKey,$dupObserved),
+    'changed event'=>array('teacher',0,600,'dup-a-teacher','acct-dup-a-teacher','event-dup-'.$runSuffix.'-changed','payload-dup-'.$runSuffix,$dupKey,$dupObserved),
+    'changed account'=>array('teacher',0,600,'dup-a-teacher','acct-dup-a-teacher-alt','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix,$dupKey,$dupObserved),
+    'changed interval'=>array('teacher',0,900,'dup-a-teacher','acct-dup-a-teacher','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix,$dupKey,$dupObserved),
+    'changed observation'=>array('teacher',0,600,'dup-a-teacher','acct-dup-a-teacher','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix,$dupKey,gmdate('Y-m-d H:i:s',strtotime($dupObserved.' UTC')-1)),
+    'changed provenance'=>array('teacher',0,600,'dup-a-teacher-alt','acct-dup-a-teacher','event-dup-'.$runSuffix,'payload-dup-'.$runSuffix,$dupKey,$dupObserved),
+);
+foreach($dupVariants as$variantLabel=>$variant){
+    $caught=null;try{$ingest($dupA,...$variant);}catch(\Throwable$e){$caught=$e->getMessage();}
+    dzn_p_assert($caught==='Idempotency conflict','the same command key on the same occurrence with a '.$variantLabel.' must fail closed');
+}
 $dupOperation=false;
 try{$intake->submitClaim((int)$dupA['lesson_id'],(int)$dupA['version_id'],array('claim_kind'=>'review_request','reason_code'=>'dup_operation','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'dup-operation'),$dupKey);}catch(\Throwable$e){$dupOperation=$e->getMessage()==='Idempotency conflict';}
 dzn_p_assert($dupOperation,'the same command key reused for another operation must fail closed');
@@ -507,8 +540,10 @@ dzn_p_assert((int)$rescheduled['schedule_version_id']!==(int)$staleOccurrence['v
 dzn_p_rejected(fn()=>$intake->adjudicate((int)$staleScheduleCase->id,array('adjudication'=>'record_no_change','expected_case_version'=>(int)$staleScheduleCase->case_version),dzn_p_key('stale-adjudicate')),'schedule_version_conflict','adjudication of a superseded schedule version');
 dzn_p_rejected(fn()=>$intake->reassess((int)$staleScheduleCase->id,array('expected_case_version'=>(int)$staleScheduleCase->case_version),dzn_p_key('stale-reassess')),'schedule_version_conflict','reassessment of a superseded schedule version');
 dzn_p_rejected(fn()=>$settlement->settleDelivered((int)$staleScheduleCase->id,false),'schedule_version_conflict','settlement of a superseded schedule version');
-$staleRead=$read->forOccurrence((int)$staleOccurrence['lesson_id'],(int)$staleOccurrence['version_id']);
-dzn_p_assert($staleRead['context']['schedule_version_current']===false,'a superseded schedule version must be reported explicitly');
+// R3: the protected current-attendance read must fail closed on a superseded schedule version even
+// though the old version row still exists durably.
+dzn_p_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE id=%d",(int)$staleOccurrence['version_id']))===1,'the superseded schedule version must remain durable for history');
+dzn_p_rejected(fn()=>$read->forOccurrence((int)$staleOccurrence['lesson_id'],(int)$staleOccurrence['version_id']),'schedule_version_conflict','the protected read of a superseded schedule version');
 
 // ---------------------------------------------------------------------------
 // 13. P-9 exact cutover-policy replay must close its transaction and retain no stale lock.

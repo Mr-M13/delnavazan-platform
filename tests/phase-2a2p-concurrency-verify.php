@@ -36,6 +36,16 @@ switch($mode){
         dzn_pv_assert($providerCount($first)===0||$providerCount($second)===0,'a losing cross-Lesson command must never write evidence into the other Lesson');
         dzn_pv_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}canonical_attendance_commands")>=1,'the winning command must be durably recorded');
         break;
+    case 'command_key_exact':
+    case 'command_key_changed_payload':
+    case 'command_key_changed_event':
+    case 'command_key_changed_account':
+    case 'command_key_changed_interval':
+    case 'command_key_changed_observed':
+    case 'command_key_changed_provenance':
+        dzn_pv_assert($providerCount($first)===1,'a same-Lesson/schedule duplicate command must never add a second evidence row');
+        dzn_pv_assert($outcome($first)===0,'a same-Lesson/schedule duplicate command must not create canonical truth');
+        break;
     case 'unrelated_lessons':
         dzn_pv_assert($evidenceCount($first)===1&&$evidenceCount($second)===1,'unrelated Lessons must each record exactly one claim');
         break;
