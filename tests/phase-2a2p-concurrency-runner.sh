@@ -5,7 +5,7 @@ set -eu
 [ "${DZN_PHASE_2A2P_RUNTIME_TEST:-}" = concurrency ] || exit 1
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 gate=$DZN_PHASE_2A2P_GATE_DIR
-modes='same_event_same_payload same_event_changed_payload claim_vs_adjudication adjudication_vs_adjudication unrelated_lessons'
+modes='same_event_same_payload same_event_changed_payload claim_vs_adjudication adjudication_vs_adjudication command_key_cross_lesson unrelated_lessons'
 if [ -n "${DZN_PHASE_2A2P_MODE:-}" ]; then modes=$DZN_PHASE_2A2P_MODE; fi
 wp(){ "$DZN_PHASE_2A2P_WP_CLI" --path="$DZN_PHASE_2A2P_WP_PATH" --user="$DZN_PHASE_2A2P_WP_USER" eval-file "$1"; }
 worker(){ env "DZN_PHASE_2A2P_WORKER=$1" "$DZN_PHASE_2A2P_WP_CLI" --path="$DZN_PHASE_2A2P_WP_PATH" --user="$DZN_PHASE_2A2P_WP_USER" eval-file "$root/tests/phase-2a2p-concurrency-worker.php"; }
@@ -20,8 +20,11 @@ expect(){
   case $mode in
     same_event_same_payload) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
     same_event_changed_payload) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'Idempotency conflict' ;;
-    claim_vs_adjudication) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
-    adjudication_vs_adjudication) [ $(( $(oks "$gate/w1.result") + $(oks "$gate/w2.result") )) -ge 1 ] || return 1 ;;
+    # A claim that lands first makes a competing adjudication stale: exactly one canonical winner.
+    claim_vs_adjudication) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'stale_case_version' ;;
+    adjudication_vs_adjudication) { [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'stale_case_version'; } || { [ "$(oks "$gate/w2.result")" = 1 ] && rejected "$gate/w1.result" && has "$gate/w1.result" 'stale_case_version'; } ;;
+    # Worker 1 is gated before it writes, so worker 2 wins: exactly one Lesson may hold the command.
+    command_key_cross_lesson) [ "$(oks "$gate/w2.result")" = 1 ] && rejected "$gate/w1.result" && has "$gate/w1.result" 'Idempotency conflict' ;;
     unrelated_lessons) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
     *) return 1 ;;
   esac

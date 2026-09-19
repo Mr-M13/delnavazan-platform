@@ -21,13 +21,20 @@ switch($mode){
         break;
     case 'claim_vs_adjudication':
         $case=$caseFor($first);
-        dzn_pv_assert($case&&in_array((string)$case->state,array('closed_no_change','adjudicated'),true),'claim/adjudication race must converge on an adjudicated case');
+        dzn_pv_assert($case&&in_array((string)$case->state,array('ready_for_review','closed_no_change','adjudicated'),true),'the concurrent claim must leave a reviewable case');
         dzn_pv_assert($evidenceCount($first)>=1,'claim evidence must be retained after adjudication');
+        dzn_pv_assert($outcome($first)===0,'a stale adjudication must never create canonical truth');
+        dzn_pv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_decisions WHERE case_id=%d AND decision_kind='admin_adjudication'",(int)$case->id))===0,'a stale adjudication must never record an adjudication decision');
         break;
     case 'adjudication_vs_adjudication':
         $case=$caseFor($first);
         dzn_pv_assert($case&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_decisions WHERE case_id=%d AND decision_kind='admin_adjudication'",(int)$case->id))>=1,'concurrent adjudication must record a decision');
         dzn_pv_assert($outcome($first)===0,'record_no_change adjudication must not create canonical truth');
+        break;
+    case 'command_key_cross_lesson':
+        dzn_pv_assert($providerCount($first)+$providerCount($second)===1,'exactly one command key reuse may write provider evidence');
+        dzn_pv_assert($providerCount($first)===0||$providerCount($second)===0,'a losing cross-Lesson command must never write evidence into the other Lesson');
+        dzn_pv_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}canonical_attendance_commands")>=1,'the winning command must be durably recorded');
         break;
     case 'unrelated_lessons':
         dzn_pv_assert($evidenceCount($first)===1&&$evidenceCount($second)===1,'unrelated Lessons must each record exactly one claim');

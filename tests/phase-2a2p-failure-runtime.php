@@ -12,7 +12,8 @@ dzn_pf_assert(is_array($fixture)&&count($fixture['sources']??array())>=1,'Phase-
 $lessons=new CanonicalLessonAuthorityService();$enrolments=new CanonicalEnrolmentLifecycleService();$terms=new CanonicalTermAuthorityService();
 $assignments=new TeacherAssignmentService();$schedules=new CanonicalLessonScheduleService();$availability=new TeacherAvailabilityService();$accepting=new TeacherAcceptingStateService();
 $intake=new CanonicalAttendanceIntakeService();$read=new CanonicalAttendanceReadService();
-$enrolmentId=(int)$fixture['sources'][0]['enrolment_id'];
+$enrolmentId=(int)$wpdb->get_var("SELECT e.id FROM {$p}enrolments e WHERE e.lifecycle_state='authorised' AND NOT EXISTS(SELECT 1 FROM {$p}terms t WHERE t.enrolment_id=e.id AND t.record_model='canonical_enrolment_term_v1') ORDER BY e.id LIMIT 1");
+dzn_pf_assert($enrolmentId>0,'A disposable canonical Enrolment source is required');
 $enrolments->activate($enrolmentId,'authorised',dzn_pf_evidence('activate'),dzn_pf_key('activate'));
 $term=$terms->create($enrolmentId,null,null,dzn_pf_evidence('term'),dzn_pf_key('term'));
 $terms->activate((int)$term['term_id'],'authorised',dzn_pf_evidence('term-active'),dzn_pf_key('term-active'));
@@ -25,7 +26,7 @@ for($weekday=1;$weekday<=7;$weekday++)$availability->setRecurringRule(array('tea
 (new TeachingEligibilityService())->setEligibility(array('teacher_id'=>$teacher,'course_id'=>$course,'status'=>'active','reason_code'=>'synthetic_provision'));
 $moved=$assignments->replace($enrolmentId,$teacher,array('expected_assignment_id'=>(int)$assignment['assignment_id'],'route'=>'staff_attestation','evidence_channel'=>'phone','evidence_reference'=>'isolated-'.$teacher,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_pf_key('isolate'));
 $assignmentId=(int)$moved['assignment_id'];
-$intake->recordCutoverPolicy(gmdate('Y-m-d H:i:s',strtotime('-1 day')),dzn_pf_key('cutover'));
+$intake->recordCutoverPolicy(gmdate('Y-m-d H:i:s',strtotime('+2 seconds')),dzn_pf_key('cutover'));
 $occurrence=function(string $label) use($lessons,$schedules,$wpdb,$p,$term,$assignmentId):array{
     $lessonId=(int)$lessons->createStandard((int)$term['term_id'],$assignmentId,dzn_pf_evidence($label),dzn_pf_key($label))['lesson_id'];
     $wall=gmdate('Y-m-d H:i:s',strtotime('+30 minutes'));
@@ -92,11 +93,34 @@ dzn_pf_assert(!empty($retry['case_id']),'clean retry after decision failure did 
 $fourth=$occurrence('fail-replay');
 $intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'bootstrap','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'bootstrap'),dzn_pf_key('bootstrap'));
 $key=dzn_pf_key('replay');
-$firstPass=$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'same_intent','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'same-intent'),$key);
-$secondPass=$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'same_intent','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'same-intent'),$key);
+$replayObserved=gmdate('Y-m-d H:i:s');
+$firstPass=$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'same_intent','observed_at'=>$replayObserved,'evidence_reference'=>'same-intent'),$key);
+$secondPass=$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'same_intent','observed_at'=>$replayObserved,'evidence_reference'=>'same-intent'),$key);
 dzn_pf_assert(!empty($secondPass['idempotent'])&&(int)$secondPass['evidence_id']===(int)$firstPass['evidence_id'],'exact replay did not converge on the recorded evidence');
 $conflict=false;
-try{$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'delivery_claim','reason_code'=>'changed_intent','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'changed-intent'),$key);}catch(Throwable$e){$conflict=$e->getMessage()==='Idempotency conflict';}
+try{$intake->submitClaim((int)$fourth['lesson_id'],(int)$fourth['version_id'],array('claim_kind'=>'delivery_claim','reason_code'=>'changed_intent','observed_at'=>$replayObserved,'evidence_reference'=>'changed-intent'),$key);}catch(Throwable$e){$conflict=$e->getMessage()==='Idempotency conflict';}
 dzn_pf_assert($conflict,'changed payload under the same command key did not fail closed');
 
-echo "failure_injection_boundaries=3\nconvergence_replay=pass\nrollback_complete=pass\nno_false_success=pass\nPhase 2A.2-P failure runtime passed\n";
+// 5. P-4: a refused conflicting provider event must still leave a durable conflict receipt, and the
+//    original immutable evidence must survive untouched when recovery is attempted.
+$fifth=$occurrence('fail-conflict');
+$intake->submitClaim((int)$fifth['lesson_id'],(int)$fifth['version_id'],array('claim_kind'=>'review_request','reason_code'=>'bootstrap','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'bootstrap'),dzn_pf_key('bootstrap'));
+$identity=new Delnavazan\Platform\Core\Application\CanonicalAttendanceIdentityService();
+$lessonRow=$wpdb->get_row($wpdb->prepare("SELECT student_id,teacher_id FROM {$p}lessons WHERE id=%d",(int)$fifth['lesson_id']));
+$identity->record(array('provider_code'=>'google_meet','provider_account_key'=>'pf-account','participant_role'=>'teacher','participant_id'=>(int)$lessonRow->teacher_id,'state'=>'verified','provenance_reference'=>'pf','evidence_reference'=>'pf'),dzn_pf_key('pf-map'));
+$versionRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_lesson_schedule_versions WHERE id=%d",(int)$fifth['version_id']));
+$observed=gmdate('Y-m-d H:i:s');
+$providerIntent=array('provider_code'=>'google_meet','provider_account_key'=>'pf-account','provider_event_key'=>'pf-event','provider_payload_key'=>'pf-payload','participant_role'=>'teacher','join_at_utc'=>$versionRow->starts_at_utc,'leave_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($versionRow->starts_at_utc.' UTC')+60),'observed_at'=>$observed,'provenance_reference'=>'pf-prov','evidence_reference'=>'pf-ref');
+$intake->ingestProviderEvidence((int)$fifth['lesson_id'],(int)$fifth['version_id'],$providerIntent,dzn_pf_key('pf-ingest'));
+$conflictCase=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cases WHERE lesson_id=%d",(int)$fifth['lesson_id']));
+$evidenceBefore=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_evidence WHERE case_id=%d",(int)$conflictCase->id));
+$originalDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT provider_payload_digest FROM {$p}canonical_attendance_evidence WHERE case_id=%d AND provider_event_key_digest IS NOT NULL LIMIT 1",(int)$conflictCase->id));
+$changes=0;
+try{$intake->ingestProviderEvidence((int)$fifth['lesson_id'],(int)$fifth['version_id'],array_merge($providerIntent,array('provider_payload_key'=>'pf-payload-changed','leave_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($versionRow->starts_at_utc.' UTC')+120))),dzn_pf_key('pf-conflict'));}catch(Throwable$e){$changes=$e->getMessage()==='Idempotency conflict'?1:0;}
+dzn_pf_assert($changes===1,'a changed provider payload under one durable event key did not fail closed');
+dzn_pf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_evidence WHERE case_id=%d",(int)$conflictCase->id))===$evidenceBefore,'a refused conflict mutated immutable evidence');
+dzn_pf_assert($originalDigest===(string)$wpdb->get_var($wpdb->prepare("SELECT provider_payload_digest FROM {$p}canonical_attendance_evidence WHERE case_id=%d AND provider_event_key_digest IS NOT NULL LIMIT 1",(int)$conflictCase->id)),'a refused conflict overwrote the original provider payload digest');
+dzn_pf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_conflicts WHERE case_id=%d",(int)$conflictCase->id))>=1,'a refused conflict left no durable conflict receipt');
+dzn_pf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_delivery_outcomes WHERE lesson_id=%d",(int)$fifth['lesson_id']))===0,'a refused conflict created canonical truth');
+
+echo "failure_injection_boundaries=3\nconvergence_replay=pass\nrollback_complete=pass\nno_false_success=pass\ndurable_payload_conflict=pass\nPhase 2A.2-P failure runtime passed\n";

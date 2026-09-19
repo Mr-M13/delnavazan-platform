@@ -8,7 +8,9 @@ use Delnavazan\Platform\Core\Infrastructure\Repository\{CanonicalAcademyObligati
  *
  * It composes the existing validated canonical reads (Lesson lifecycle, schedule version, Phase-O
  * delivery truth, academy obligation) with Phase-P intake state. It exposes no raw provider payload,
- * and it fails closed when any composed canonical aggregate is corrupt.
+ * it never recomputes under current code and presents a corrupt stored case as trusted, and it fails
+ * closed when any composed canonical aggregate — identity registry, cutover policy binding, rule
+ * version, decision chain, anomaly classification or Phase-O result link — is corrupt.
  */
 final class CanonicalAttendanceReadService {
     private const CAPABILITY='dzn_view_canonical_attendance_review';
@@ -36,30 +38,43 @@ final class CanonicalAttendanceReadService {
         if(!$lesson||!CanonicalLessonAuthorityValidator::valid($lesson,$this->lessons->events($lessonId),$this->lessons))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
         $version=$this->schedules->version($scheduleVersionId);
         if(!$version||!CanonicalLessonScheduleValidator::validForLesson($lessonId,$this->schedules,$this->lessons))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+        $versions=$this->schedules->versionsForLesson($lessonId);
+        $latest=$versions?$versions[count($versions)-1]:null;
+        $scheduleVersionCurrent=$latest!==null&&(int)$latest->id===$scheduleVersionId;
+        $policy=$this->repository->policy((int)$case->cutover_policy_id);
         $evidence=$this->repository->evidenceForCase((int)$case->id);
         $decisions=$this->repository->decisionsForCase((int)$case->id);
         $anomalies=$this->repository->anomaliesForCase((int)$case->id);
+        $conflicts=$this->repository->conflictsForCase((int)$case->id);
         $effective=CanonicalLessonDeliveryValidator::effective($this->delivery->outcomesForLesson($lessonId));
         $outcomes=$this->delivery->outcomesForLesson($lessonId);
         $term=(string)$this->termState((int)$case->term_id);
-        $latest=$decisions?$decisions[count($decisions)-1]:null;
-        $provider=array();$claims=array();$intervals=array();$excluded=array();
-        $counts=array('provider_interval'=>0,'human_claim'=>0,'verified'=>0,'unverified'=>0,'resolved'=>0,'unresolved'=>0);
+        $latestDecision=$decisions?$decisions[count($decisions)-1]:null;
+        $provider=array();$claims=array();$intervals=array();
+        $counts=array('provider_interval'=>0,'human_claim'=>0,'verified'=>0,'unverified'=>0,'resolved'=>0,'unresolved'=>0,'ambiguous'=>0,'mismatch'=>0,'conflict'=>count($conflicts));
         foreach($evidence as$row){
             if((string)$row->evidence_kind==='provider_interval'){
                 $counts['provider_interval']++;
-                if((string)$row->verification_state==='verified')$counts['verified']++;else $counts['unverified']++;
-                if((string)$row->participant_identity_state==='resolved')$counts['resolved']++;else $counts['unresolved']++;
+                $identity=(string)$row->participant_identity_state;
+                $verification=(string)$row->verification_state;
+                if($verification==='verified')$counts['verified']++;else $counts['unverified']++;
+                if($identity==='resolved')$counts['resolved']++;elseif($identity==='ambiguous')$counts['ambiguous']++;else $counts['unresolved']++;
+                $role=(string)$row->participant_role;
+                $expected=$role==='teacher'?(int)$case->teacher_id:(int)$case->student_id;
+                $resolved=$role==='teacher'?(int)($row->resolved_teacher_id??0):(int)($row->resolved_student_id??0);
+                $mismatch=$verification==='verified'&&$identity==='resolved'&&$resolved!==$expected;
+                if($mismatch)$counts['mismatch']++;
                 $provider[]=array(
                     'evidence_id'=>(int)$row->id,'provider_code'=>(string)$row->provider_code,
-                    'participant_role'=>(string)$row->participant_role,
-                    'participant_identity_state'=>(string)$row->participant_identity_state,
-                    'verification_state'=>(string)$row->verification_state,
+                    'participant_role'=>$role,
+                    'participant_identity_state'=>$identity,
+                    'verification_state'=>$verification,
+                    'resolved_participant_matches_occurrence'=>!$mismatch&&$identity==='resolved',
                     'join_at_utc'=>$row->join_at_utc,'leave_at_utc'=>$row->leave_at_utc,
                     'observed_at'=>(string)$row->observed_at,
                 );
-                if((string)$row->verification_state==='verified'&&(string)$row->participant_identity_state==='resolved'){
-                    $intervals[]=array('role'=>(string)$row->participant_role,'join_at_utc'=>$row->join_at_utc,'leave_at_utc'=>$row->leave_at_utc);
+                if($verification==='verified'&&$identity==='resolved'&&!$mismatch){
+                    $intervals[]=array('role'=>$role,'join_at_utc'=>$row->join_at_utc,'leave_at_utc'=>$row->leave_at_utc);
                 }
             }else{
                 $counts['human_claim']++;
@@ -74,8 +89,14 @@ final class CanonicalAttendanceReadService {
         $teacher=array();$student=array();
         foreach($intervals as$interval)if($interval['role']==='teacher')$teacher[]=$interval;else $student[]=$interval;
         $assessment=CanonicalAttendanceRule::assess($teacher,$student,(string)$case->occurrence_start_utc,(string)$case->occurrence_end_utc);
-        $decisionAnomalies=array();
+        // The stored decision chain must agree with the stored evidence: a divergence is corruption,
+        // never a silently recomputed "trusted" answer.
+        $recordedOverlap=null;
+        foreach($decisions as$decision)if((string)$decision->decision_kind==='assessment'&&$decision->qualifying_overlap_seconds!==null)$recordedOverlap=(int)$decision->qualifying_overlap_seconds;
+        if($recordedOverlap!==null&&$recordedOverlap!==(int)$assessment['seconds'])throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+        $decisionAnomalies=array();$decisionKinds=array();
         foreach($anomalies as$anomaly)$decisionAnomalies[]=(string)$anomaly->code;
+        foreach($decisions as$decision)$decisionKinds[]=(string)$decision->decision_kind;
         return array(
             'case'=>array(
                 'case_id'=>(int)$case->id,'case_uid'=>(string)$case->uid,'state'=>(string)$case->state,
@@ -86,11 +107,20 @@ final class CanonicalAttendanceReadService {
                 'lesson_id'=>$lessonId,'lesson_state'=>(string)$lesson->lifecycle_state,
                 'enrolment_id'=>(int)$case->enrolment_id,'enrolment_state'=>(string)$this->enrolmentState((int)$case->enrolment_id),
                 'term_id'=>(int)$case->term_id,'term_state'=>$term,
-                'schedule_version_id'=>$scheduleVersionId,
+                'schedule_version_id'=>$scheduleVersionId,'schedule_version_current'=>$scheduleVersionCurrent,
                 'occurrence_start_utc'=>(string)$case->occurrence_start_utc,'occurrence_end_utc'=>(string)$case->occurrence_end_utc,
                 'qualifying_window_end_utc'=>(string)$case->window_end_utc,
                 'expected_student_id'=>(int)$case->student_id,'expected_teacher_id'=>(int)$case->teacher_id,
                 'teacher_assignment_id'=>(int)$case->teacher_assignment_id,
+            ),
+            'cutover'=>array(
+                'policy_id'=>$policy===null?null:(int)$policy->id,
+                'policy_version'=>$policy===null?null:(string)$policy->policy_version,
+                'cutover_utc'=>$policy===null?null:(string)$policy->cutover_utc,
+                'rule_version'=>$policy===null?null:(string)$policy->rule_version,
+                'threshold_seconds'=>$policy===null?null:(int)$policy->threshold_seconds,
+                'pre_grace_seconds'=>$policy===null?null:(int)$policy->pre_grace_seconds,
+                'post_grace_seconds'=>$policy===null?null:(int)$policy->post_grace_seconds,
             ),
             'evidence'=>array('counts'=>$counts,'provider'=>$provider,'intervals'=>$intervals,'excluded'=>$assessment['excluded']),
             'assessment'=>array(
@@ -99,9 +129,10 @@ final class CanonicalAttendanceReadService {
                 'pre_grace_seconds'=>CanonicalAttendanceRule::PRE_GRACE_SECONDS,
                 'post_grace_seconds'=>CanonicalAttendanceRule::POST_GRACE_SECONDS,
                 'qualifying_overlap_seconds'=>(int)$assessment['seconds'],
+                'recorded_overlap_seconds'=>$recordedOverlap,
                 'segments'=>$assessment['segments'],
                 'automatic_success_eligible'=>(bool)$assessment['eligible'],
-                'anomaly_codes'=>$decisionAnomalies,
+                'anomaly_codes'=>array_values(array_unique($decisionAnomalies)),
                 'evidence_set_digest'=>$this->evidenceSetDigest($evidence),
             ),
             'claims'=>$claims,
@@ -113,9 +144,12 @@ final class CanonicalAttendanceReadService {
                 'academy_obligation_count'=>count($this->obligations->forLesson($lessonId)),
             ),
             'review'=>array(
-                'latest_decision'=>$latest===null?null:array('decision_id'=>(int)$latest->id,'decision_kind'=>(string)$latest->decision_kind,'state_after'=>(string)$latest->state_after,'created_at'=>(string)$latest->created_at),
+                'latest_decision'=>$latestDecision===null?null:array('decision_id'=>(int)$latestDecision->id,'decision_kind'=>(string)$latestDecision->decision_kind,'state_after'=>(string)$latestDecision->state_after,'created_at'=>(string)$latestDecision->created_at),
                 'decision_count'=>count($decisions),
+                'decision_kinds'=>$decisionKinds,
                 'anomaly_count'=>count($anomalies),
+                'conflict_count'=>count($conflicts),
+                'conflicts'=>array_map(static fn($row)=>array('conflict_id'=>(int)$row->id,'conflict_kind'=>(string)$row->conflict_kind,'detected_at'=>(string)$row->detected_at),$conflicts),
                 'late_evidence'=>in_array('late_evidence',$decisionAnomalies,true),
                 'term_closed'=>$term!=='current',
                 'closed_no_change'=>(string)$case->state==='closed_no_change',

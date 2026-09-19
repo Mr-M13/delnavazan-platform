@@ -70,6 +70,10 @@ final class CanonicalAttendanceRepository {
     public function maxDecisionSequence(int $caseId):int{
         global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(decision_sequence),0) FROM {$this->p}canonical_attendance_decisions WHERE case_id=%d",$caseId));
     }
+    /** The highest recorded assessment overlap for one case; used for the final settlement record only. */
+    public function maxAssessmentOverlap(int $caseId):int{
+        global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(qualifying_overlap_seconds),0) FROM {$this->p}canonical_attendance_decisions WHERE case_id=%d AND decision_kind='assessment'",$caseId));
+    }
     public function insertDecision(array $data):int{return $this->insert('canonical_attendance_decisions',$data,'Canonical attendance decision persistence failed');}
 
     public function anomaliesForCase(int $caseId):array{
@@ -83,16 +87,71 @@ final class CanonicalAttendanceRepository {
     }
     public function insertCommand(array $data):int{return $this->insert('canonical_attendance_commands',$data,'Canonical attendance command persistence failed');}
 
-    /** Durable prospective cutover policy: no production cutover is performed by migration. */
-    public function cutoverPolicy():?object{
-        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies ORDER BY id DESC LIMIT 1");
+    /**
+     * Durable prospective cutover policy. No production cutover is performed by migration.
+     *
+     * Applicability is deterministic from the occurrence instant: the applicable policy for an
+     * occurrence is the most recently activated policy whose cutover instant has already passed for
+     * that occurrence. A later policy can never reinterpret an earlier admitted occurrence, because
+     * every case stores the exact policy row that admitted it.
+     */
+    public function policy(int $policyId,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE id=%d".($lock?' FOR UPDATE':''),$policyId);
+    }
+    public function applicablePolicy(string $occurrenceStartUtc,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies WHERE cutover_utc<=%s ORDER BY cutover_utc DESC,id DESC LIMIT 1".($lock?' FOR UPDATE':''),$occurrenceStartUtc);
+    }
+    public function latestPolicy():?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_cutover_policies ORDER BY cutover_utc DESC,id DESC LIMIT 1");
     }
     public function insertCutoverPolicy(array $data):int{return $this->insert('canonical_attendance_cutover_policies',$data,'Canonical attendance cutover policy persistence failed');}
+
+    /** Durable provider-neutral participant identity registry: the only provider identity authority. */
+    public function mapping(int $mappingId,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_participant_mappings WHERE id=%d".($lock?' FOR UPDATE':''),$mappingId);
+    }
+    /** @return array<int,object> every mapping row recorded for one provider account and role */
+    public function mappingsForAccount(string $providerCode,string $accountDigest,string $role,bool $lock=false):array{
+        global $wpdb;$suffix=$lock?' FOR UPDATE':'';
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_attendance_participant_mappings WHERE provider_code=%s AND provider_account_digest=%s AND participant_role=%s ORDER BY id{$suffix}",$providerCode,$accountDigest,$role))?:array();
+    }
+    /** @param array<int,string> $digests @return array<int,object> */
+    public function mappingsForDigests(array $digests,bool $lock=false):array{
+        global $wpdb;$digests=array_values(array_unique(array_filter($digests,static fn($d)=>is_string($d)&&$d!=='')));
+        if(!$digests)return array();
+        $suffix=$lock?' FOR UPDATE':'';
+        $in=implode(',',array_fill(0,count($digests),'%s'));
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_attendance_participant_mappings WHERE provider_account_digest IN ({$in}) ORDER BY id{$suffix}",...$digests))?:array();
+    }
+    public function insertMapping(array $data):int{return $this->insert('canonical_attendance_participant_mappings',$data,'Canonical attendance participant mapping persistence failed');}
+    public function updateMappingState(int $mappingId,int $expectedVersion,string $state,?string $revokedAt,string $now,int $actor):void{
+        global $wpdb;
+        $changed=$wpdb->update($this->p.'canonical_attendance_participant_mappings',array(
+            'state'=>$state,'revoked_at'=>$revokedAt,'mapping_version'=>$expectedVersion+1,'updated_at'=>$now,'updated_by'=>$actor,
+        ),array('id'=>$mappingId,'mapping_version'=>$expectedVersion));
+        if($changed!==1)throw new \RuntimeException('Stale canonical attendance participant mapping');
+    }
+
+    /** Append-only durable conflict receipts: changed or cross-context provider events under one key. */
+    public function insertConflict(array $data):int{return $this->insert('canonical_attendance_conflicts',$data,'Canonical attendance conflict persistence failed');}
+    public function conflictsForCase(int $caseId):array{
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_attendance_conflicts WHERE case_id=%d ORDER BY id",$caseId))?:array();
+    }
+    public function conflictForEventKey(string $eventKeyDigest,int $caseId):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_attendance_conflicts WHERE provider_event_key_digest=%s AND case_id=%d ORDER BY id LIMIT 1",$eventKeyDigest,$caseId);
+    }
 
     public function duplicate(\Throwable $e):?string{
         if(!preg_match("/Duplicate entry .* for key ['`](?:[^'`.]+\\.)?([^'`]+)['`]/i",$e->getMessage(),$m))return null;
         $key=strtolower($m[1]);
         return in_array($key,array('command_key_digest','provider_event_key_digest','case_occurrence','decision_sequence','uid'),true)?$key:null;
+    }
+    /** Read-only transaction-state diagnostic: zero means no transaction is open on this connection. */
+    public function openTransactions():int{
+        global $wpdb;
+        $value=$wpdb->get_var('SELECT @@in_transaction');
+        return $value===null?-1:(int)$value;
     }
     private function one(string $sql,...$args):?object{global $wpdb;return $wpdb->get_row($wpdb->prepare($sql,...$args));}
     private function insert(string $table,array $data,string $message):int{

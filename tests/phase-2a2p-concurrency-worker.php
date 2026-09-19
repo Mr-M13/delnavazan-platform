@@ -31,16 +31,17 @@ try{
         'ingest'=>(function() use($intake,$occurrence,$state,$worker,$key,$reference,$at):array{
             $eventKey=(string)($state['event_keys'][$worker]??('race-event-'.$worker));
             $payloadKey=(string)($state['payload_keys'][$worker]??('race-payload-'.$worker));
+            $accountKey=(string)($state['accounts'][$worker]??('race-acct-'.$worker));
             return $intake->ingestProviderEvidence((int)$occurrence['lesson_id'],(int)$occurrence['version_id'],array(
-                'provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$payloadKey,
-                'participant_role'=>'teacher','participant_identity_state'=>'resolved','verification_state'=>'verified',
-                'resolved_teacher_id'=>(int)$occurrence['teacher_id'],
+                'provider_code'=>'google_meet','provider_account_key'=>$accountKey,
+                'provider_event_key'=>$eventKey,'provider_payload_key'=>$payloadKey,
+                'participant_role'=>'teacher',
                 'join_at_utc'=>$occurrence['start'],'leave_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($occurrence['start'].' UTC')+60),
                 'observed_at'=>$at,'provenance_reference'=>'prov-'.$reference,'evidence_reference'=>'ref-'.$reference,
             ),$key);
         })(),
         'claim'=>$intake->submitClaim((int)$occurrence['lesson_id'],(int)$occurrence['version_id'],array('claim_kind'=>'review_request','reason_code'=>'race_claim','observed_at'=>$at,'evidence_reference'=>'claim-'.$reference),$key),
-        'adjudicate'=>$intake->adjudicate((int)$state['case_id'],array('adjudication'=>(string)($entry['adjudication']??'record_no_change')),$key),
+        'adjudicate'=>$intake->adjudicate((int)$state['case_id'],array('adjudication'=>(string)($entry['adjudication']??'record_no_change'),'expected_case_version'=>(int)($state['case_version']??0)),$key),
         default=>throw new RuntimeException('Unknown race action: '.$action),
     };
     $mark($worker.'.result',wp_json_encode(array('ok'=>true,'action'=>$action,'result'=>is_array($result)?$result:array('value'=>$result)))."\n");

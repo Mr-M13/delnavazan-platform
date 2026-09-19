@@ -9,7 +9,9 @@ use Delnavazan\Platform\Core\Infrastructure\Repository\{CanonicalAttendanceRepos
  * Intake evidence and decisions describe *what was observed or claimed*; they are never delivery
  * truth. Phase O remains the only owner of canonical delivery/attendance truth, and Lesson authority
  * remains the only owner of completion. This validator therefore proves only that the intake
- * aggregate is coherent and exactly bound to its canonical Lesson occurrence.
+ * aggregate is coherent, exactly bound to its canonical Lesson occurrence, bound to the exact
+ * prospective cutover policy that admitted it, and that every provider interval resolves through the
+ * durable provider-neutral participant identity registry rather than through caller assertion.
  */
 final class CanonicalAttendanceValidator {
     public const STATES=array('open','ready_for_review','settlement_pending','settled','adjudicated','closed_no_change','superseded');
@@ -18,13 +20,17 @@ final class CanonicalAttendanceValidator {
     public const PARTICIPANT_ROLES=array('teacher','student');
     public const IDENTITY_STATES=array('resolved','unknown','ambiguous');
     public const VERIFICATION_STATES=array('verified','unverified');
+    public const MAPPING_STATES=array('verified','unverified','revoked');
+    public const CONFLICT_KINDS=array('changed_payload','cross_context','cross_lesson','cross_schedule_version');
     public const DECISION_KINDS=array('assessment','settlement_requested','settlement_completed','anomaly_opened','admin_adjudication','closed_no_change','late_evidence_review');
     public const ANOMALY_CODES=array(
         'teacher_participation_unproven','student_participation_unproven','overlap_below_threshold',
         'provider_evidence_missing','provider_evidence_incomplete','provider_evidence_conflicting',
-        'participant_unknown','participant_ambiguous','duplicate_event_conflict','impossible_interval',
+        'participant_unknown','participant_ambiguous','participant_identity_unverified','participant_identity_mismatch','provider_identity_unmapped',
+        'duplicate_event_conflict','impossible_interval',
         'late_evidence','provider_outage','lesson_cancelled','canonical_outcome_exists',
         'canonical_truth_conflict','schedule_version_conflict','canonical_integrity_conflict',
+        'cutover_policy_missing','cutover_policy_conflict',
     );
 
     /** Hydrate and validate one intake aggregate against its canonical Lesson occurrence. */
@@ -37,14 +43,24 @@ final class CanonicalAttendanceValidator {
         $lesson=$lessons->lesson((int)$case->lesson_id,$lock);
         $version=$schedules->version((int)$case->schedule_version_id,$lock);
         $assignment=$lessons->assignmentById((int)$case->teacher_assignment_id,$lock);
+        $evidence=$repository->evidenceForCase($caseId,$lock);
+        $digests=array();
+        foreach($evidence as$row)$digests[]=(string)($row->provider_account_digest??'');
+        // The identity registry and the prospective cutover policy are immutable authority rows shared
+        // by many occurrences: they are read without row locks so one occurrence can never serialise
+        // unrelated intake work, and no lock-order edge is introduced into the write path.
+        $mappings=$repository->mappingsForDigests($digests,false);
+        $policy=$repository->policy((int)($case->cutover_policy_id??0),false);
         $ok=self::valid(
             $case,
-            $repository->evidenceForCase($caseId,$lock),
+            $evidence,
             $repository->decisionsForCase($caseId,$lock),
             $repository->anomaliesForCase($caseId),
             $lesson,
             $version,
-            $assignment
+            $assignment,
+            $mappings,
+            $policy
         );        if(!$ok)return false;
         // Any recorded Phase-O result link must resolve to an outcome of this exact Lesson.
         $outcomeIds=array();
@@ -57,7 +73,7 @@ final class CanonicalAttendanceValidator {
     }
 
     /** Pure aggregate validation over hydrated rows. */
-    public static function valid(object $case,array $evidence,array $decisions,array $anomalies,?object $lesson,?object $version,?object $assignment):bool{
+    public static function valid(object $case,array $evidence,array $decisions,array $anomalies,?object $lesson,?object $version,?object $assignment,array $mappings=array(),?object $policy=null):bool{
         $caseId=(int)($case->id??0);
         if($caseId<1||(string)($case->uid??'')==='')return false;
         foreach(array('lesson_id','schedule_version_id','enrolment_id','term_id','student_id','teacher_id','teacher_assignment_id')as$field)if((int)($case->{$field}??0)<1)return false;
@@ -68,6 +84,19 @@ final class CanonicalAttendanceValidator {
         if(!in_array((string)($case->state??''),self::STATES,true))return false;
         if((int)($case->case_version??0)<1)return false;
         if(!self::utc($case->created_at??null)||(int)($case->created_by??0)<1)return false;
+        // Locked rule identity: a case may never claim a rule version the platform does not recognise.
+        if((string)($case->rule_version??'')!==CanonicalAttendanceRule::RULE_VERSION)return false;
+        // Exact prospective-cutover-policy binding frozen at admission.
+        $policyId=(int)($case->cutover_policy_id??0);
+        if($policyId<1||!$policy)return false;
+        if((int)($policy->id??0)!==$policyId)return false;
+        if((string)($policy->policy_version??'')==='')return false;
+        if((string)($policy->rule_version??'')!==CanonicalAttendanceRule::RULE_VERSION)return false;
+        if((int)($policy->threshold_seconds??-1)!==CanonicalAttendanceRule::THRESHOLD_SECONDS)return false;
+        if((int)($policy->pre_grace_seconds??-1)!==CanonicalAttendanceRule::PRE_GRACE_SECONDS)return false;
+        if((int)($policy->post_grace_seconds??-1)!==CanonicalAttendanceRule::POST_GRACE_SECONDS)return false;
+        if(!self::utc($policy->cutover_utc??null))return false;
+        if((int)strtotime($start.' UTC')<(int)strtotime((string)$policy->cutover_utc.' UTC'))return false;
         if(!$lesson||(string)($lesson->record_model??'')!=='canonical_term_lesson_v1')return false;
         if((int)$lesson->enrolment_id!==(int)$case->enrolment_id||(int)$lesson->term_id!==(int)$case->term_id)return false;
         if((int)$lesson->student_id!==(int)$case->student_id||(int)$lesson->teacher_id!==(int)$case->teacher_id)return false;
@@ -75,6 +104,7 @@ final class CanonicalAttendanceValidator {
         if(!$version||(int)$version->lesson_id!==(int)$case->lesson_id)return false;
         if((string)$version->starts_at_utc!==$start||(string)$version->ends_at_utc!==$end)return false;
         if(!$assignment||(int)$assignment->id!==(int)$case->teacher_assignment_id||(int)$assignment->enrolment_id!==(int)$case->enrolment_id)return false;
+        $registry=self::registry($mappings);
         $seenEventKeys=array();
         foreach($evidence as$row){
             if((int)($row->case_id??0)!==$caseId)return false;
@@ -93,6 +123,8 @@ final class CanonicalAttendanceValidator {
                 if(!self::digest($row->provider_payload_digest??null))return false;
                 if((string)($row->provider_code??'')==='')return false;
                 if(!in_array((string)($row->verification_state??''),self::VERIFICATION_STATES,true))return false;
+                // Provider identity must be a durable, provider-neutral account digest.
+                if(!self::digest($row->provider_account_digest??null))return false;
             }
             $identity=(string)($row->participant_identity_state??'');
             if($identity!=='')if(!in_array($identity,self::IDENTITY_STATES,true))return false;
@@ -100,16 +132,46 @@ final class CanonicalAttendanceValidator {
             if($role!=='')if(!in_array($role,self::PARTICIPANT_ROLES,true))return false;
             if($identity==='resolved'){
                 if($role==='teacher'){
-                    if((int)($row->resolved_teacher_id??0)!==(int)$case->teacher_id)return false;
+                    $resolved=(int)($row->resolved_teacher_id??0);
+                    if($resolved<1||(int)($row->resolved_student_id??0)>0)return false;
                 }elseif($role==='student'){
-                    if((int)($row->resolved_student_id??0)!==(int)$case->student_id)return false;
+                    $resolved=(int)($row->resolved_student_id??0);
+                    if($resolved<1||(int)($row->resolved_teacher_id??0)>0)return false;
                 }else{
                     return false;
                 }
+                // A resolved participant must be justified by exactly one verified durable mapping for
+                // this exact provider account and role. Caller assertion can never justify resolution,
+                // and an account bound to a different canonical participant is a recorded fact that
+                // never qualifies for this occurrence.
+                $account=(string)($row->provider_account_digest??'');
+                $provider=(string)($row->provider_code??'');
+                $bucket=$registry[$provider.'|'.$account.'|'.$role]??array();
+                $verified=array();
+                foreach($bucket as$mapping)if((string)($mapping->state??'')==='verified')$verified[(int)$mapping->participant_id]=true;
+                if(count($verified)!==1||!isset($verified[$resolved]))return false;
+            }elseif($role!==''&&(string)($row->source_kind??'')==='provider'){
+                // Unresolved provider identity is permitted as retained evidence, but must carry no target.
+                if((int)($row->resolved_teacher_id??0)>0||(int)($row->resolved_student_id??0)>0)return false;
             }
             $join=$row->join_at_utc??null;$leave=$row->leave_at_utc??null;
             if($join!==null&&!self::utc($join))return false;
             if($leave!==null&&!self::utc($leave))return false;
+        }
+        foreach($mappings as$mapping){
+            if(!in_array((string)($mapping->state??''),self::MAPPING_STATES,true))return false;
+            if(!in_array((string)($mapping->participant_role??''),self::PARTICIPANT_ROLES,true))return false;
+            if((int)($mapping->participant_id??0)<1)return false;
+            if((string)($mapping->provider_code??'')==='')return false;
+            if(!self::digest($mapping->provider_account_digest??null))return false;
+            if(!self::digest($mapping->provenance_digest??null))return false;
+            if(!self::digest($mapping->evidence_reference_digest??null))return false;
+            if((string)$mapping->state==='verified'){
+                if(!self::utc($mapping->verified_at??null)||$mapping->revoked_at!==null)return false;
+            }
+            if((string)$mapping->state==='revoked'){
+                if(!self::utc($mapping->revoked_at??null))return false;
+            }
         }
         $sequence=1;$latest=0;
         foreach($decisions as$decision){
@@ -133,6 +195,22 @@ final class CanonicalAttendanceValidator {
             if(!in_array((string)($anomaly->code??''),self::ANOMALY_CODES,true))return false;
         }
         return true;
+    }
+
+    /**
+     * Index the durable identity registry by provider + account digest + role so one provider account
+     * can never silently resolve to a different canonical participant at validation time.
+     *
+     * @param array<int,object> $mappings
+     * @return array<string,array<int,object>>
+     */
+    public static function registry(array $mappings):array{
+        $registry=array();
+        foreach($mappings as$mapping){
+            $key=(string)($mapping->provider_code??'').'|'.(string)($mapping->provider_account_digest??'').'|'.(string)($mapping->participant_role??'');
+            $registry[$key][]=$mapping;
+        }
+        return $registry;
     }
 
     public static function digest(mixed $value):bool{return (bool)preg_match('/^[a-f0-9]{64}$/D',(string)($value??''));}

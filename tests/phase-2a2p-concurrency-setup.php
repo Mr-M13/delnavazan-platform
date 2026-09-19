@@ -1,7 +1,7 @@
 <?php
 /** Prepare one deterministic gated Phase-P attendance intake race on synthetic production-path chains. */
 if(getenv('DZN_PHASE_2A2P_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!WP_CLI){fwrite(STDERR,"Phase 2A.2-P concurrency setup refused.\n");exit(1);}
-use Delnavazan\Platform\Core\Application\{CanonicalAttendanceIntakeService,CanonicalEnrolmentLifecycleService,CanonicalLessonAuthorityService,CanonicalLessonScheduleService,CanonicalTermAuthorityService,TeacherAcceptingStateService,TeacherAssignmentService,TeacherAvailabilityService,TeacherService,TeachingEligibilityService};
+use Delnavazan\Platform\Core\Application\{CanonicalAttendanceIdentityService,CanonicalAttendanceIntakeService,CanonicalEnrolmentLifecycleService,CanonicalLessonAuthorityService,CanonicalLessonScheduleService,CanonicalTermAuthorityService,TeacherAcceptingStateService,TeacherAssignmentService,TeacherAvailabilityService,TeacherService,TeachingEligibilityService};
 
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 $mode=(string)getenv('DZN_PHASE_2A2P_MODE');
@@ -9,7 +9,7 @@ $fixture=get_option('dzn_phase_2a2j_fixture');
 if(!is_array($fixture)||count($fixture['sources']??array())<2)throw new RuntimeException('Phase-J fixture required');
 $enrolments=new CanonicalEnrolmentLifecycleService();$terms=new CanonicalTermAuthorityService();$assignments=new TeacherAssignmentService();
 $lessons=new CanonicalLessonAuthorityService();$schedules=new CanonicalLessonScheduleService();$availability=new TeacherAvailabilityService();$accepting=new TeacherAcceptingStateService();
-$intake=new CanonicalAttendanceIntakeService();
+$intake=new CanonicalAttendanceIntakeService();$identity=new CanonicalAttendanceIdentityService();
 $evidence=static fn(string $reference):array=>array('evidence_channel'=>'staff_record','evidence_reference'=>$reference,'evidence_at'=>gmdate('Y-m-d H:i:s'));
 $key=static fn(string $label):string=>'dzn-2a2p-race-'.$label.'-'.wp_generate_uuid4();
 $allocate=static function() use($fixture,$wpdb,$p):int{foreach($fixture['sources'] as$source){$id=(int)$source['enrolment_id'];$state=(string)$wpdb->get_var($wpdb->prepare("SELECT lifecycle_state FROM {$p}enrolments WHERE id=%d",$id));$terms=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d AND record_model='canonical_enrolment_term_v1'",$id));if($state==='authorised'&&$terms===0)return$id;}throw new RuntimeException('no_available_source');};
@@ -39,20 +39,31 @@ $occurrence=function(array $chain,string $label) use($lessons,$schedules,$wpdb,$
 };
 $GLOBALS['dzn_race_evidence']=$evidence;$GLOBALS['dzn_race_key']=$key;
 if(!$intake){} // silence unused notices
-$policy=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cutover_policies ORDER BY id DESC LIMIT 1"));
-if(!$policy)$intake->recordCutoverPolicy(gmdate('Y-m-d H:i:s',strtotime('-1 day')),$key('cutover'));
+$policy=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cutover_policies ORDER BY cutover_utc DESC,id DESC LIMIT 1"));
+if(!$policy)$intake->recordCutoverPolicy(gmdate('Y-m-d H:i:s',strtotime('+2 seconds')),$key('cutover'));
 $one=$chain();$two=$chain();
 $first=$occurrence($one,'race-one');$second=$occurrence($two,'race-two');
 $suffix=substr(str_replace('-','',wp_generate_uuid4()),0,10);
-$state=array('mode'=>$mode,'at'=>gmdate('Y-m-d H:i:s'),'chain'=>$one,'second_chain'=>$two,'first'=>$first,'second'=>$second,'keys'=>array('w1'=>$key('w1'),'w2'=>$key('w2')),'references'=>array('w1'=>'race-w1','w2'=>'race-w2'));
+// Provider identity is authoritative: both race accounts must resolve through the durable registry.
+$accounts=array('w1'=>'race-acct-w1-'.$suffix,'w2'=>'race-acct-w2-'.$suffix);
+$identity->record(array('provider_code'=>'google_meet','provider_account_key'=>$accounts['w1'],'participant_role'=>'teacher','participant_id'=>(int)$first['teacher_id'],'state'=>'verified','provenance_reference'=>'race-prov-w1','evidence_reference'=>'race-ref-w1'),$key('map-w1'));
+$identity->record(array('provider_code'=>'google_meet','provider_account_key'=>$accounts['w2'],'participant_role'=>'teacher','participant_id'=>(int)$second['teacher_id'],'state'=>'verified','provenance_reference'=>'race-prov-w2','evidence_reference'=>'race-ref-w2'),$key('map-w2'));
+// The same-event races must share ONE provider account, otherwise they are genuine context conflicts.
+$sharedAccount='race-acct-shared-'.$suffix;
+$identity->record(array('provider_code'=>'google_meet','provider_account_key'=>$sharedAccount,'participant_role'=>'teacher','participant_id'=>(int)$first['teacher_id'],'state'=>'verified','provenance_reference'=>'race-prov-shared','evidence_reference'=>'race-ref-shared'),$key('map-shared'));
+$state=array('mode'=>$mode,'at'=>gmdate('Y-m-d H:i:s'),'chain'=>$one,'second_chain'=>$two,'first'=>$first,'second'=>$second,'keys'=>array('w1'=>$key('w1'),'w2'=>$key('w2')),'accounts'=>$accounts,'references'=>array('w1'=>'race-w1','w2'=>'race-w2'));
 switch($mode){
     case 'same_event_same_payload':
+        $state['accounts']=array('w1'=>$sharedAccount,'w2'=>$sharedAccount);
+        $state['references']=array('w1'=>'race-shared','w2'=>'race-shared');
         $state['actions']=array('w1'=>array('action'=>'ingest','target'=>'first'),'w2'=>array('action'=>'ingest','target'=>'first'));
         $state['event_keys']=array('w1'=>'race-event-one-'.$suffix,'w2'=>'race-event-one-'.$suffix);
         $state['payload_keys']=array('w1'=>'race-payload-one-'.$suffix,'w2'=>'race-payload-one-'.$suffix);
         $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>null);
         break;
     case 'same_event_changed_payload':
+        $state['accounts']=array('w1'=>$sharedAccount,'w2'=>$sharedAccount);
+        $state['references']=array('w1'=>'race-shared','w2'=>'race-shared');
         $state['actions']=array('w1'=>array('action'=>'ingest','target'=>'first'),'w2'=>array('action'=>'ingest','target'=>'first'));
         $state['event_keys']=array('w1'=>'race-event-two-'.$suffix,'w2'=>'race-event-two-'.$suffix);
         $state['payload_keys']=array('w1'=>'race-payload-two-'.$suffix,'w2'=>'race-payload-two-changed-'.$suffix);
@@ -61,16 +72,24 @@ switch($mode){
     case 'claim_vs_adjudication':
         $intake->submitClaim((int)$first['lesson_id'],(int)$first['version_id'],array('claim_kind'=>'review_request','reason_code'=>'race_bootstrap','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'race-bootstrap'),$key('bootstrap'));
         $case=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cases WHERE lesson_id=%d",(int)$first['lesson_id']));
-        $state['case_id']=(int)$case->id;
+        $state['case_id']=(int)$case->id;$state['case_version']=(int)$case->case_version;
         $state['actions']=array('w1'=>array('action'=>'claim','target'=>'first'),'w2'=>array('action'=>'adjudicate','target'=>'first','adjudication'=>'record_no_change'));
         $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>'dzn_phase_2a2p_after_decision_insert');
         break;
     case 'adjudication_vs_adjudication':
         $intake->submitClaim((int)$first['lesson_id'],(int)$first['version_id'],array('claim_kind'=>'review_request','reason_code'=>'race_bootstrap','observed_at'=>gmdate('Y-m-d H:i:s'),'evidence_reference'=>'race-bootstrap'),$key('bootstrap'));
         $case=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_cases WHERE lesson_id=%d",(int)$first['lesson_id']));
-        $state['case_id']=(int)$case->id;
+        $state['case_id']=(int)$case->id;$state['case_version']=(int)$case->case_version;
         $state['actions']=array('w1'=>array('action'=>'adjudicate','target'=>'first','adjudication'=>'record_no_change'),'w2'=>array('action'=>'adjudicate','target'=>'first','adjudication'=>'record_no_change'));
         $state['hooks']=array('w1'=>'dzn_phase_2a2p_after_decision_insert','w2'=>null);
+        break;
+    case 'command_key_cross_lesson':
+        $crossKey=$key('cross');
+        $state['actions']=array('w1'=>array('action'=>'ingest','target'=>'first'),'w2'=>array('action'=>'ingest','target'=>'second'));
+        $state['event_keys']=array('w1'=>'race-cross-event-'.$suffix,'w2'=>'race-cross-event-b-'.$suffix);
+        $state['payload_keys']=array('w1'=>'race-cross-payload-'.$suffix,'w2'=>'race-cross-payload-b-'.$suffix);
+        $state['keys']=array('w1'=>$crossKey,'w2'=>$crossKey);
+        $state['hooks']=array('w1'=>'dzn_phase_2a2p_occurrence_locks_held','w2'=>null);
         break;
     case 'unrelated_lessons':
         $state['actions']=array('w1'=>array('action'=>'claim','target'=>'first'),'w2'=>array('action'=>'claim','target'=>'second'));

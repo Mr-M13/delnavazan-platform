@@ -14,24 +14,30 @@ use Delnavazan\Platform\Core\Support\Identifier;
  * create a Phase-M replacement, academy obligation, refund, remedial Lesson or reschedule.
  *
  * Owner locks implemented:
- *  - ordinary delivery settles automatically only from trusted, identity-resolved provider evidence
- *    with >=1200s of qualifying simultaneous overlap inside [start, end + 15 minutes);
+ *  - ordinary delivery settles automatically only from trusted provider evidence whose provider
+ *    account resolves through the durable participant identity registry to the exact canonical
+ *    Teacher and Student of the occurrence, with >=1200s of qualifying simultaneous overlap inside
+ *    [start, end + 15 minutes);
+ *  - caller assertion of identity or verification is never accepted: a missing, unverified, revoked,
+ *    ambiguous or mismatched mapping can never contribute qualifying attendance;
  *  - failure to prove success never identifies responsibility: no outcome, obligation or
  *    replacement is created, only an anomaly/review;
  *  - Student "Notify Absence" is only an advance claim about expected non-attendance;
  *  - human claims are evidence, never settlement, and never outrank provider evidence;
- *  - conflicting evidence requires administrative adjudication (no last-write-wins);
+ *  - conflicting evidence requires administrative adjudication (no last-write-wins), and every
+ *    refused conflicting provider event leaves a durable conflict receipt;
  *  - unresolved Phase-P review never blocks Term closure and is never auto-published as Phase-O
  *    `review_required`;
- *  - Phase P is prospective only, using a durable persisted cutover instant.
+ *  - Phase P is prospective only: a cutover instant must be prospective at activation, and every
+ *    admitted case is bound to the exact immutable policy row that admitted it.
  */
 final class CanonicalAttendanceIntakeService {
+    public const PROVIDER_CODES=array('google_meet','zoom','teams','other_trusted_provider');
     private const PROVIDER_CAPABILITY='dzn_ingest_canonical_attendance_evidence';
     private const STUDENT_CLAIM_CAPABILITY='dzn_submit_own_attendance_claim';
     private const TEACHER_CLAIM_CAPABILITY='dzn_submit_own_delivery_claim';
     private const REVIEW_CAPABILITY='dzn_manage_canonical_attendance_review';
     private const POLICY_VERSION='canonical_attendance_cutover_v1';
-    private const PROVIDER_CODES=array('google_meet','zoom','teams','other_trusted_provider');
     private const CLAIM_KINDS=array('advance_absence_claim','attendance_claim','delivery_claim','review_request');
     private const ADJUDICATIONS=array('settle_delivered','record_no_change','review_required','teacher_non_delivery');
     public function __construct(
@@ -46,13 +52,17 @@ final class CanonicalAttendanceIntakeService {
         $this->settlement??=new CanonicalAttendanceSettlementService();
     }
 
-    /** Record the durable prospective cutover boundary. No production cutover is performed here. */
+    /**
+     * Record the durable prospective cutover boundary. No production cutover is performed here, and
+     * a cutover instant may never be backdated: the activation instant must still be in the future.
+     */
     public function recordCutoverPolicy(string $cutoverUtc,string $key):array{
         $this->requireCapability(self::REVIEW_CAPABILITY);
         if(!CanonicalAttendanceValidator::utc($cutoverUtc))throw new \InvalidArgumentException('Valid UTC cutover instant required');
+        if((int)strtotime($cutoverUtc.' UTC')<=(int)strtotime(gmdate('Y-m-d H:i:s').' UTC'))throw new \InvalidArgumentException('cutover_instant_not_prospective');
         $actor=$this->actor();
         $digest=CanonicalAttendanceIdempotency::key($key);
-        $facts=array('policy_version'=>self::POLICY_VERSION,'cutover_utc'=>$cutoverUtc,'rule_version'=>CanonicalAttendanceRule::RULE_VERSION);
+        $facts=array('domain'=>'canonical_attendance_v1','operation'=>'record_cutover_policy','policy_version'=>self::POLICY_VERSION,'cutover_utc'=>$cutoverUtc,'rule_version'=>CanonicalAttendanceRule::RULE_VERSION);
         $payload=CanonicalAttendanceIdempotency::payload($facts);
         $this->repository->begin();
         try{
@@ -84,26 +94,40 @@ final class CanonicalAttendanceIntakeService {
         $this->repository->begin();
         try{
             [$case,$lesson,$version,$created]=$this->lockOccurrence($lessonId,$scheduleVersionId);
+            $intent=$this->resolveIdentity($intent);
+            $payload=CanonicalAttendanceIdempotency::payload($this->evidenceFacts($case,$intent));
+            $replay=$this->ingestReplay($digest,$payload,$case);
+            if($replay!==null){
+                $this->repository->commit();
+                if(!empty($replay['converge']))$replay=$this->convergeSettlement((int)$case->id,$replay);
+                return $replay;
+            }
             $evidenceId=null;
-            $replay=$this->ingestReplay($digest,$intent,$case);
-            if($replay!==null){$this->repository->commit();return $replay;}
-            $existing=$this->repository->evidenceByEventKey($intent['provider_event_key_digest'],true);
+            $existing=$this->repository->evidenceByEventKey((string)$intent['provider_event_key_digest'],true);
             if($existing){
-                if(!hash_equals((string)$existing->provider_payload_digest,$intent['provider_payload_digest']))throw new IdempotencyConflictException('Idempotency conflict');
+                if(!$this->sameEvidenceContext($existing,$case,$intent)){
+                    $this->recordConflict($case,$existing,$intent,$this->conflictKind($existing,$case));
+                    $this->repository->commit();
+                    throw new IdempotencyConflictException('Idempotency conflict');
+                }
                 // Exact duplicate provider event: retain the receipt, do not double-count, still assess.
                 $evidenceId=(int)$existing->id;
             }else{
                 $now=gmdate('Y-m-d H:i:s');
                 $evidenceId=$this->insertEvidence($case,$lesson,$intent,$now,$this->actor());
             }
-            $this->insertCommand($digest,CanonicalAttendanceIdempotency::payload($this->evidenceFacts($case,$intent)),'ingest_provider_evidence',$this->evidenceFacts($case,$intent),$case,$evidenceId,'recorded',null,$now??gmdate('Y-m-d H:i:s'),$this->actor());
+            // P-1: the complete aggregate, including the row just inserted, must validate before any
+            // assessment, judgement or canonical settlement is attempted.
+            if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+            $now=gmdate('Y-m-d H:i:s');
+            $this->insertCommand($digest,CanonicalAttendanceIdempotency::payload($this->evidenceFacts($case,$intent)),'ingest_provider_evidence',$this->evidenceFacts($case,$intent),$case,$evidenceId,'recorded',null,$now,$this->actor());
             $assessment=$this->assessAndDecide($case,$lesson);
             $this->repository->commit();
             $settlement=$this->maybeSettle($case,$assessment);
             return array('case_id'=>(int)$case->id,'evidence_id'=>$evidenceId,'assessment'=>$assessment,'settlement'=>$settlement,'created'=>$created);
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayCommand($winner,null,'ingest_provider_evidence');
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayIngestCommand($winner,$lessonId,$scheduleVersionId);
             throw $e;
         }
     }
@@ -130,6 +154,7 @@ final class CanonicalAttendanceIntakeService {
             $now=gmdate('Y-m-d H:i:s');
             $intent['attribution']=$this->isAdministrator()?'administrator_on_behalf':'own_principal';
             $evidenceId=$this->insertEvidence($case,$lesson,$intent,$now,$actor);
+            if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
             if($late)$this->openAnomaly($case,'late_evidence',$now,$actor);
             $assessment=$this->assessAndDecide($case,$lesson);
             $this->insertCommand($digest,$payload,'submit_claim',$facts,$case,$evidenceId,'recorded',$assessment['decision_id'],$now,$actor);
@@ -137,7 +162,7 @@ final class CanonicalAttendanceIntakeService {
             return array('case_id'=>(int)$case->id,'evidence_id'=>$evidenceId,'assessment'=>$assessment,'settlement'=>null,'created'=>$created);
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayCommand($winner,null,'submit_claim');
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayClaimCommand($winner,$lessonId,$scheduleVersionId,$intent);
             throw $e;
         }
     }
@@ -147,15 +172,18 @@ final class CanonicalAttendanceIntakeService {
         $this->requireCapability(self::REVIEW_CAPABILITY);
         $outcome=(string)($input['adjudication']??'');
         if(!in_array($outcome,self::ADJUDICATIONS,true))throw new \InvalidArgumentException('Controlled adjudication required');
+        // P-6: the administrator must adjudicate the exact case version they reviewed.
+        $expected=(int)($input['expected_case_version']??0);
+        if($expected<1)throw new \InvalidArgumentException('expected_case_version_required');
         $actor=$this->actor();
         $digest=CanonicalAttendanceIdempotency::key($key);
         $this->repository->begin();
         try{
-            $case=$this->repository->caseById($caseId,true);
-            if(!$case)throw new \InvalidArgumentException('canonical_attendance_case_required');
-            $facts=array('case_id'=>$caseId,'adjudication'=>$outcome,'expected_case_version'=>(int)$case->case_version,'lesson_id'=>(int)$case->lesson_id);
+            $case=$this->hydrateDurableCase($caseId,'adjudicate');
+            $facts=array('case_id'=>$caseId,'adjudication'=>$outcome,'expected_case_version'=>$expected,'lesson_id'=>(int)$case->lesson_id);
             $payload=CanonicalAttendanceIdempotency::payload($facts);
             if($winner=$this->repository->command($digest)){ $replay=$this->replayCommand($winner,$payload,'adjudicate'); $this->repository->commit(); return $replay; }
+            if((int)$case->case_version!==$expected)throw new \RuntimeException('stale_case_version');
             $now=gmdate('Y-m-d H:i:s');
             if($outcome==='record_no_change'){
                 $decisionId=$this->recordDecision($case,'admin_adjudication','closed_no_change',null,'administrative_no_change',array(),$now,$actor);
@@ -169,8 +197,8 @@ final class CanonicalAttendanceIntakeService {
             $intentDecision=$this->recordDecision($case,'admin_adjudication','settlement_pending',null,'administrative_'.$outcome,array(),$now,$actor);
             $this->repository->commit();
             $settlement=null;
-            if($outcome==='settle_delivered')$settlement=$this->settlement->settleDelivered($case,true);
-            else $this->publishPhaseOutcome($case,$outcome==='review_required'?'review_required':'teacher_non_delivery');
+            if($outcome==='settle_delivered')$settlement=$this->settlement->settleDelivered($caseId,true);
+            else $this->publishPhaseOutcome($caseId,$outcome==='review_required'?'review_required':'teacher_non_delivery');
             $this->repository->begin();
             $case=$this->repository->caseById($caseId,true);
             $state=$outcome==='settle_delivered'?'settled':'adjudicated';
@@ -180,23 +208,25 @@ final class CanonicalAttendanceIntakeService {
             return array('case_id'=>(int)$case->id,'adjudication'=>$outcome,'state'=>$state,'decision_id'=>$decisionId,'settlement'=>$settlement,'intent_decision_id'=>$intentDecision);
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayCommand($winner,null,'adjudicate');
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayAdjudicationCommand($winner,$caseId,$outcome,$expected);
             throw $e;
         }
     }
 
     /** Re-run assessment for a case (administrator) so a pending settlement can converge. */
-    public function reassess(int $caseId,string $key):array{
+    public function reassess(int $caseId,array $input,string $key):array{
         $this->requireCapability(self::REVIEW_CAPABILITY);
+        $expected=(int)($input['expected_case_version']??0);
+        if($expected<1)throw new \InvalidArgumentException('expected_case_version_required');
         $digest=CanonicalAttendanceIdempotency::key($key);
         $this->repository->begin();
         try{
-            $case=$this->repository->caseById($caseId,true);
-            if(!$case)throw new \InvalidArgumentException('canonical_attendance_case_required');
+            $case=$this->hydrateDurableCase($caseId,'reassess');
             $lesson=$this->lessons->lesson((int)$case->lesson_id,true);
-            $facts=array('case_id'=>$caseId,'operation'=>'reassess','expected_case_version'=>(int)$case->case_version);
+            $facts=array('case_id'=>$caseId,'operation'=>'reassess','expected_case_version'=>$expected);
             $payload=CanonicalAttendanceIdempotency::payload($facts);
             if($winner=$this->repository->command($digest)){ $replay=$this->replayCommand($winner,$payload,'reassess'); $this->repository->commit(); return $replay; }
+            if((int)$case->case_version!==$expected)throw new \RuntimeException('stale_case_version');
             $assessment=$this->assessAndDecide($case,$lesson);
             $this->insertCommand($digest,$payload,'reassess',$facts,$case,null,$assessment['state'],$assessment['decision_id'],gmdate('Y-m-d H:i:s'),$this->actor());
             $this->repository->commit();
@@ -204,7 +234,7 @@ final class CanonicalAttendanceIntakeService {
             return array('case_id'=>$caseId,'assessment'=>$assessment,'settlement'=>$settlement);
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayCommand($winner,null,'reassess');
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayReassessCommand($winner,$caseId,$expected);
             throw $e;
         }
     }
@@ -227,9 +257,13 @@ final class CanonicalAttendanceIntakeService {
         if(!$version)throw new \InvalidArgumentException('schedule_version_conflict');
         $latest=$versions?$versions[count($versions)-1]:null;
         if(!$latest||(int)$latest->id!==$scheduleVersionId)throw new \InvalidArgumentException('schedule_version_conflict');
-        $policy=$this->repository->cutoverPolicy();
-        if(!$policy)throw new \InvalidArgumentException('cutover_policy_required');
-        if((string)$version->starts_at_utc<(string)$policy->cutover_utc)throw new \InvalidArgumentException('occurrence_before_cutover');
+        // Policy rows are immutable authority: read without a lock so occurrences that share one
+        // policy never serialise against each other.
+        $policy=$this->repository->applicablePolicy((string)$version->starts_at_utc,false);
+        if(!$policy){
+            if($this->repository->latestPolicy())throw new \InvalidArgumentException('occurrence_before_cutover');
+            throw new \InvalidArgumentException('cutover_policy_required');
+        }
         $case=$this->repository->caseFor($lessonId,$scheduleVersionId,true);
         $created=false;
         if(!$case){
@@ -242,6 +276,7 @@ final class CanonicalAttendanceIntakeService {
                 'teacher_assignment_id'=>(int)$lesson->teacher_assignment_id,
                 'occurrence_start_utc'=>(string)$version->starts_at_utc,'occurrence_end_utc'=>(string)$version->ends_at_utc,
                 'window_end_utc'=>(string)$window['window_end_utc'],'rule_version'=>CanonicalAttendanceRule::RULE_VERSION,
+                'cutover_policy_id'=>(int)$policy->id,
                 'state'=>'open','case_version'=>1,'latest_decision_id'=>null,
                 'created_at'=>$now,'created_by'=>$this->actor(),'updated_at'=>$now,'updated_by'=>$this->actor(),
             ));
@@ -254,25 +289,48 @@ final class CanonicalAttendanceIntakeService {
         return array($case,$lesson,$version,$created);
     }
 
+    /** A durable case is re-validated in full before any canonical consequence may be attempted. */
+    private function hydrateDurableCase(int $caseId,string $operation):object{
+        $case=$this->repository->caseById($caseId,true);
+        if(!$case)throw new \InvalidArgumentException('canonical_attendance_case_required');
+        if(!CanonicalAttendanceValidator::validForCase($caseId,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+        $versions=$this->schedules->versionsForLesson((int)$case->lesson_id,true);
+        $latest=$versions?$versions[count($versions)-1]:null;
+        if(!$latest||(int)$latest->id!==(int)$case->schedule_version_id)throw new \InvalidArgumentException('schedule_version_conflict');
+        do_action('dzn_phase_2a2p_case_hydrated',$caseId,$operation);
+        return $case;
+    }
+
     /** Assess the evidence set and durably record the assessment (and anomaly) decisions. */
     private function assessAndDecide(object $case,?object $lesson):array{
         $lesson??=$this->lessons->lesson((int)$case->lesson_id,true);
         $evidence=$this->repository->evidenceForCase((int)$case->id,true);
         $teacherIntervals=array();$studentIntervals=array();$anomalies=array();
-        $providerSeen=0;$unverified=0;$unresolved=0;
+        $providerSeen=0;$unverified=0;$unmapped=0;$ambiguous=0;$mismatched=0;
         foreach($evidence as$row){
             if((string)$row->evidence_kind!=='provider_interval')continue;
             $providerSeen++;
-            if((string)($row->verification_state??'')!=='verified'){$unverified++;continue;}
             $identity=(string)($row->participant_identity_state??'');
-            if($identity!=='resolved'){$unresolved++;continue;}
+            if((string)($row->verification_state??'')!=='verified'){
+                $unverified++;
+                if($identity==='ambiguous')$ambiguous++;else $unmapped++;
+                continue;
+            }
+            if($identity!=='resolved'){$unmapped++;continue;}
+            $role=(string)$row->participant_role;
+            $expected=$role==='teacher'?(int)$case->teacher_id:(int)$case->student_id;
+            $resolved=$role==='teacher'?(int)($row->resolved_teacher_id??0):(int)($row->resolved_student_id??0);
+            if($role!=='teacher'&&$role!=='student'){$unmapped++;continue;}
+            if($resolved!==$expected){$mismatched++;continue;}
             $interval=array('join_at_utc'=>(string)($row->join_at_utc??''),'leave_at_utc'=>$row->leave_at_utc===null?null:(string)$row->leave_at_utc);
-            if((string)$row->participant_role==='teacher')$teacherIntervals[]=$interval;
-            elseif((string)$row->participant_role==='student')$studentIntervals[]=$interval;
+            if($role==='teacher')$teacherIntervals[]=$interval;
+            else $studentIntervals[]=$interval;
         }
         if($providerSeen===0)$anomalies[]='provider_evidence_missing';
         if($unverified>0)$anomalies[]='provider_evidence_incomplete';
-        if($unresolved>0)$anomalies[]='participant_ambiguous';
+        if($unmapped>0)$anomalies[]='provider_identity_unmapped';
+        if($ambiguous>0)$anomalies[]='participant_ambiguous';
+        if($mismatched>0)$anomalies[]='participant_identity_mismatch';
         $assessment=CanonicalAttendanceRule::assess($teacherIntervals,$studentIntervals,(string)$case->occurrence_start_utc,(string)$case->occurrence_end_utc);
         foreach($assessment['excluded'] as$excluded){
             $reason=(string)($excluded['reason']??'');
@@ -310,16 +368,45 @@ final class CanonicalAttendanceIntakeService {
     /** Run settlement outside the Phase-P transaction and durably record the converged result. */
     private function maybeSettle(object $case,array $assessment):?array{
         if(empty($assessment['eligible']))return null;
-        $settlement=$this->settlement->settleDelivered($case,false);
+        $settlement=$this->settlement->settleDelivered((int)$case->id,false);
+        $decisionId=$this->recordSettlementResult((int)$case->id,(int)$settlement['outcome_id']);
+        return array_merge($settlement,array('decision_id'=>$decisionId));
+    }
+
+    /**
+     * P-5: an exact replay of the original ingest command resumes forward settlement when the durable
+     * case state says settlement is still pending, so an interrupted ordinary settlement converges
+     * without manual reassessment and without duplicating canonical authority.
+     */
+    private function convergeSettlement(int $caseId,array $result):array{
+        $fresh=$this->repository->caseById($caseId);
+        if(!$fresh)throw new \InvalidArgumentException('canonical_attendance_case_required');
+        if((string)$fresh->state!=='settlement_pending')return array_merge($result,array('state'=>(string)$fresh->state));
+        $settlement=$this->settlement->settleDelivered($caseId,false);
+        $decisionId=$this->recordSettlementResult($caseId,(int)$settlement['outcome_id']);
+        return array_merge($result,array('settlement'=>$settlement,'decision_id'=>$decisionId,'state'=>'settled','converged'=>true));
+    }
+
+    /** Record the final settlement decision exactly once per case, and return the recorded decision. */
+    private function recordSettlementResult(int $caseId,int $outcomeId):int{
+        $case=$this->repository->caseById($caseId);
+        if(!$case)throw new \InvalidArgumentException('canonical_attendance_case_required');
+        $overlap=(int)$this->repository->maxAssessmentOverlap($caseId);
+        $digest=CanonicalAttendanceIdempotency::key('attendance-settlement-record-'.$case->uid);
         $this->repository->begin();
         try{
-            $fresh=$this->repository->caseById((int)$case->id,true);
+            $existing=$this->repository->command($digest);
+            $fresh=$this->repository->caseById($caseId,true);
+            // A settlement recorded earlier is never repeated, but new evidence may have legitimately
+            // returned the case to a pending state; converge it explicitly and append-only.
+            if($existing&&(string)$fresh->state==='settled'){$this->repository->commit();return (int)$existing->result_decision_id;}
             $now=gmdate('Y-m-d H:i:s');
-            $decisionId=$this->recordDecision($fresh,'settlement_completed','settled',$assessment['qualifying_overlap_seconds'],'accepted',array(),$now,$this->actor(),(int)$settlement['outcome_id']);
-            do_action('dzn_phase_2a2p_after_settlement_result',(int)$case->id,$decisionId);
-            $this->insertCommand(CanonicalAttendanceIdempotency::key('attendance-settlement-record-'.$case->uid),CanonicalAttendanceIdempotency::payload(array('case_id'=>(int)$case->id,'outcome_id'=>(int)$settlement['outcome_id'])),'settlement_completed',array('case_id'=>(int)$case->id),$fresh,null,'settled',$decisionId,$now,$this->actor());
+            $decisionId=$this->recordDecision($fresh,'settlement_completed','settled',$overlap,'accepted',array(),$now,$this->actor(),$outcomeId);
+            if($existing){$this->repository->commit();return $decisionId;}
+            do_action('dzn_phase_2a2p_after_settlement_result',$caseId,$decisionId);
+            $this->insertCommand($digest,CanonicalAttendanceIdempotency::payload(array('case_id'=>$caseId,'outcome_id'=>$outcomeId)),'settlement_completed',array('case_id'=>$caseId),$fresh,null,'settled',$decisionId,$now,$this->actor());
             $this->repository->commit();
-            return array_merge($settlement,array('decision_id'=>$decisionId));
+            return $decisionId;
         }catch(\Throwable$e){
             $this->repository->rollback();
             throw $e;
@@ -327,7 +414,9 @@ final class CanonicalAttendanceIntakeService {
     }
 
     /** Delegate a non-delivery/review outcome to Phase O; Phase O owns any consequence. */
-    private function publishPhaseOutcome(object $case,string $outcomeCode):void{
+    private function publishPhaseOutcome(int $caseId,string $outcomeCode):void{
+        $case=$this->repository->caseById($caseId);
+        if(!$case)throw new \InvalidArgumentException('canonical_attendance_case_required');
         $lesson=$this->lessons->lesson((int)$case->lesson_id);
         $state=(string)($lesson->lifecycle_state??'');
         if(!in_array($state,array('authorised','completed'),true))throw new \InvalidArgumentException('lesson_not_delivery_recordable');
@@ -388,21 +477,18 @@ final class CanonicalAttendanceIntakeService {
         );
     }
 
+    /**
+     * Parse the immutable caller intent. No participant identity or verification state is accepted
+     * from the caller: both are derived from the durable identity registry after the occurrence is
+     * locked, so a caller can never assert its own resolution or verification.
+     */
     private function providerIntent(array $input):array{
         $providerCode=(string)($input['provider_code']??'');
         if(!in_array($providerCode,self::PROVIDER_CODES,true))throw new \InvalidArgumentException('Controlled provider code required');
         $role=(string)($input['participant_role']??'');
         if(!in_array($role,CanonicalAttendanceValidator::PARTICIPANT_ROLES,true))throw new \InvalidArgumentException('Controlled participant role required');
-        // P-1 (partial): intake must never self-assert a verified/resolved participant. Callers must
-        // supply an explicit identity state and, for a resolved participant, the exact canonical ID.
-        $identity=(string)($input['participant_identity_state']??'');
-        if(!in_array($identity,CanonicalAttendanceValidator::IDENTITY_STATES,true))throw new \InvalidArgumentException('Controlled participant identity state required');
-        $verification=(string)($input['verification_state']??'');
-        if(!in_array($verification,CanonicalAttendanceValidator::VERIFICATION_STATES,true))throw new \InvalidArgumentException('Controlled verification state required');
-        if($identity==='resolved'){
-            if($role==='teacher'&&(int)($input['resolved_teacher_id']??0)<1)throw new \InvalidArgumentException('Resolved Teacher identity requires the canonical Teacher ID');
-            if($role==='student'&&(int)($input['resolved_student_id']??0)<1)throw new \InvalidArgumentException('Resolved Student identity requires the canonical Student ID');
-        }
+        $account=trim((string)($input['provider_account_key']??''));
+        if($account==='')throw new \InvalidArgumentException('Provider account identity required');
         $observed=(string)($input['observed_at']??'');
         if(!CanonicalAttendanceValidator::utc($observed)||$observed>gmdate('Y-m-d H:i:s'))throw new \InvalidArgumentException('Valid past-or-present UTC observed time required');
         $join=$input['join_at_utc']??null;$leave=$input['leave_at_utc']??null;
@@ -411,19 +497,44 @@ final class CanonicalAttendanceIntakeService {
         return array(
             'source_kind'=>'provider','evidence_kind'=>'provider_interval',
             'provider_code'=>$providerCode,
-            'provider_account_digest'=>$this->optionalDigest($input,'provider_account_key'),
+            'provider_account_digest'=>CanonicalAttendanceIdempotency::evidence($account),
             'provider_session_digest'=>$this->optionalDigest($input,'provider_session_key'),
             'provider_event_key_digest'=>CanonicalAttendanceIdempotency::providerEventKey((string)($input['provider_event_key']??'')),
             'provider_payload_digest'=>CanonicalAttendanceIdempotency::providerPayload((string)($input['provider_payload_key']??'')),
-            'participant_role'=>$role,'participant_identity_state'=>$identity,
-            'resolved_student_id'=>$identity==='resolved'?(int)($input['resolved_student_id']??0):null,
-            'resolved_teacher_id'=>$identity==='resolved'?(int)($input['resolved_teacher_id']??0):null,
-            'verification_state'=>$verification,
+            'participant_role'=>$role,
+            'participant_identity_state'=>'unknown','resolved_student_id'=>null,'resolved_teacher_id'=>null,
+            'verification_state'=>'unverified','identity_reason'=>'provider_identity_unmapped',
             'join_at_utc'=>$join,'leave_at_utc'=>$leave,'observed_at'=>$observed,
             'provenance_digest'=>CanonicalAttendanceIdempotency::evidence((string)($input['provenance_reference']??$input['provider_event_key']??'')),
             'reason_code'=>'provider_attendance_evidence',
             'evidence_reference_digest'=>CanonicalAttendanceIdempotency::evidence((string)($input['evidence_reference']??$input['provider_event_key']??'')),
         );
+    }
+
+    /**
+     * P-1: derive the participant identity from the durable registry only.
+     *
+     * The caller's claim is irrelevant; the account digest decides. A verified mapping to the exact
+     * expected canonical participant is the only way evidence can contribute qualifying attendance.
+     */
+    private function resolveIdentity(array $intent):array{
+        // Registry rows are read without row locks: two occurrences that share one provider account
+        // must never contend on the registry row, only on their own occurrence aggregate.
+        $rows=$this->repository->mappingsForAccount((string)$intent['provider_code'],(string)$intent['provider_account_digest'],(string)$intent['participant_role'],false);
+        $resolved=CanonicalAttendanceIdentityService::resolve($rows);
+        $intent['identity_reason']=$resolved['reason'];
+        if($resolved['state']==='resolved'){
+            $intent['participant_identity_state']='resolved';
+            $intent['verification_state']='verified';
+            $participantId=(int)$resolved['participant_id'];
+            if((string)$intent['participant_role']==='teacher')$intent['resolved_teacher_id']=$participantId;
+            else $intent['resolved_student_id']=$participantId;
+            return $intent;
+        }
+        $intent['participant_identity_state']=$resolved['state']==='ambiguous'?'ambiguous':'unknown';
+        $intent['verification_state']='unverified';
+        $intent['resolved_student_id']=null;$intent['resolved_teacher_id']=null;
+        return $intent;
     }
 
     private function claimIntent(string $kind,array $input):array{
@@ -445,12 +556,76 @@ final class CanonicalAttendanceIntakeService {
         );
     }
 
+    /** Immutable command context: caller-supplied facts only, so an exact replay stays comparable. */
     private function evidenceFacts(object $case,array $intent):array{
-        return array('domain'=>'canonical_attendance_v1','operation'=>'ingest_provider_evidence','case_id'=>(int)$case->id,'lesson_id'=>(int)$case->lesson_id,'schedule_version_id'=>(int)$case->schedule_version_id,'provider_event_key_digest'=>$intent['provider_event_key_digest'],'provider_payload_digest'=>$intent['provider_payload_digest'],'participant_role'=>$intent['participant_role'],'join_at_utc'=>$intent['join_at_utc'],'leave_at_utc'=>$intent['leave_at_utc']);
+        return array(
+            'domain'=>'canonical_attendance_v1','operation'=>'ingest_provider_evidence',
+            'case_id'=>(int)$case->id,'lesson_id'=>(int)$case->lesson_id,'schedule_version_id'=>(int)$case->schedule_version_id,
+            'provider_code'=>(string)$intent['provider_code'],
+            'provider_account_digest'=>(string)($intent['provider_account_digest']??''),
+            'provider_event_key_digest'=>(string)($intent['provider_event_key_digest']??''),
+            'provider_payload_digest'=>(string)($intent['provider_payload_digest']??''),
+            'participant_role'=>(string)($intent['participant_role']??''),
+            'join_at_utc'=>$intent['join_at_utc']??null,'leave_at_utc'=>$intent['leave_at_utc']??null,
+            'observed_at'=>(string)($intent['observed_at']??''),
+            'provenance_digest'=>(string)($intent['provenance_digest']??''),
+        );
     }
 
     private function claimFacts(object $case,array $intent):array{
         return array('domain'=>'canonical_attendance_v1','operation'=>'submit_claim','case_id'=>(int)$case->id,'lesson_id'=>(int)$case->lesson_id,'schedule_version_id'=>(int)$case->schedule_version_id,'evidence_kind'=>$intent['evidence_kind'],'reason_code'=>$intent['reason_code'],'observed_at'=>$intent['observed_at'],'evidence_reference_digest'=>$intent['evidence_reference_digest']);
+    }
+
+    /** P-3/P-4: full immutable context equality for a replayed provider event. */
+    private function sameEvidenceContext(object $existing,object $case,array $intent):bool{
+        if((int)$existing->case_id!==(int)$case->id)return false;
+        if((int)$existing->lesson_id!==(int)$case->lesson_id)return false;
+        if((int)$existing->schedule_version_id!==(int)$case->schedule_version_id)return false;
+        if((string)$existing->provider_code!==(string)$intent['provider_code'])return false;
+        if((string)($existing->provider_account_digest??'')!==(string)($intent['provider_account_digest']??''))return false;
+        if((string)($existing->participant_role??'')!==(string)($intent['participant_role']??''))return false;
+        if(!hash_equals((string)$existing->provider_payload_digest,(string)$intent['provider_payload_digest']))return false;
+        if((string)($existing->provenance_digest??'')!==(string)($intent['provenance_digest']??''))return false;
+        if((string)($existing->join_at_utc??'')!==(string)($intent['join_at_utc']??''))return false;
+        $existingLeave=$existing->leave_at_utc===null?null:(string)$existing->leave_at_utc;
+        $incomingLeave=$intent['leave_at_utc']===null?null:(string)$intent['leave_at_utc'];
+        if($existingLeave!==$incomingLeave)return false;
+        if((string)$existing->observed_at!==(string)$intent['observed_at'])return false;
+        return true;
+    }
+
+    /**
+     * P-4: a refused conflicting provider event must still leave durable, reviewable evidence of the
+     * conflict. The original evidence row is never overwritten and no canonical truth is touched.
+     */
+    private function conflictKind(object $existing,object $case):string{
+        if((int)$existing->lesson_id!==(int)$case->lesson_id)return 'cross_lesson';
+        if((int)$existing->schedule_version_id!==(int)$case->schedule_version_id)return 'cross_schedule_version';
+        if((int)$existing->case_id!==(int)$case->id)return 'cross_context';
+        return 'changed_payload';
+    }
+
+    private function recordConflict(object $case,object $existing,array $intent,string $kind):void{
+        global $wpdb;
+        if(!in_array($kind,CanonicalAttendanceValidator::CONFLICT_KINDS,true))$kind='cross_context';
+        $now=gmdate('Y-m-d H:i:s');
+        try{
+            $this->repository->insertConflict(array(
+                'uid'=>Identifier::uid(),'case_id'=>(int)$case->id,'lesson_id'=>(int)$case->lesson_id,
+                'schedule_version_id'=>(int)$case->schedule_version_id,
+                'provider_code'=>(string)$intent['provider_code'],
+                'provider_event_key_digest'=>(string)$intent['provider_event_key_digest'],
+                'conflict_kind'=>$kind,'existing_evidence_id'=>(int)$existing->id,
+                'incoming_payload_digest'=>(string)($intent['provider_payload_digest']??''),
+                'incoming_reference_digest'=>(string)$intent['evidence_reference_digest'],
+                'detected_at'=>$now,'created_at'=>$now,'created_by'=>$this->actor(),
+            ));
+        }catch(\Throwable$e){
+            // The conflict receipt is not itself a reason to lose the conflict: it is retried below by
+            // an anomaly, which carries the same classification without depending on the unique key.
+            if($wpdb->last_error==='')throw $e;
+        }
+        $this->openAnomaly($case,'duplicate_event_conflict',$now,$this->actor());
     }
 
     private function authoriseOwnership(string $kind,object $case,bool $late):void{
@@ -495,6 +670,7 @@ final class CanonicalAttendanceIntakeService {
             'command_key_digest'=>$digest,'command_payload_digest'=>$payload??CanonicalAttendanceIdempotency::payload($facts),
             'case_id'=>$case?(int)$case->id:null,'lesson_id'=>(int)($facts['lesson_id']??0)>0?(int)$facts['lesson_id']:null,
             'schedule_version_id'=>isset($facts['schedule_version_id'])?(int)$facts['schedule_version_id']:null,
+            'subject_id'=>null,
             'expected_case_version'=>$facts['expected_case_version']??null,
             'result_evidence_id'=>$evidenceId,'result_decision_id'=>$decisionId,'result_state'=>$state,
             'created_at'=>$now,'created_by'=>$actor,
@@ -513,11 +689,56 @@ final class CanonicalAttendanceIntakeService {
         );
     }
 
-    private function ingestReplay(string $digest,array $intent,object $case):?array{
+    private function ingestReplay(string $digest,string $payload,object $case):?array{
         $winner=$this->repository->command($digest);
         if(!$winner)return null;
-        if(!hash_equals((string)$winner->command_payload_digest,CanonicalAttendanceIdempotency::payload($this->evidenceFacts($case,$intent))))throw new IdempotencyConflictException('Idempotency conflict');
-        return array('case_id'=>(int)$case->id,'operation'=>'ingest_provider_evidence','idempotent'=>true,'evidence_id'=>$winner->result_evidence_id===null?null:(int)$winner->result_evidence_id,'assessment'=>null,'settlement'=>null,'created'=>false);
+        if(!hash_equals((string)$winner->command_payload_digest,$payload))throw new IdempotencyConflictException('Idempotency conflict');
+        if((string)$winner->command_domain!=='canonical_attendance_v1'||(string)$winner->operation!=='ingest_provider_evidence')throw new \RuntimeException('Contaminated canonical attendance command');
+        if((int)$winner->lesson_id!==(int)$case->lesson_id||$winner->schedule_version_id===null||(int)$winner->schedule_version_id!==(int)$case->schedule_version_id)throw new IdempotencyConflictException('Idempotency conflict');
+        $fresh=$this->repository->caseById((int)$case->id,true);
+        $converge=$fresh!==null&&(string)$fresh->state==='settlement_pending';
+        return array('case_id'=>(int)$case->id,'operation'=>'ingest_provider_evidence','idempotent'=>true,'evidence_id'=>$winner->result_evidence_id===null?null:(int)$winner->result_evidence_id,'decision_id'=>$winner->result_decision_id===null?null:(int)$winner->result_decision_id,'state'=>$fresh===null?(string)$winner->result_state:(string)$fresh->state,'assessment'=>null,'settlement'=>null,'converge'=>$converge);
+    }
+
+    // ---------------------------------------------------------------------
+    // Duplicate-key recovery: the expected payload and context are always compared, never assumed.
+    // ---------------------------------------------------------------------
+
+    private function replayIngestCommand(object $winner,int $lessonId,int $scheduleVersionId):array{
+        if((string)$winner->operation!=='ingest_provider_evidence'||$winner->case_id===null)throw new IdempotencyConflictException('Idempotency conflict');
+        if((int)$winner->lesson_id!==$lessonId||(int)($winner->schedule_version_id??0)!==$scheduleVersionId)throw new IdempotencyConflictException('Idempotency conflict');
+        $case=$this->repository->caseById((int)$winner->case_id);
+        if(!$case)throw new IdempotencyConflictException('Idempotency conflict');
+        return $this->replayCommand($winner,null,'ingest_provider_evidence');
+    }
+
+    private function replayClaimCommand(object $winner,int $lessonId,int $scheduleVersionId,array $intent):array{
+        if((string)$winner->operation!=='submit_claim'||$winner->case_id===null)throw new IdempotencyConflictException('Idempotency conflict');
+        if((int)$winner->lesson_id!==$lessonId||(int)($winner->schedule_version_id??0)!==$scheduleVersionId)throw new IdempotencyConflictException('Idempotency conflict');
+        $case=$this->repository->caseById((int)$winner->case_id);
+        if(!$case)throw new IdempotencyConflictException('Idempotency conflict');
+        return array(
+            'case_id'=>(int)$case->id,'operation'=>'submit_claim','idempotent'=>true,
+            'evidence_id'=>$winner->result_evidence_id===null?null:(int)$winner->result_evidence_id,
+            'decision_id'=>$winner->result_decision_id===null?null:(int)$winner->result_decision_id,
+            'state'=>(string)$winner->result_state,
+            'payload_digest'=>(string)$winner->command_payload_digest,
+            'expected_payload_digest'=>CanonicalAttendanceIdempotency::payload($this->claimFacts($case,$intent)),
+        );
+    }
+
+    private function replayAdjudicationCommand(object $winner,int $caseId,string $outcome,int $expected):array{
+        if((string)$winner->operation!=='adjudicate'||(int)($winner->case_id??0)!==$caseId)throw new IdempotencyConflictException('Idempotency conflict');
+        $case=$this->repository->caseById($caseId);
+        if(!$case)throw new IdempotencyConflictException('Idempotency conflict');
+        $facts=array('case_id'=>$caseId,'adjudication'=>$outcome,'expected_case_version'=>$expected,'lesson_id'=>(int)$case->lesson_id);
+        return $this->replayCommand($winner,CanonicalAttendanceIdempotency::payload($facts),'adjudicate');
+    }
+
+    private function replayReassessCommand(object $winner,int $caseId,int $expected):array{
+        if((string)$winner->operation!=='reassess'||(int)($winner->case_id??0)!==$caseId)throw new IdempotencyConflictException('Idempotency conflict');
+        $facts=array('case_id'=>$caseId,'operation'=>'reassess','expected_case_version'=>$expected);
+        return $this->replayCommand($winner,CanonicalAttendanceIdempotency::payload($facts),'reassess');
     }
 
     private function requireCapability(string $capability):void{if(!current_user_can($capability))throw new \RuntimeException('Unauthorized');}
