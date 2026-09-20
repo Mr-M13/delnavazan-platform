@@ -262,9 +262,13 @@ final class CanonicalLessonScheduleService {
 
     private function assertCapacity(int $teacherId,string $startsAt,string $occupiedEnd,int $lessonId):void{
         $conflicts=$this->repository->overlappingApplicable($teacherId,$startsAt,$occupiedEnd,$lessonId);
-        if(!$conflicts)return;
-        foreach($conflicts as$conflict)if(!CanonicalLessonScheduleValidator::validForLesson((int)$conflict->lesson_id,$this->repository,$this->lessons))throw new \InvalidArgumentException('canonical_schedule_integrity_conflict');
-        throw new \InvalidArgumentException('teacher_slot_conflict');
+        if($conflicts){
+            foreach($conflicts as$conflict)if(!CanonicalLessonScheduleValidator::validForLesson((int)$conflict->lesson_id,$this->repository,$this->lessons))throw new \InvalidArgumentException('canonical_schedule_integrity_conflict');
+            throw new \InvalidArgumentException('teacher_slot_conflict');
+        }
+        // Phase 2A.2-Q: an active pre-payment continuation hold is real Teacher capacity. The hold is
+        // never a Lesson schedule, but the same capacity gate must consider both authorities.
+        CanonicalContinuationCapacityAuthority::assertNoActiveHold($teacherId,$startsAt,$occupiedEnd);
     }
 
     /** Availability is an upstream constraint, never scheduling authority. */

@@ -12,8 +12,8 @@
 | Phase 2A.2-M approved candidate | `f44b502509f5dcb9b5d0281cfda4329407abd3bf`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
-| Current authoritative main | Phase 2A.2-P implementation merge `30fe1f11c425ad7066408f20ca57e2ca084841d6`; the docs-only closeout commit that follows is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None |
+| Current authoritative main | `b7378665af1bc3cce935cfae27d346326a1ddc10` (Phase-P implementation merge `30fe1f11c425ad7066408f20ca57e2ca084841d6` plus its docs-only closeout) |
+| Active Platform candidate | Phase 2A.2-Q post-intro continuation & slot reservation authority — Schema 24 candidate, unmerged, undeployed, owner-verified, awaiting independent review (see [PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md](PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md)) |
 | Schema | 23 |
 | Migrations | 001–023; latest `023_canonical_attendance_intake_authority` |
 | Build identity | `phase2a2p-canonical-attendance-intake-20260919.1` |
@@ -28,7 +28,8 @@
 | Current 2A.2-N state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** |
 | Current 2A.2-O state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3) |
 | Current 2A.2-P state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3). Provenance: original `6a6a4ce8249f79df0371753479587e5d9c1fcd27` failed (P-1…P-11); `eda3df2a24f5de67dcbba1dbe6e4ae863b325e13` is historical incomplete; `629310e835a4cad3bc25d5406280944c2b6e6145` failed; `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9` failed; `30fe1f11c425ad7066408f20ca57e2ca084841d6` passed and was fast-forward merged. Phase P is provider-neutral intake/evidence/assessment/review authority only; Phase O remains canonical delivery/attendance consequence authority and Lesson authority owns completion. No Google/provider credential, no production cutover, no deployment; Theme/NIU untouched. |
-| Next Platform action | **Requires explicit product/architecture authorisation.** No next Platform slice is approved by this record; do not begin a production attendance cutover, Google/Meet/OAuth/webhook integration, provider credential work, payment/notification/Finance work, Teacher Portal or Student Portal integration on the strength of this document. |
+| Current 2A.2-Q state | **IMPLEMENTATION CANDIDATE — owner-verified, NOT merged, NOT deployed.** Phase Q owns only the post-introductory continuation decision and a bounded pre-payment hold on the expected first regular class slot, integrated into the single canonical Teacher-capacity arbitration seam. It creates no payment/Stripe object, Term, standard or replacement Lesson, academy obligation, delivery/attendance outcome, notification or provider/calendar/Google authority. Schema 23 remains authoritative on `main`; Schema 24 / `024_post_intro_continuation_slot_reservation_authority` is candidate-only. |
+| Next Platform action | **Independent review of the Phase 2A.2-Q candidate.** Beyond that, **explicit product/architecture authorisation is required**; do not begin payment/Stripe, Term or Lesson materialisation, notification, Google/provider, Teacher/Student Portal, production attendance cutover or deployment work on the strength of this document. |
 
 The completed coordination chain is:
 

@@ -13,14 +13,18 @@ $repo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CanonicalAtte
 $phaseP=$rule.$intake.$settlement.$validator.$read.$repo.$identity;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<23)throw new RuntimeException('Missing Phase P schema identity');
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2p-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase P build identity');
+// Forward-compatible canonical build identity: a later additive phase advances the build id, so the
+// Phase-P contract pins the repository's canonical build-identity pattern rather than a frozen value.
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', '[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing canonical build identity');
 
 // Migration, storage, verifier wiring, capabilities.
 foreach(array('023_canonical_attendance_intake_authority','install_canonical_attendance_intake_authority','verify_canonical_attendance_intake_schema','canonical_attendance_cases','canonical_attendance_evidence','canonical_attendance_decisions','canonical_attendance_case_anomalies','canonical_attendance_commands','canonical_attendance_cutover_policies','canonical_attendance_participant_mappings','canonical_attendance_conflicts','cutover_policy_id','dzn_ingest_canonical_attendance_evidence','dzn_submit_own_attendance_claim','dzn_submit_own_delivery_claim','dzn_manage_canonical_attendance_review','dzn_view_canonical_attendance_review','dzn_manage_canonical_attendance_identity')as$n)if(!str_contains($migration.$plugin,$n))throw new RuntimeException('Missing Phase P migration contract: '.$n);
 if(!str_contains($migration,"if(\$id==='023_canonical_attendance_intake_authority')self::verify_canonical_attendance_intake_schema();"))throw new RuntimeException('Migration 023 must invoke the Phase P schema verifier before it is recorded');
 if(substr_count($migration,'self::verify_canonical_attendance_intake_schema();')<3)throw new RuntimeException('Phase P verifier must run after migration 023, on current-schema verification and before schema activation');
 if(!str_contains($migration,"in_array( '023_canonical_attendance_intake_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-023 pre-activation verification is missing');
-if(!str_contains($migration,"'023_canonical_attendance_intake_authority' )"))throw new RuntimeException('Phase P migration must be listed as required');
+// Forward-compatible: a later additive migration is appended to the required list, so assert that
+// migration 023 is listed as a required entry rather than that it is the final entry.
+if(!str_contains($migration,"'023_canonical_attendance_intake_authority',")&&!str_contains($migration,"'023_canonical_attendance_intake_authority' )"))throw new RuntimeException('Phase P migration must be listed as required');
 $install=substr($migration,strpos($migration,'private static function install_canonical_attendance_intake_authority'),strpos($migration,'private static function verify_canonical_attendance_intake_schema')-strpos($migration,'private static function install_canonical_attendance_intake_authority'));
 // Only the two mutable registry aggregates (case state, participant mapping state) may carry updated_at.
 if(substr_count($install,'updated_at datetime')!==2)throw new RuntimeException('Only the mutable intake case and participant-mapping aggregates may carry updated_at; Phase P evidence must stay append-only');
