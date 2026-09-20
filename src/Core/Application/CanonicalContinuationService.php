@@ -123,10 +123,15 @@ final class CanonicalContinuationService {
                 'actor_user_id'=>$actor,'authority_basis'=>$basis,'reason_code'=>$reason,
                 'schedule_timezone'=>$resolved['schedule_timezone'],'local_wall_date'=>$resolved['local_wall_date'],'local_wall_time'=>$resolved['local_wall_time'],
                 'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'occupied_ends_at_utc'=>$resolved['occupied_ends_at_utc'],
+                'rule_version'=>CanonicalContinuationRule::RULE_VERSION,
                 'evidence_reference_digest'=>$evidence['digest']);
             $payload=CanonicalContinuationIdempotency::payload($facts);
             if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload,'record_first_regular_slot');$this->repository->commit();return $result;}
             if($this->repository->slotAuthorityForIntro((int)$context->lesson->id,true))throw new \InvalidArgumentException('first_regular_slot_already_authorised');
+            // The pre-existing aggregate must already be valid before the slot authority is written: the
+            // intermediate (slot present, hold absent) state is never observable outside this transaction.
+            $existingCase=$this->repository->caseForIntro((int)$context->lesson->id,true);
+            if($existingCase&&!CanonicalContinuationValidator::validForCase((int)$existingCase->id,$this->repository,true))throw new \InvalidArgumentException('canonical_continuation_integrity_conflict');
             $now=gmdate('Y-m-d H:i:s');
             $id=$this->repository->insertSlotAuthority(array(
                 'uid'=>Identifier::uid(),'intro_lesson_id'=>(int)$context->lesson->id,'intro_schedule_version_id'=>(int)$context->occurrence->id,
@@ -139,16 +144,32 @@ final class CanonicalContinuationService {
                 'rule_version'=>CanonicalContinuationRule::RULE_VERSION,'recorded_at'=>$now,'recorded_by'=>$actor,
             ));
             do_action('dzn_phase_2a2q_after_slot_authority_insert',(int)$context->lesson->id,$id);
+            // Q-R1-1: a Student may legitimately continue before the agreed slot is recorded. Recording
+            // the authoritative slot then converges that EXISTING decision into the hold inside this one
+            // transaction — no second Student decision is created and no consent is duplicated.
+            $convergence=$this->convergeExistingCase($existingCase,CanonicalContinuationRule::DECISION_CONTINUE,(object)array(
+                'id'=>$id,'intro_lesson_id'=>(int)$context->lesson->id,'intro_schedule_version_id'=>(int)$context->occurrence->id,
+                'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'occupied_ends_at_utc'=>$resolved['occupied_ends_at_utc'],
+                'duration_minutes'=>(int)$resolved['duration_minutes'],'buffer_minutes'=>(int)$resolved['buffer_minutes'],
+                'schedule_timezone'=>$resolved['schedule_timezone'],'local_wall_date'=>$resolved['local_wall_date'],'local_wall_time'=>$resolved['local_wall_time'],
+            ),$context,$now,$actor);
             $this->writeCommand(array(
                 'uid'=>Identifier::uid(),'command_domain'=>'canonical_continuation_v1','operation'=>'record_first_regular_slot',
                 'command_key_digest'=>$digest,'command_payload_digest'=>$payload,
-                'continuation_case_id'=>null,'intro_lesson_id'=>(int)$context->lesson->id,
+                'continuation_case_id'=>$convergence['case_id'],'intro_lesson_id'=>(int)$context->lesson->id,
                 'student_id'=>(int)$context->lesson->student_id,'teacher_id'=>(int)$context->lesson->teacher_id,
-                'result_decision_id'=>null,'result_reservation_id'=>null,'result_intervention_id'=>null,
+                'result_decision_id'=>$convergence['decision_id'],'result_reservation_id'=>$convergence['reservation_id'],'result_intervention_id'=>null,
                 'result_slot_authority_id'=>$id,'result_state'=>'recorded','created_at'=>$now,'created_by'=>$actor,
             ));
             $this->repository->commit();
-            return array('slot_authority_id'=>$id,'intro_lesson_id'=>(int)$context->lesson->id,'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'schedule_timezone'=>$resolved['schedule_timezone'],'authority_basis'=>$basis);
+            return array(
+                'slot_authority_id'=>$id,'intro_lesson_id'=>(int)$context->lesson->id,
+                'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],
+                'schedule_timezone'=>$resolved['schedule_timezone'],'authority_basis'=>$basis,
+                'case_id'=>$convergence['case_id'],'reservation_id'=>$convergence['reservation_id'],
+                'decision_id'=>$convergence['decision_id'],
+                'converged'=>$convergence['converged'],'convergence_reason'=>$convergence['reason'],
+            );
         }catch(\Throwable$e){
             $this->repository->rollback();
             if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload,'record_first_regular_slot');
@@ -339,6 +360,35 @@ final class CanonicalContinuationService {
         ));
         do_action('dzn_phase_2a2q_after_reservation_insert',(int)$case->id,$id);
         return array('reservation_id'=>$id,'state'=>$state,'expires_at'=>$expires,'starts_at_utc'=>$slot['starts_at_utc'],'ends_at_utc'=>$slot['ends_at_utc'],'capacity_effective'=>CanonicalContinuationRule::capacityEffective($state,$expires,$now),'reused'=>false);
+    }
+
+    /**
+     * Q-R1-1 delayed convergence: turn an already-recorded continuing decision into the hold.
+     *
+     * The original Student decision is never rewritten or duplicated; the reservation references it.
+     * A case that is no longer eligible simply keeps its correct history and the slot authority stands
+     * alone (a legitimate standalone state). A capacity conflict throws, so the whole transaction —
+     * including the slot authority — rolls back and no false success can be recorded.
+     */
+    private function convergeExistingCase(?object $case,string $requiredDecision,object $slotAuthority,object $context,string $now,int $actor):array{
+        if(!$case)return array('converged'=>false,'reason'=>'no_continuation_case','case_id'=>null,'reservation_id'=>null,'decision_id'=>null);
+        if((string)$case->current_decision!==$requiredDecision)return array('converged'=>false,'reason'=>'continuation_not_active','case_id'=>(int)$case->id,'reservation_id'=>null,'decision_id'=>null);
+        if($this->repository->reservationForCase((int)$case->id,true))return array('converged'=>false,'reason'=>'reservation_already_exists','case_id'=>(int)$case->id,'reservation_id'=>null,'decision_id'=>null);
+        $decisionId=(int)$case->latest_decision_id;
+        if($decisionId<1)throw new \InvalidArgumentException('canonical_continuation_integrity_conflict');
+        $reservation=$this->holdFirstRegularSlot($case,$decisionId,$slotAuthority,$context,$now,$actor);
+        $this->resolveMissingSlotRequirement($case,$now,$actor);
+        return array('converged'=>true,'reason'=>'converged','case_id'=>(int)$case->id,'reservation_id'=>(int)$reservation['reservation_id'],'decision_id'=>$decisionId);
+    }
+
+    /** Resolve the missing-slot administrator requirement append-preservingly; history is never deleted. */
+    private function resolveMissingSlotRequirement(object $case,string $now,int $actor):void{
+        foreach($this->repository->interventionsForCase((int)$case->id,true)as$intervention){
+            if((string)$intervention->reason_code!=='first_regular_slot_authority_required')continue;
+            if((string)$intervention->state!=='required')continue;
+            $this->repository->resolveIntervention((int)$intervention->id,$now,$actor);
+            do_action('dzn_phase_2a2q_after_intervention_resolve',(int)$case->id,(int)$intervention->id);
+        }
     }
 
     /** A non-holding decision releases any active hold so capacity is never leaked to a non-continuing case. */

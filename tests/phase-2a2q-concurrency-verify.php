@@ -130,6 +130,34 @@ switch($mode){
         dzn_qv_assert($w2['ok']===false&&$w2['message']==='Unauthorized','a revoked guardian must not commit a continuation decision');
         dzn_qv_assert($caseOf($firstLesson)===null,'a refused revoked-guardian command must leave no continuation case');
         break;
+    case 'slot_vs_lesson_schedule':
+        $ok=0;$losers=0;
+        foreach(array('w1','w2')as$worker){$r=json_decode(trim((string)@file_get_contents($gate.'/'.$worker.'.result')),true);if(!is_array($r))continue;if($r['ok']===true)$ok++;elseif($r['message']==='teacher_slot_conflict')$losers++;}
+        dzn_qv_assert($ok===1&&$losers===1,'exactly one of the delayed hold and the conflicting Lesson schedule may win');
+        $chain=(array)($state['chain']??array());
+        dzn_qv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d",(int)$chain['lesson_id']))<=1,'no double occupancy may survive the race');
+        dzn_qv_assert($activeHoldCount($firstTeacher)<=1,'no orphan hold may survive the race');
+        dzn_qv_assert((int)$decisionCount((int)$state['delayed_case_id'])===1,'the delayed race must not duplicate the Student decision');
+        break;
+    case 'slot_vs_teacher_unsuitable':
+        $case=$caseOf($firstLesson);
+        dzn_qv_assert($case!==null&&(int)$case->id===(int)$state['delayed_case_id'],'the delayed race must keep the original continuation case');
+        dzn_qv_assert((int)$decisionCount((int)$case->id)>=1&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_decisions WHERE continuation_case_id=%d AND decision='continue_with_teacher'",(int)$case->id))===1,'the original continue decision must be preserved exactly once');
+        if((string)$case->current_decision==='teacher_unsuitable'){
+            $reservation=$reservationOf((int)$case->id);
+            dzn_qv_assert($reservation===null||(string)$reservation->state!=='active','a suppressed match must not keep holding capacity');
+        }
+        dzn_qv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",$firstLesson))===1,'exactly one slot authority may exist');
+        break;
+    case 'slot_vs_terminal_decision':
+        $case=$caseOf($firstLesson);
+        dzn_qv_assert($case!==null&&(int)$case->id===(int)$state['delayed_case_id'],'the delayed race must keep the original continuation case');
+        dzn_qv_assert((int)$decisionCount((int)$case->id)===2,'the terminal decision must be appended without duplicating the original');
+        dzn_qv_assert((string)$case->current_decision==='not_continuing','the later terminal decision must be current');
+        $reservation=$reservationOf((int)$case->id);
+        dzn_qv_assert($reservation===null||(string)$reservation->state!=='active','a terminal case must never keep holding capacity');
+        dzn_qv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",$firstLesson))===1,'exactly one slot authority may exist');
+        break;
     default:
         throw new RuntimeException('Unknown Phase-Q race mode: '.$mode);
 }

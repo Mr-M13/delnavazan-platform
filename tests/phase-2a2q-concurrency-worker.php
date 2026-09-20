@@ -31,12 +31,21 @@ try{
     if($action==='teacher_exception')wp_set_current_user((int)$state['teacher_user']);
     elseif(isset($state['actors'][$worker]))wp_set_current_user((int)$state['actors'][$worker]);
     else wp_set_current_user((int)$occurrence['principal']);
-    if(in_array($action,array('revoke_guardian','revoke_principal','lesson_schedule'),true))wp_set_current_user(1);
+    if(in_array($action,array('revoke_guardian','revoke_principal','lesson_schedule','record_slot'),true))wp_set_current_user(1);
     $evidence=array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'race-'.$action.'-'.$reference,'evidence_at'=>$at);
     $result=match($action){
         'continue'=>$svc->continueWithTeacher((int)$occurrence['lesson_id'],$evidence,$key),
         'contact'=>$svc->requestContact((int)$occurrence['lesson_id'],$evidence,$key),
         'teacher_exception'=>$svc->markMatchNeedsAdmin((int)$occurrence['lesson_id'],$evidence,$key),
+        'stop'=>$svc->stopContinuation((int)$occurrence['lesson_id'],$evidence,$key),
+        'record_slot'=>(function() use($svc,$occurrence,$state,$key):array{
+            $wall=(string)($state['slot_wall']??gmdate('Y-m-d H:i:s',time()+7200));
+            return $svc->recordFirstRegularSlot((int)$occurrence['lesson_id'],array(
+                'schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),
+                'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot',
+                'evidence_channel'=>'staff_record','evidence_reference'=>'race-slot-'.substr(hash('sha256',$key),0,12),'evidence_at'=>gmdate('Y-m-d H:i:s'),
+            ),$key);
+        })(),
         'lesson_schedule'=>(function() use($state,$at,$reference,$key):array{
             $chain=(array)($state['chain']??array());
             $wall=(string)($state['schedule_wall']??$at);

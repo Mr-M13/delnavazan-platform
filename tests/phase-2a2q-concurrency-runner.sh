@@ -5,7 +5,7 @@ set -eu
 [ "${DZN_PHASE_2A2Q_RUNTIME_TEST:-}" = concurrency ] || exit 1
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 gate=$DZN_PHASE_2A2Q_GATE_DIR
-modes='continue_exact_replay command_key_changed_decision two_student_decisions continue_vs_teacher_exception competing_hold_same_slot unrelated_teachers hold_vs_lesson_schedule_q_first hold_vs_lesson_schedule_n_first expiry_vs_new_claim principal_decision_first principal_revocation_first guardian_decision_first guardian_revocation_first'
+modes='continue_exact_replay command_key_changed_decision two_student_decisions continue_vs_teacher_exception competing_hold_same_slot unrelated_teachers hold_vs_lesson_schedule_q_first hold_vs_lesson_schedule_n_first expiry_vs_new_claim principal_decision_first principal_revocation_first guardian_decision_first guardian_revocation_first slot_vs_lesson_schedule slot_vs_teacher_unsuitable slot_vs_terminal_decision'
 if [ -n "${DZN_PHASE_2A2Q_MODE:-}" ]; then modes=$DZN_PHASE_2A2Q_MODE; fi
 wp(){ "$DZN_PHASE_2A2Q_WP_CLI" --path="$DZN_PHASE_2A2Q_WP_PATH" --user="$DZN_PHASE_2A2Q_WP_USER" eval-file "$1"; }
 worker(){ env "DZN_PHASE_2A2Q_WORKER=$1" "$DZN_PHASE_2A2Q_WP_CLI" --path="$DZN_PHASE_2A2Q_WP_PATH" --user="$DZN_PHASE_2A2Q_WP_USER" eval-file "$root/tests/phase-2a2q-concurrency-worker.php"; }
@@ -31,6 +31,11 @@ expect(){
     principal_revocation_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'Unauthorized' ;;
     guardian_decision_first) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
     guardian_revocation_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'Unauthorized' ;;
+    # Worker 1 is gated while holding the Teacher scheduling root, so the delayed slot converges first
+    # and the conflicting Phase-N schedule loses; the verifier separately accepts either winner.
+    slot_vs_lesson_schedule) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'teacher_slot_conflict' ;;
+    slot_vs_teacher_unsuitable) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
+    slot_vs_terminal_decision) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
     *) return 1 ;;
   esac
 }

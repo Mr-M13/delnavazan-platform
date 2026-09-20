@@ -1,6 +1,13 @@
 # Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority
 
-Status: **CORRECTION ROUND 1 CANDIDATE — owner-verified, NOT merged, NOT deployed, awaiting independent re-review.**
+Status: **CORRECTION ROUND 2 CANDIDATE — owner-verified, NOT merged, NOT deployed, awaiting final independent re-review.**
+
+Correction Round 1 candidate `c43a89b3aeecd74d4335b2a1fabd70c4e0ad263e` (tree
+`0cdf92de266f70d9e22e887e6a384934082ec51a`) **failed independent review** on Q-R1-1 (a delayed slot
+authority did not converge an already-continuing case into a hold), Q-R1-2 (the reported lock order did
+not match the implemented Student-decision acquisition order) and Q-R1-3 (a dead concurrency fixture
+still referenced the removed slot derivation). Correction Round 2 corrects all three as descendant
+commits.
 
 The independently reviewed candidate `33368f6a37c128b476419542e507462952909702` (tree
 `a20c48d8c8f5aaf61688d029c5b5084daa113327`) **failed independent review** on Q-1 (a future first-paid
@@ -67,6 +74,25 @@ If a Student continues before any slot has been authorised, the decision is reco
 held**, and an administrator-intervention item `first_regular_slot_authority_required` is raised. The
 aggregate is invalid if a continuing case has neither an authoritative slot with its hold nor that
 explicit requirement.
+
+### Q-R1-1 — delayed slot authority converges the existing decision
+
+Continuing before the agreed slot exists is a supported ordering. Recording the authoritative slot later
+now converges that **existing** case inside the same transaction: the slot authority is written, the
+durable case is hydrated and revalidated, the current Student decision is revalidated, the Teacher
+scheduling root is taken, Phase-N schedules and other Phase-Q holds are rechecked, exactly one
+reservation is created referencing the **original** decision id, the frozen expiry is computed, and the
+missing-slot requirement is resolved append-preservingly (history retained, `state='resolved'` with
+resolution actor/instant). No second Student decision is ever created and the original consent is never
+rewritten.
+
+A capacity conflict or any other fault rolls the **whole** convergence back, including the slot
+authority, so no `continue_with_teacher + slot authority + no hold + current missing-slot requirement`
+false success can be observed. A case that is no longer eligible (a later terminal or suppressing
+decision, or an existing reservation) keeps its correct history: the slot authority is still a
+legitimate standalone fact, but no hold is created and no terminal state is reactivated. Exact replay of
+the slot command returns the same authority, case and reservation idempotently; a changed slot under the
+same command key fails `Idempotency conflict`.
 
 ## Post-intro eligibility gate
 
@@ -187,9 +213,9 @@ continuation authority.
 | Phase-Q contract | pass |
 | Authority runtime | pass (continue + real hold, slot derivation, frozen expiry, exact replay and changed-context conflict, admin interventions, not-continuing closure with optional feedback, Teacher match exception, Student/guardian authority, capacity arbitration against both a second hold and canonical Lesson scheduling, expired-hold non-blocking, absolute boundaries) |
 | Corruption runtime | **34 fail-closed cases with repair/recovery** (including slot-authority identity/interval/wall-clock/basis/rule/provenance and accepted-arrangement lineage corruption) |
-| Failure-injection runtime | **6 write boundaries** (slot authority, case, decision, reservation, intervention, command evidence) with complete rollback, no false admin item, no partial future-slot authority, no capacity leak and retry convergence |
+| Failure-injection runtime | **10 injected boundaries**: 6 write boundaries (slot authority, case, decision, reservation, intervention, command evidence) plus the four delayed-convergence boundaries (Teacher root, reservation, intervention resolution, command evidence) with complete convergence rollback and retry |
 | Migration runtime | fresh Schema 24, 23→24 rehearsal, repeat, partial capability repair, no backfill, no payment/Term creation, provider-neutral storage, slot-authority storage, 10 malformed-storage cases, retained-024 fail-closed |
-| Concurrency runner | **13 deterministic gated modes**: exact continuation replay, same key + changed decision, two Student decisions, continue vs Teacher exception, competing hold on the same Teacher slot, unrelated Teachers, and four cross-authority races — Phase-Q hold vs Phase-N Lesson scheduling in **both** commit orders, hold-expiry vs new capacity claim across the frozen boundary, guardian decision vs guardian revocation and Student principal change vs decision (both orders) |
+| Concurrency runner | **16 deterministic gated modes**: the 13 above plus three delayed-slot races — delayed slot authority vs conflicting Phase-N Lesson scheduling, vs a Teacher match-unsuitable transition, and vs a Student terminal decision (no stale continue state may produce a hold) |
 
 ### Q-3 — accepted-arrangement lineage
 
@@ -199,14 +225,28 @@ Student/Teacher/Course is authoritative, none leaves the lineage absent, and sev
 arrangement must also still be an intact accepted record (fingerprint digest, acceptance instants and
 matching Student/Teacher/Course).
 
-### Lock order
+### Lock order (Q-R1-2: documented exactly as implemented)
 
-The complete hierarchy is: Phase-F authority rows (WordPress user → principal link / guardian grant) →
-Phase-Q introductory Lesson and slot authority → Phase-Q continuation case → per-Teacher scheduling root
-→ Phase-N Lesson schedule versions. Phase Q takes the Phase-F authority rows first and the Teacher root
-last; Phase N takes only the Teacher root and never touches Phase-Q or Phase-F rows, so no reverse order
-or cycle exists. Both capacity authorities therefore serialize on one device in one direction, and the
-cross-service races prove a genuine wait, a post-wait revalidation and exactly one winner.
+The **actual** order taken by a Student continuation command is:
+
+1. the introductory Lesson row (`hydrateIntro`);
+2. the Phase-F authority row — the Student's own active principal link, or the acting guardian's active
+   representative grant (`studentAuthority`);
+3. the Phase-Q continuation case row (lock / create);
+4. the per-Teacher scheduling root (`teacher_root`), only when a hold is actually created;
+5. Phase-N `canonical_lesson_schedule_versions` reads inside the capacity check.
+
+`recordFirstRegularSlot()` follows the same global direction: introductory Lesson → slot authority row →
+continuation case → Teacher root → Phase-N versions. `markMatchNeedsAdmin` takes the introductory Lesson →
+Teacher principal link → case → (release only) reservation.
+
+Deadlock audit: Phase-F mutation paths (`revokePrincipal`, `revokeGuardian`, `establishPrincipal`,
+`grantGuardian`, `supersede*`) acquire only the WordPress user row plus the principal/grant rows and never
+read or lock a Lesson, a Phase-Q row or a Teacher scheduling root, so there is no reverse edge and no
+cycle. Phase-N scheduling never touches Phase-F or Phase-Q rows. The documented order above is therefore
+the implemented order, and the cross-authority races (guardian/principal revocation, Teacher exception,
+Lesson scheduling, expiry) each prove a genuine wait followed by post-wait revalidation with exactly one
+winner.
 
 Phase-P, Phase-O, Phase-N, Phase-M, Phase-M0 and Phase-L regressions were re-run unchanged. No
 deployment, production, Theme/NIU, Google/provider or payment work occurred.

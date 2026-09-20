@@ -154,13 +154,22 @@ final class CanonicalContinuationValidator {
             if((int)($reservation->reservation_version??0)<1)return false;
         }
         // An intervention set must be coherent, attributable and appended after its owning decision.
-        $seenReasons=array();
+        $seenReasons=array();$currentReasons=array();
         foreach($interventions as$intervention){
             if((int)($intervention->continuation_case_id??0)!==$caseId)return false;
             $reason=(string)($intervention->reason_code??'');
             if(!in_array($reason,CanonicalContinuationRule::INTERVENTION_REASONS,true))return false;
             if(isset($seenReasons[$reason]))return false;
             $seenReasons[$reason]=true;
+            $state=(string)($intervention->state??'');
+            if(!in_array($state,array('required','resolved'),true))return false;
+            if($state==='required'){
+                if($intervention->resolved_at!==null||$intervention->resolved_by!==null)return false;
+                $currentReasons[$reason]=true;
+            }else{
+                // Append-preserving resolution keeps the historical row and records who resolved it.
+                if(!self::utc($intervention->resolved_at??null)||(int)($intervention->resolved_by??0)<1)return false;
+            }
             $owner=$byId[(int)($intervention->decision_id??0)]??null;
             if(!$owner)return false;
             if($reason!=='integrity_conflict'&&(string)$owner->decision!==self::expectedOwnerDecision($reason))return false;
@@ -174,10 +183,12 @@ final class CanonicalContinuationValidator {
             CanonicalContinuationRule::DECISION_TEACHER_UNSUITABLE=>'teacher_match_unsuitable',
             default=>null,
         };
-        if($required!==null&&!isset($seenReasons[$required]))return false;
+        if($required!==null&&!isset($currentReasons[$required]))return false;
         // Continuing without an authoritative first-regular-slot record must be an explicit
         // administrator requirement, never a silent absence of capacity authority.
-        if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority===null&&!isset($seenReasons['first_regular_slot_authority_required']))return false;
+        if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority===null&&!isset($currentReasons['first_regular_slot_authority_required']))return false;
+        // After the authoritative slot converges the case, no missing-slot requirement may stay current.
+        if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority!==null&&isset($currentReasons['first_regular_slot_authority_required']))return false;
         if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority!==null&&$reservation===null)return false;
         return true;
     }

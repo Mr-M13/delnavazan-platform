@@ -65,10 +65,6 @@ if($mode!=='competing_hold_same_slot'&&(int)$first['teacher_id']===(int)$second[
 }
 $state=array('mode'=>$mode,'at'=>gmdate('Y-m-d H:i:s'),'first'=>$first,'second'=>$second,'teacher_user'=>$teacherUser,
     'keys'=>array('w1'=>$key('w1'),'w2'=>$key('w2')),'references'=>array('w1'=>'race-w1','w2'=>'race-w2'));
-$derived=static function(array $occurrence) use($wpdb,$p):array{
-    $course=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}courses WHERE id=%d",(int)$occurrence['course_id']));
-    return Delnavazan\Platform\Core\Application\CanonicalContinuationRule::expectedFirstRegularSlot($occurrence,$course);
-};
 switch($mode){
     case 'continue_exact_replay':
         $sharedExact=$key('shared');
@@ -167,6 +163,43 @@ switch($mode){
         $state['actions']=array('w1'=>array('action'=>'continue','target'=>'first'),'w2'=>array('action'=>'revoke_guardian','target'=>'first'));
         if($mode==='guardian_revocation_first')$state['actions']=array('w1'=>array('action'=>'revoke_guardian','target'=>'first'),'w2'=>array('action'=>'continue','target'=>'first'));
         $state['hooks']=array('w1'=>$mode==='guardian_decision_first'?'dzn_phase_2a2q_authority_held':'dzn_phase_2a2f_authority_locks_held','w2'=>null);
+        break;
+    case 'slot_vs_lesson_schedule':
+    case 'slot_vs_teacher_unsuitable':
+    case 'slot_vs_terminal_decision':
+        // The Student continues BEFORE any slot is authorised, then the delayed slot command races a
+        // competing authority action on the same case.
+        $delayed=$introOf(5,$mode==='slot_vs_lesson_schedule'?12:($mode==='slot_vs_teacher_unsuitable'?13:14),$mode);
+        $wpdb->query($wpdb->prepare("DELETE FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$delayed['lesson_id']));
+        wp_set_current_user((int)$delayed['principal']);
+        $continuation->continueWithTeacher((int)$delayed['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>$mode.'-continue'),$key($mode.'-continue'));
+        wp_set_current_user(1);
+        $delayedCase=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_cases WHERE intro_lesson_id=%d",(int)$delayed['lesson_id']));
+        if(!$delayedCase)throw new RuntimeException('The delayed-slot race requires a continuing case');
+        $slotWall=gmdate('Y-m-d H:i:s',time()+7200+9000);
+        $state['first']=$delayed;
+        $state['slot_wall']=$slotWall;
+        $state['delayed_case_id']=(int)$delayedCase->id;
+        $state['delayed_decision_id']=(int)$delayedCase->latest_decision_id;
+        if($mode==='slot_vs_lesson_schedule'){
+            $chain=$raceChain((int)$delayed['teacher_id'],'slot-schedule');
+            $wpdb->update($p.'lessons',array('teacher_id'=>(int)$delayed['teacher_id']),array('id'=>(int)$chain['lesson_id']));
+            $state['chain']=$chain;
+            $state['schedule_wall']=$slotWall;
+            $state['actions']=array('w1'=>array('action'=>'record_slot','target'=>'first'),'w2'=>array('action'=>'lesson_schedule','target'=>'first'));
+            $state['hooks']=array('w1'=>'dzn_phase_2a2q_teacher_root_held','w2'=>null);
+        }elseif($mode==='slot_vs_teacher_unsuitable'){
+            $state['actions']=array('w1'=>array('action'=>'record_slot','target'=>'first'),'w2'=>array('action'=>'teacher_exception','target'=>'first'));
+            $state['hooks']=array('w1'=>'dzn_phase_2a2q_teacher_root_held','w2'=>null);
+        }else{
+            $state['actions']=array('w1'=>array('action'=>'record_slot','target'=>'first'),'w2'=>array('action'=>'stop','target'=>'first'));
+            $state['hooks']=array('w1'=>'dzn_phase_2a2q_teacher_root_held','w2'=>null);
+        }
+        if((int)$teacherUser>0&&$mode!=='slot_vs_lesson_schedule'&&$mode==='slot_vs_teacher_unsuitable'){
+            $introTeacherUser=(int)$wpdb->get_var($wpdb->prepare("SELECT wordpress_user_id FROM {$p}teacher_principal_links WHERE teacher_id=%d AND status='active' AND revoked_at IS NULL LIMIT 1",(int)$delayed['teacher_id']));
+            if($introTeacherUser>0)(new \WP_User($introTeacherUser))->add_cap('dzn_submit_own_continuation_match_exception');
+            $state['teacher_user']=$introTeacherUser;
+        }
         break;
     default:
         throw new RuntimeException('Unknown Phase-Q race mode: '.$mode);

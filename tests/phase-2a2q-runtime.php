@@ -280,6 +280,77 @@ dzn_q_assert((int)$afterExpiry['reservation']['reservation_id']>0&&$afterExpiry[
 // 9. Absolute boundaries: no Term, no Lesson, no payment, no delivery truth, no notification.
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+// 9a. Q-R1-1: a Student may continue BEFORE the agreed slot exists; recording the authoritative slot
+// later converges that same decision into the hold inside one transaction.
+// ---------------------------------------------------------------------------
+$delayed=$introOf(9,'delayed-slot',3,false);
+$delayedPrincipal=$principalOf((int)$delayed['student_id']);
+wp_set_current_user($delayedPrincipal);
+$delayedContinue=$svc->continueWithTeacher((int)$delayed['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'delayed-continue'),dzn_q_key('delayed-continue'));
+wp_set_current_user($admin);
+$delayedCase=$caseOf((int)$delayed['lesson_id']);
+dzn_q_assert((string)$delayedCase->current_decision==='continue_with_teacher'&&$delayedContinue['reservation']===null,'a continuing decision without an authorised slot must hold nothing');
+dzn_q_assert($reservationOf((int)$delayedCase->id)===null&&$decisionCount((int)$delayedCase->id)===1,'the pre-slot decision must be the only decision and hold no capacity');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND reason_code='first_regular_slot_authority_required' AND state='required'",(int)$delayedCase->id))===1,'the missing-slot requirement must be current before convergence');
+$delayedDecisionId=(int)$delayedCase->latest_decision_id;
+$delayedWall=gmdate('Y-m-d H:i:s',time()+7200+9*3600);
+$delayedSlotKey=dzn_q_key('delayed-slot');
+$delayedSlot=$svc->recordFirstRegularSlot((int)$delayed['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($delayedWall,0,10),'local_wall_time'=>substr($delayedWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'delayed-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),$delayedSlotKey);
+dzn_q_assert($delayedSlot['converged']===true&&(int)$delayedSlot['case_id']===(int)$delayedCase->id,'recording the slot later must converge the existing case');
+$delayedCaseAfter=$caseOf((int)$delayed['lesson_id']);
+dzn_q_assert((int)$delayedCaseAfter->id===(int)$delayedCase->id&&(int)$delayedCaseAfter->latest_decision_id===$delayedDecisionId,'delayed convergence must preserve the original case and decision');
+dzn_q_assert($decisionCount((int)$delayedCaseAfter->id)===1,'delayed convergence must never create a second Student decision');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$delayed['lesson_id']))===1,'delayed convergence must record exactly one slot authority');
+$delayedReservation=$reservationOf((int)$delayedCaseAfter->id);
+dzn_q_assert($delayedReservation!==null&&(int)$delayedReservation->decision_id===$delayedDecisionId,'the converged reservation must reference the ORIGINAL continue decision');
+$delayedSlotRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$delayed['lesson_id']));
+dzn_q_assert(CanonicalContinuationRule::expiresAt((string)$delayed['occurrence']->ends_at_utc,(string)$delayedSlotRow->starts_at_utc)===(string)$delayedReservation->expires_at,'the converged hold must freeze the locked expiry rule');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND reason_code='first_regular_slot_authority_required' AND state='required'",(int)$delayedCaseAfter->id))===0,'the missing-slot requirement must no longer be current');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND reason_code='first_regular_slot_authority_required'",(int)$delayedCaseAfter->id))===1,'the historical requirement row must be retained');
+$delayedRead=$read->forIntroLesson((int)$delayed['lesson_id']);
+dzn_q_assert($delayedRead['reservation']['capacity_effective']===true&&$delayedRead['case']['admin_action_required']===false,'the converged read must show an effective hold and no current admin requirement');
+dzn_q_assert((int)$delayedRead['reservation_decision_id']===$delayedDecisionId,'the protected read must expose the reservation provenance decision');
+// Exact replay of the slot command converges idempotently without duplicating anything.
+$delayedReplay=$svc->recordFirstRegularSlot((int)$delayed['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($delayedWall,0,10),'local_wall_time'=>substr($delayedWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'delayed-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),$delayedSlotKey);
+dzn_q_assert(!empty($delayedReplay['idempotent'])&&(int)$delayedReplay['slot_authority_id']===(int)$delayedSlot['slot_authority_id']&&(int)$delayedReplay['reservation_id']===(int)$delayedSlot['reservation_id'],'an exact slot replay must return the same authority and reservation idempotently');
+$delayedChanged=false;
+try{$svc->recordFirstRegularSlot((int)$delayed['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr(gmdate('Y-m-d H:i:s',time()+10800),0,10),'local_wall_time'=>substr(gmdate('Y-m-d H:i:s',time()+10800),11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'delayed-slot-changed','evidence_at'=>gmdate('Y-m-d H:i:s')),$delayedSlotKey);}catch(\Throwable$e){$delayedChanged=$e->getMessage()==='Idempotency conflict';}
+dzn_q_assert($delayedChanged,'a changed slot under the same command key must fail idempotency conflict');
+dzn_q_assert($decisionCount((int)$delayedCaseAfter->id)===1&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_reservations WHERE continuation_case_id=%d",(int)$delayedCaseAfter->id))===1,'replay must not duplicate decisions or reservations');
+// Non-continuing decisions keep their history and never gain a hold from a later slot record.
+$notConverging=$introOf(10,'no-converge',3,false);
+$notConvergingPrincipal=$principalOf((int)$notConverging['student_id']);
+wp_set_current_user($notConvergingPrincipal);
+$svc->requestContact((int)$notConverging['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'no-converge'),dzn_q_key('no-converge'));
+wp_set_current_user($admin);
+$notConvergingCase=$caseOf((int)$notConverging['lesson_id']);
+$notConvergingDecision=(int)$notConvergingCase->latest_decision_id;
+$ncWall=gmdate('Y-m-d H:i:s',time()+7200+10*3600);
+$ncResult=$svc->recordFirstRegularSlot((int)$notConverging['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($ncWall,0,10),'local_wall_time'=>substr($ncWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'no-converge-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('no-converge-slot'));
+$notConvergingCase=$caseOf((int)$notConverging['lesson_id']);
+dzn_q_assert($ncResult['converged']===false&&(string)$notConvergingCase->current_decision==='contact_me','a non-continuing decision must never be reactivated by a later slot record');
+dzn_q_assert($reservationOf((int)$notConvergingCase->id)===null&&(int)$notConvergingCase->latest_decision_id===$notConvergingDecision,'a non-continuing case must keep its decision history and hold nothing');
+// Capacity conflict rolls back the whole convergence, including the slot authority.
+$conflict=$introOf(11,'converge-conflict',3,false);
+$conflictPrincipal=$principalOf((int)$conflict['student_id']);
+wp_set_current_user($conflictPrincipal);
+$svc->continueWithTeacher((int)$conflict['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'converge-conflict'),dzn_q_key('converge-conflict'));
+wp_set_current_user($admin);
+$conflictCase=$caseOf((int)$conflict['lesson_id']);
+$conflictDecision=(int)$conflictCase->latest_decision_id;
+$conflictWall=gmdate('Y-m-d H:i:s',time()+7200+11*3600);
+$wpdb->query("DELETE FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=999999");
+dzn_q_assert($wpdb->insert($p.'canonical_lesson_schedule_versions',array('uid'=>\Delnavazan\Platform\Core\Support\Identifier::uid(),'lesson_id'=>999999,'version_number'=>(int)(time()%100000)+1,'applicable_slot'=>1,'enrolment_id'=>0,'term_id'=>0,'teacher_assignment_id'=>0,'teacher_id'=>(int)$conflict['teacher_id'],'starts_at_utc'=>$conflictWall,'ends_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($conflictWall.' UTC')+1800),'duration_minutes'=>30,'buffer_minutes'=>30,'duration_source'=>'course_default','occupied_ends_at_utc'=>gmdate('Y-m-d H:i:s',strtotime($conflictWall.' UTC')+3600),'schedule_timezone'=>'UTC','local_wall_date'=>substr($conflictWall,0,10),'local_wall_time'=>substr($conflictWall,11,8),'availability_basis'=>'within_availability','reason_code'=>'synthetic_converge_conflict','evidence_channel'=>'staff_record','evidence_reference_digest'=>str_repeat('b',64),'evidence_at'=>gmdate('Y-m-d H:i:s'),'created_at'=>gmdate('Y-m-d H:i:s'),'created_by'=>$admin))!==false,'the conflicting Phase-N schedule fixture must be inserted: '.$wpdb->last_error);
+$conflictRejected=false;
+try{$svc->recordFirstRegularSlot((int)$conflict['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($conflictWall,0,10),'local_wall_time'=>substr($conflictWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'converge-conflict-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('converge-conflict-slot'));}catch(\Throwable$e){$conflictRejected=$e->getMessage()==='teacher_slot_conflict';}
+dzn_q_assert($conflictRejected,'a capacity conflict must fail the delayed convergence');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$conflict['lesson_id']))===0,'a failed convergence must roll back its slot authority');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_commands WHERE intro_lesson_id=%d AND operation='record_first_regular_slot'",(int)$conflict['lesson_id']))===0,'a failed convergence must record no false command success');
+$conflictCase=$caseOf((int)$conflict['lesson_id']);
+dzn_q_assert((int)$conflictCase->latest_decision_id===$conflictDecision&&$decisionCount((int)$conflictCase->id)===1,'a failed convergence must not duplicate the Student decision');
+dzn_q_assert($reservationOf((int)$conflictCase->id)===null,'a failed convergence must leave no reservation');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND reason_code='first_regular_slot_authority_required' AND state='required'",(int)$conflictCase->id))===1,'a failed convergence must leave the requirement current');
+// ---------------------------------------------------------------------------
 // 9b. Q-1: capacity may only be held against an EXPLICIT authoritative slot, never a +7-day guess.
 // ---------------------------------------------------------------------------
 $introEnd=static function(array $o):string{return (string)$o['occurrence']->ends_at_utc;};

@@ -13,8 +13,8 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 | Migrations | 001–023 authoritative; latest `023_canonical_attendance_intake_authority` |
 | Latest merged slice | Phase 2A.2-P — Canonical Attendance Intake & Review Authority (Schema 23) |
 | Previous merged slice | Phase 2A.2-O — Canonical Lesson Delivery & Attendance Outcome Authority (Schema 22) |
-| Active Platform candidate | Phase 2A.2-Q post-intro continuation & slot reservation authority — **Correction Round 1 candidate**, unmerged, undeployed, owner-verified, awaiting final independent re-review (Schema 24 candidate; the reviewed candidate `33368f6a` failed review on Q-1/Q-2/Q-3; see [PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md](docs/PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md)) |
-| Next boundary | **Final independent re-review of the Phase-Q Correction Round 1 candidate.** Payment/Stripe, Term and Lesson materialisation, notifications, Google/provider integration, Teacher/Student Portal work and deployment require separate explicit authorisation and remain outside current authority |
+| Active Platform candidate | Phase 2A.2-Q post-intro continuation & slot reservation authority — **Correction Round 2 candidate**, unmerged, undeployed, owner-verified, awaiting final independent re-review (Schema 24 candidate; `33368f6a` failed on Q-1/Q-2/Q-3 and `c43a89b3` failed on Q-R1-1/Q-R1-2/Q-R1-3; see [PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md](docs/PHASE-2A-2Q-POST-INTRO-CONTINUATION-SLOT-RESERVATION-AUTHORITY.md)) |
+| Next boundary | **Final independent re-review of the Phase-Q Correction Round 2 candidate.** Payment/Stripe, Term and Lesson materialisation, notifications, Google/provider integration, Teacher/Student Portal work and deployment require separate explicit authorisation and remain outside current authority |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

@@ -13,14 +13,14 @@ foreach(array('canonical_continuation_commands','canonical_continuation_interven
 $svc=new CanonicalContinuationService();$read=new CanonicalContinuationReadService();
 $previous=get_current_user_id();wp_set_current_user(1);
 $principalOf=static function(int $studentId) use($wpdb,$p):int{$id=(int)$wpdb->get_var($wpdb->prepare("SELECT wordpress_user_id FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND active_slot=1 LIMIT 1",$studentId));if($id<1)throw new RuntimeException('principal fixture required');return $id;};
-$introOf=function(int $index,int $sequence,string $label) use($sources,$wpdb,$p,$svc):array{
+$introOf=function(int $index,int $sequence,string $label,bool $withSlot=true) use($sources,$wpdb,$p,$svc):array{
     $src=$sources[$index%count($sources)];
     $lessonId=(int)(new LessonService())->create(array('student_id'=>(int)$src['student_id'],'teacher_id'=>(int)$src['teacher_id'],'course_id'=>(int)$src['course_id'],'lesson_type'=>'introductory','status'=>'draft'));
     $wall=gmdate('Y-m-d H:i:s',strtotime('-3 days')-($sequence*3600));
     (new LessonScheduleService())->initial($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),'reason'=>$label));
     // An explicit authorised first regular slot so a continuing decision can hold real capacity.
     $slotWall=gmdate('Y-m-d H:i:s',time()+7200+$sequence*3600);
-    $svc->recordFirstRegularSlot($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'fail-slot-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_qf_key('fail-slot-'.$label));
+    if($withSlot)$svc->recordFirstRegularSlot($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'fail-slot-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_qf_key('fail-slot-'.$label));
     return array('lesson_id'=>$lessonId,'student_id'=>(int)$src['student_id']);
 };
 $counts=static function() use($wpdb,$p):array{return array(
@@ -123,6 +123,33 @@ $clear('dzn_phase_2a2q_after_slot_authority_insert');
 dzn_qf_assert($slotCaught,'slot-authority failure injection was not observed');
 dzn_qf_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities")===$slotBefore,'a failed slot-authority write must leave no partial future-slot authority');
 dzn_qf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$slotFailure['lesson_id']))===0,'a failed slot-authority write must leave no authority row');
+
+// 5c. Delayed-convergence boundaries: a fault at any point must roll back the whole convergence.
+$converge=$introOf(1,11,'fail-converge',false);
+wp_set_current_user($principalOf((int)$converge['student_id']));
+$svc->continueWithTeacher((int)$converge['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'fail-converge'),dzn_qf_key('fail-converge'));
+wp_set_current_user(1);
+$convergeCase=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_cases WHERE intro_lesson_id=%d",(int)$converge['lesson_id']));
+dzn_qf_assert($convergeCase!==null,'the delayed-convergence fixture must record a continuing case');
+$convergeDecision=(int)$convergeCase->latest_decision_id;
+$slotOffset=180000;
+foreach(array('dzn_phase_2a2q_teacher_root_held','dzn_phase_2a2q_after_reservation_insert','dzn_phase_2a2q_after_intervention_resolve','dzn_phase_2a2q_after_command_insert')as$hook){
+    $before=$counts();
+    $slotWall=gmdate('Y-m-d H:i:s',time()+$slotOffset);$slotOffset+=3600;
+    $inject($hook);
+    $caught=false;
+    try{$svc->recordFirstRegularSlot((int)$converge['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'fail-converge-'.$hook,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_qf_key('fail-converge-'.$hook));}
+    catch(RuntimeException$e){$caught=$e->getMessage()==='injected:'.$hook;}
+    $clear($hook);
+    dzn_qf_assert($caught,'delayed-convergence failure injection was not observed: '.$hook);
+    dzn_qf_assert($counts()===$before,'a fault at '.$hook.' must roll back the whole convergence');
+    dzn_qf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$converge['lesson_id']))===0,'a fault at '.$hook.' must leave no slot authority');
+    dzn_qf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_reservations WHERE continuation_case_id=%d",(int)$convergeCase->id))===0,'a fault at '.$hook.' must leave no reservation');
+    dzn_qf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND state='required'",(int)$convergeCase->id))===1,'a fault at '.$hook.' must leave the requirement current');
+}
+$convergeWall=gmdate('Y-m-d H:i:s',time()+$slotOffset);
+$converged=$svc->recordFirstRegularSlot((int)$converge['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($convergeWall,0,10),'local_wall_time'=>substr($convergeWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'fail-converge-retry','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_qf_key('fail-converge-retry'));
+dzn_qf_assert($converged['converged']===true&&(int)$converged['decision_id']===$convergeDecision,'retry after a fault must converge and preserve the original decision');
 
 $sixth=$introOf(2,6,'fail-replay');
 wp_set_current_user($principalOf((int)$sixth['student_id']));

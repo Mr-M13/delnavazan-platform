@@ -73,6 +73,14 @@ final class CanonicalContinuationRepository {
         return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}canonical_continuation_interventions WHERE continuation_case_id=%d ORDER BY id{$suffix}",$caseId))?:array();
     }
     public function insertIntervention(array $data):int{return $this->insert('canonical_continuation_interventions',$data,'Continuation intervention persistence failed');}
+    /** Append-preserving resolution: the historical requirement row is retained and marked resolved. */
+    public function resolveIntervention(int $interventionId,string $now,int $actor):void{
+        global $wpdb;
+        $changed=$wpdb->update($this->p.'canonical_continuation_interventions',array(
+            'state'=>'resolved','resolved_at'=>$now,'resolved_by'=>$actor,
+        ),array('id'=>$interventionId,'state'=>'required'));
+        if($changed!==1)throw new \RuntimeException('Stale continuation intervention');
+    }
 
     public function command(string $digest):?object{
         return $this->one("SELECT * FROM {$this->p}canonical_continuation_commands WHERE command_key_digest=%s",$digest);

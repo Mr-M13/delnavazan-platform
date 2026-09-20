@@ -61,13 +61,19 @@ final class CanonicalContinuationReadService {
             'rule_version'=>(string)$reservation->rule_version,
         );
         $reasons=array();
-        foreach($interventions as$intervention)$reasons[]=(string)$intervention->reason_code;
+        $currentReasons=array();$history=array();
+        foreach($interventions as$intervention){
+            $reason=(string)$intervention->reason_code;
+            $history[]=$reason;
+            if((string)$intervention->state==='required')$currentReasons[]=$reason;
+        }
+        // A resolved requirement is retained as history and is no longer actionable.
         return array(
             'case'=>array(
                 'continuation_case_id'=>$caseId,'case_uid'=>(string)$case->uid,'case_version'=>(int)$case->case_version,
                 'current_decision'=>(string)$case->current_decision,'decision_at'=>$case->decision_at===null?null:(string)$case->decision_at,
                 'decision_count'=>count($decisions),'rule_version'=>(string)$case->rule_version,
-                'admin_action_required'=>(bool)$reasons,
+                'admin_action_required'=>(bool)$currentReasons,
             ),
             'source'=>array(
                 'intro_lesson_id'=>(int)$case->intro_lesson_id,'intro_schedule_version_id'=>(int)$case->intro_schedule_version_id,
@@ -79,7 +85,12 @@ final class CanonicalContinuationReadService {
                 'accepted_service_arrangement_id'=>$case->accepted_service_arrangement_id===null?null:(int)$case->accepted_service_arrangement_id,
             ),
             'reservation'=>$hold,
-            'admin'=>array('intervention_count'=>count($interventions),'reason_codes'=>$reasons),
+            'reservation_decision_id'=>$reservation===null?null:(int)$reservation->decision_id,
+            'admin'=>array(
+                'intervention_count'=>count($interventions),
+                'current_intervention_count'=>count($currentReasons),
+                'reason_codes'=>$history,'current_reason_codes'=>$currentReasons,
+            ),
         );
     }
 }
