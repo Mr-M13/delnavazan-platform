@@ -24,13 +24,13 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration — Schema 23 (authoritative on `main`)
+## Current authoritative migration — Schema 24 (authoritative on `main`)
 
-### Schema 24 — post-intro continuation & slot reservation authority (Phase 2A.2-Q candidate, unmerged)
+### Schema 24 — post-intro continuation & slot reservation authority (Phase 2A.2-Q, merged and closed)
 
 `024_post_intro_continuation_slot_reservation_authority` is additive only: it creates the Phase-Q explicit first-regular-slot authority, continuation case, decision, reservation, administrator-intervention and command tables, performs no backfill and invents no continuation decision or reservation. It creates no payment object, `payment_state`, Term, standard/replacement Lesson, academy obligation or delivery/attendance outcome, and migration 024 makes no external call. `dzn_canonical_continuation_slot_authorities` is immutable and is the only source that may justify a capacity hold — no weekly recurrence is ever derived from the introduction. Only `dzn_canonical_continuation_cases` (current decision/case version) and `dzn_canonical_continuation_reservations` (lifecycle state/version) are mutable; decisions, interventions and commands stay append-only and digest-only. Its verifier runs after migration 024, on current-schema verification and unconditionally before Schema 24 activation (including the retained-024/stale-version path), and rejects payment/provider-specific columns, missing indexes and any mutable column on an append-only Phase-Q table.
 
-### Schema 23 — canonical attendance intake & review authority (Phase 2A.2-P, merged and closed)
+### Schema 23 — canonical attendance intake & review authority (Phase 2A.2-P, merged and closed, predecessor)
 
 `023_canonical_attendance_intake_authority` is additive only: it creates the Phase-P cutover-policy, participant-identity-mapping, case, evidence, decision, anomaly, durable-conflict and command tables, performs no historical attendance import, no dual-read, activates no production cutover and reinterprets no Phase-O data. `dzn_canonical_attendance_participant_mappings` is the durable provider-neutral provider-account → canonical-participant identity registry, and `dzn_canonical_attendance_conflicts` records refused conflicting provider events; `dzn_canonical_attendance_cases` stores the exact immutable cutover-policy binding. `dzn_canonical_attendance_cutover_policies` enforces one immutable policy per cutover instant (`UNIQUE cutover_instant`), so applicability can never fall back to the database insertion id. Its verifier runs after migration 023, on current-schema verification and unconditionally before Schema 23 activation (including the retained-023/stale-version path), and rejects provider-specific storage, missing registry/conflict/cutover-instant indexes, a nullable cutover-policy binding and any mutable column on an append-only Phase-P table. Only `canonical_attendance_cases` (state/case version) and `canonical_attendance_participant_mappings` (state/mapping version) are mutable.
 

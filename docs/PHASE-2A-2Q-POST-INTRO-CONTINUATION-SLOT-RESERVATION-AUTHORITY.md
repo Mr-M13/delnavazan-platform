@@ -1,6 +1,26 @@
 # Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority
 
-Status: **CORRECTION ROUND 2 CANDIDATE — owner-verified, NOT merged, NOT deployed, awaiting final independent re-review.**
+Status: **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED — NOT deployed.**
+
+Final independently approved candidate `815a301679fdebc5d058646749e5a206ab492629`, tree
+`13757b52dd84810d44e6dba19550ec7e668ad169`, from authoritative pre-merge main
+`b7378665af1bc3cce935cfae27d346326a1ddc10`, was **fast-forward merged into `main`** (the
+implementation-merge SHA equals the approved candidate because no merge commit was required). Schema 24
+/ migration `024_post_intro_continuation_slot_reservation_authority` / build
+`phase2a2q-post-intro-continuation-slot-reservation-20260920.1` are authoritative. No deployment,
+production activation, payment, provider, Portal or Theme/NIU work occurred.
+
+Review history (retained as provenance): original candidate `33368f6a…` failed on Q-1/Q-2/Q-3;
+Correction-Round-1 candidate `c43a89b3…` failed on Q-R1-1/Q-R1-2/Q-R1-3; Correction Round 2 passed final
+independent re-review.
+
+**Known follow-up (test hygiene only, not a production defect).** The `expiry_vs_new_claim` concurrency
+mode uses a two-second hold-expiry window, so under heavy load the first claim attempt can start *after*
+the boundary and the runner's expected winner order inverts (the production behaviour remains correct:
+whichever attempt runs post-expiry succeeds and the pre-expiry attempt fails `teacher_slot_conflict`).
+Both full-matrix runs passed after widening the window locally, and the deterministic expiry-boundary
+behaviour is covered by the authority runtime. A bounded test-harness stability change should be made in
+a future correction round rather than inside this merge, because the approved tree must remain unchanged.
 
 Correction Round 1 candidate `c43a89b3aeecd74d4335b2a1fabd70c4e0ad263e` (tree
 `0cdf92de266f70d9e22e887e6a384934082ec51a`) **failed independent review** on Q-R1-1 (a delayed slot
