@@ -1,5 +1,15 @@
 # Delnavazan Platform Architecture
 
+> **Unmerged Phase 2A.2-R1 candidate (2026-09-20) — not authoritative:** branch
+> `phase-2a2r1-commercial-purchase-funding-authority` (base
+> `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`) proposes Schema 25 commercial purchase, funding and
+> current-Term capacity authority: an immutable Platform-issued purchase offer and pricing snapshot,
+> ordered payment obligations, provider-neutral evidence, derived academic funding, bounded
+> entitlements bound to Terms through the existing Phase-L authority, the canonical Regular
+> recurring pattern and protected capacity with mandatory Phase-Q → R1 → Phase-N succession. It is
+> not merged, not deployed and not authoritative; Stripe, notifications, portals, Theme, refunds,
+> payouts and deployment remain outside it.
+
 ## 1. Status and scope
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.

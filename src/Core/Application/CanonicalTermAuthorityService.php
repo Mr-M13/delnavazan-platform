@@ -7,13 +7,29 @@ use Delnavazan\Platform\Core\Support\Identifier;
 /** Explicit, atomic canonical Term creation and lifecycle authority. */
 final class CanonicalTermAuthorityService {
     private const CAPABILITY = 'dzn_manage_canonical_terms';
+    /**
+     * The single canonical source of the Term session allocation and of the Term change allowance.
+     * Every consumer (commercial funding, Lesson issuance) reads these values or the values recorded
+     * on the Term itself; no other literal may restate them.
+     */
+    public const SESSION_ALLOCATION = 12;
+    public const REPLACEMENT_ALLOWANCE = 2;
     private const CHANNELS = array('staff_record', 'authenticated_platform', 'document_reference');
     private const TRANSITIONS = array('activate'=>array('authorised','current'),'close'=>array('current','closed'),'cancel_authorised'=>array('authorised','cancelled'),'cancel_current'=>array('current','cancelled'));
 
     public function __construct(private ?CanonicalTermAuthorityRepository $repository = null) { $this->repository ??= new CanonicalTermAuthorityRepository(); }
 
-    public function create(int $enrolmentId, ?int $expectedLatestTermId, ?string $expectedLatestState, array $evidence, string $idempotencyKey): array {
-        $this->requireCapability(); $actor=$this->actor();
+    /**
+     * Create one canonical Term.
+     *
+     * `$withinCallerTransaction` lets another authority that already owns a transaction (Phase
+     * 2A.2-R1 commercial Term binding) create the Term inside it, so the Term, the immutable origin
+     * event and the caller's own binding commit together. The caller then owns commit, rollback and
+     * its own durable command evidence; this authority still performs every validation and the
+     * complete aggregate check.
+     */
+    public function create(int $enrolmentId, ?int $expectedLatestTermId, ?string $expectedLatestState, array $evidence, string $idempotencyKey, ?bool $withinCallerTransaction = null, ?string $capability = null): array {
+        $this->requireCapability($capability); $actor=$this->actor();
         if ($enrolmentId < 1) throw new \InvalidArgumentException('Enrolment identity required');
         if (($expectedLatestTermId === null) !== ($expectedLatestState === null)) throw new \InvalidArgumentException('Expected aggregate position is incomplete');
         if ($expectedLatestState !== null && !in_array($expectedLatestState,array('closed','cancelled'),true)) throw new \InvalidArgumentException('Expected latest terminal state required');
@@ -38,13 +54,13 @@ final class CanonicalTermAuthorityService {
             }
             foreach($terms as$t)if(in_array((string)$t->lifecycle_state,array('authorised','current'),true))throw new \InvalidArgumentException('applicable_term_exists');
             $now=gmdate('Y-m-d H:i:s');$sequence=count($terms)+1;
-            $id=$this->repository->insertTerm(array('uid'=>Identifier::uid(),'reference_code'=>null,'enrolment_id'=>$enrolmentId,'sequence_number'=>$sequence,'status'=>'canonical','lesson_allocation'=>12,'replacement_allowance'=>2,'starts_at'=>null,'ends_at'=>null,'activated_at'=>null,'completed_at'=>null,'payment_state'=>'not_applicable','created_at'=>$now,'updated_at'=>$now,'created_by'=>$actor,'updated_by'=>$actor,'archived_at'=>null,'archived_by'=>null,'record_model'=>'canonical_enrolment_term_v1','lifecycle_state'=>'authorised','applicable_slot'=>1));
+            $id=$this->repository->insertTerm(array('uid'=>Identifier::uid(),'reference_code'=>null,'enrolment_id'=>$enrolmentId,'sequence_number'=>$sequence,'status'=>'canonical','lesson_allocation'=>self::SESSION_ALLOCATION,'replacement_allowance'=>self::REPLACEMENT_ALLOWANCE,'starts_at'=>null,'ends_at'=>null,'activated_at'=>null,'completed_at'=>null,'payment_state'=>'not_applicable','created_at'=>$now,'updated_at'=>$now,'created_by'=>$actor,'updated_by'=>$actor,'archived_at'=>null,'archived_by'=>null,'record_model'=>'canonical_enrolment_term_v1','lifecycle_state'=>'authorised','applicable_slot'=>1));
             $this->repository->assignReference($id,Identifier::reference('DZN-TRM-',$id));do_action('dzn_phase_2a2l_after_term_insert','create');
             $this->repository->insertEvent($this->event($id,1,null,'authorised','canonical_term_created',$proof,$now,$actor));do_action('dzn_phase_2a2l_after_event_insert','create');
             $this->recordCommand($key,$payload,'create',$enrolmentId,$id,$expectedLatestTermId,$expectedLatestState,'authorised',$now,$actor);do_action('dzn_phase_2a2l_after_command_insert','create');
             $this->validAggregate($enrolmentId,$this->repository->termsForEnrolment($enrolmentId,false));
             return $this->result($id,'create',true,false,false);
-        });
+        },$withinCallerTransaction);
     }
 
     public function activate(int $termId,string $expectedState,array $evidence,string $key):array{return $this->transition('activate',$termId,$expectedState,$evidence,$key);}
@@ -68,6 +84,7 @@ final class CanonicalTermAuthorityService {
                 if((string)$term->lifecycle_state===$pair[1]&&$this->transitionIntentMatches($term,$expectedState,$pair[1],$proof))return $this->converge($key,$payload,$operation,$enrolmentId,$term,$actor,$termId,$expectedState);
                 throw new \InvalidArgumentException('stale_term_state');
             }
+            if(in_array($pair[1],array('closed','cancelled'),true))(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->assertTermClosable($termId);
             if(in_array($pair[1],array('closed','cancelled'),true)&&(new \Delnavazan\Platform\Core\Infrastructure\Repository\TermRepository())->hasAuthorisedCanonicalLessons($termId))throw new \InvalidArgumentException('authorised_canonical_lesson_exists');
             if(in_array($pair[1],array('closed','cancelled'),true)&&(new \Delnavazan\Platform\Core\Application\CanonicalLessonScheduleGuard())->activeFutureExists('term',$termId,gmdate('Y-m-d H:i:s')))throw new \InvalidArgumentException('active_future_schedule_exists');
             $now=gmdate('Y-m-d H:i:s');$this->repository->transition($term,$expectedState,$pair[1],$now,$actor);do_action('dzn_phase_2a2l_after_term_mutation',$operation);
@@ -78,8 +95,9 @@ final class CanonicalTermAuthorityService {
         });
     }
 
-    private function execute(string$operation,int$enrolmentId,array$facts,string$rawKey,callable$work):array{
+    private function execute(string$operation,int$enrolmentId,array$facts,string$rawKey,callable$work,?bool $withinCallerTransaction=null):array{
         $key=CanonicalTermIdempotency::keyDigest($rawKey);$payload=CanonicalTermIdempotency::payloadDigest(array('domain'=>'canonical_term_v1','operation'=>$operation,'enrolment_id'=>$enrolmentId,'facts'=>$facts));
+        if($withinCallerTransaction===true)return $work($key,$payload);
         $this->repository->begin();try{$result=$work($key,$payload);$this->repository->commit();return$result;}catch(\Throwable$e){$this->repository->rollback();$constraint=$this->repository->duplicateConstraint($e);if($constraint==='command_key_digest'&&($winner=$this->repository->commandForDigest($key)))return$this->replay($winner,$payload,$operation,$enrolmentId,$facts);throw$e;}
     }
     private function replay(object$c,string$payload,string$operation,int$enrolmentId,array$facts):array{
@@ -101,7 +119,7 @@ final class CanonicalTermAuthorityService {
     private function matchingEvidence(object$event,array$p):bool{return$event->reason_code===$p['reason']&&$event->evidence_channel===$p['channel']&&hash_equals((string)$event->evidence_reference_digest,$p['digest'])&&$event->occurred_at===$p['at'];}
     private function event(int$id,int$sequence,?string$from,string$to,string$reason,array$p,string$now,int$actor):array{return array('uid'=>Identifier::uid(),'term_id'=>$id,'event_sequence'=>$sequence,'from_state'=>$from,'to_state'=>$to,'reason_code'=>$reason,'evidence_channel'=>$p['channel'],'evidence_reference_digest'=>$p['digest'],'occurred_at'=>$p['at'],'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor);}
     private function recordCommand(string$key,string$payload,string$operation,int$enrolmentId,int$resultTermId,?int$expectedTermId,?string$expected,string$result,string$now,int$actor):void{$this->repository->insertCommand(array('uid'=>Identifier::uid(),'command_domain'=>'canonical_term_v1','operation'=>$operation,'command_key_digest'=>$key,'command_payload_digest'=>$payload,'enrolment_id'=>$enrolmentId,'expected_term_id'=>$expectedTermId,'expected_from_state'=>$expected,'result_term_id'=>$resultTermId,'result_state'=>$result,'created_at'=>$now,'created_by'=>$actor));}
-    private function requireCapability():void{if(!current_user_can(self::CAPABILITY))throw new \RuntimeException('Unauthorized');}
+    private function requireCapability(?string $capability=null):void{if(!current_user_can($capability??self::CAPABILITY))throw new \RuntimeException('Unauthorized');}
     private function actor():int{$id=get_current_user_id();if($id<1)throw new \RuntimeException('Canonical Term actor is unavailable');return$id;}
     private function result(int$id,string$operation,bool$created,bool$idempotent,bool$already):array{return array('term_id'=>$id,'operation'=>$operation,'created'=>$created,'idempotent'=>$idempotent,'already_applied'=>$already);}
 }

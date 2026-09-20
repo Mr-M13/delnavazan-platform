@@ -13,14 +13,17 @@ $schedule=file_get_contents($root.'/src/Core/Application/CanonicalLessonSchedule
 $phaseQ=$rule.$service.$validator.$read.$repo.$capacity;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<24)throw new RuntimeException('Missing Phase Q schema identity');
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2q-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase Q build identity');
+/* Compatibility markers are minimum-schema plus the canonical build identity shape, so a later
+   phase may advance the platform build without invalidating this closed phase's contract. */
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2[a-z0-9]*-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing canonical build identity for Phase Q+');
 
 // Migration, storage, verifier wiring, capabilities.
 foreach(array('024_post_intro_continuation_slot_reservation_authority','install_canonical_continuation_authority','verify_canonical_continuation_schema','canonical_continuation_cases','canonical_continuation_decisions','canonical_continuation_reservations','canonical_continuation_interventions','canonical_continuation_commands','dzn_manage_canonical_continuation','dzn_view_canonical_continuation','dzn_submit_own_continuation_match_exception')as$n)if(!str_contains($migration.$plugin,$n))throw new RuntimeException('Missing Phase Q migration contract: '.$n);
 if(!str_contains($migration,"if(\$id==='024_post_intro_continuation_slot_reservation_authority')self::verify_canonical_continuation_schema();"))throw new RuntimeException('Migration 024 must invoke the Phase Q schema verifier before it is recorded');
 if(substr_count($migration,'self::verify_canonical_continuation_schema();')<3)throw new RuntimeException('Phase Q verifier must run after migration 024, on current-schema verification and before schema activation');
 if(!str_contains($migration,"in_array( '024_post_intro_continuation_slot_reservation_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-024 pre-activation verification is missing');
-if(!str_contains($migration,"'024_post_intro_continuation_slot_reservation_authority' )"))throw new RuntimeException('Phase Q migration must be listed as required');
+/* The required-migration list is append-only, so a later phase may follow this entry. */
+if(!str_contains($migration,"'024_post_intro_continuation_slot_reservation_authority',")&&!str_contains($migration,"'024_post_intro_continuation_slot_reservation_authority' )"))throw new RuntimeException('Phase Q migration must be listed as required');
 $install=substr($migration,strpos($migration,'private static function install_canonical_continuation_authority'),strpos($migration,'private static function verify_canonical_continuation_schema')-strpos($migration,'private static function install_canonical_continuation_authority'));
 if(substr_count($install,'updated_at datetime')!==2)throw new RuntimeException('Only the mutable case and reservation aggregates may carry updated_at; Phase Q evidence must stay append-only');
 if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO'))throw new RuntimeException('Phase Q migration must be additive only: no backfill or payment import');

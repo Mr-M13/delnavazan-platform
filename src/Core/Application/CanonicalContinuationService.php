@@ -346,6 +346,8 @@ final class CanonicalContinuationService {
         do_action('dzn_phase_2a2q_teacher_root_held','hold_first_regular_slot',(int)$case->teacher_id);
         if($this->schedules->overlappingApplicable((int)$case->teacher_id,$slot['starts_at_utc'],$slot['occupied_ends_at_utc'],0))throw new \InvalidArgumentException('teacher_slot_conflict');
         if($this->repository->overlappingEffectiveReservations((int)$case->teacher_id,$slot['starts_at_utc'],$slot['occupied_ends_at_utc'],$now))throw new \InvalidArgumentException('teacher_slot_conflict');
+        // An interval already protected by a paid commercial commitment is not available to a new hold.
+        CommercialCapacityAuthority::assertNoConflictingClaim((int)$case->teacher_id,$slot['starts_at_utc'],$slot['occupied_ends_at_utc']);
         $state=CanonicalContinuationRule::capacityEffective('active',$expires,$now)?'active':'expired';
         $id=$this->repository->insertReservation(array(
             'uid'=>Identifier::uid(),'continuation_case_id'=>(int)$case->id,'decision_id'=>$decisionId,

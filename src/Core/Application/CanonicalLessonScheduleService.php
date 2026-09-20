@@ -63,12 +63,14 @@ final class CanonicalLessonScheduleService {
             $assignment=$this->assertApplicableAssignment($lesson,$expectedAssignmentId);
             $this->repository->ensureAndLockTeacherRoot((int)$lesson->teacher_id,$now,$actor);
             do_action('dzn_phase_2a2n_teacher_root_held',$operation,$lessonId,(int)$lesson->teacher_id);
-            $this->assertCapacity((int)$lesson->teacher_id,$resolved['starts_at_utc'],$resolved['occupied_ends_at_utc'],$lessonId);
+            $this->assertCapacity((int)$lesson->teacher_id,$resolved['starts_at_utc'],$resolved['occupied_ends_at_utc'],$lessonId,$lesson);
             $basis=$this->availabilityBasis($intent,(int)$lesson->teacher_id,$resolved['starts_at_utc'],$resolved['ends_at_utc']);
 
             if($applicable)$this->repository->supersede((int)$applicable->id,$now,null);
             do_action('dzn_phase_2a2n_after_version_supersede',$operation,$lessonId);
             $versionId=$this->insertVersion($lesson,$facts,$resolved,$basis,$assignment,$now,$actor);
+            // The protected interval and the concrete occupancy change together: never a gap.
+            CommercialCapacityAuthority::satisfyForLesson($lesson,(int)$versionId,$actor,$now);
             if($applicable)$this->repository->setSuccessor((int)$applicable->id,$versionId);
             do_action('dzn_phase_2a2n_after_version_insert',$operation,$lessonId);
             $eventId=$this->insertEvent($lesson,$facts,$applicable?'rescheduled':'scheduled',$applicable?(int)$applicable->id:null,$versionId,$now,$actor);
@@ -87,6 +89,7 @@ final class CanonicalLessonScheduleService {
         $this->repository->ensureAndLockTeacherRoot((int)$lesson->teacher_id,$now,$actor);
         do_action('dzn_phase_2a2n_teacher_root_held','schedule_release',(int)$lesson->id,(int)$lesson->teacher_id);
         $this->repository->supersede((int)$applicable->id,$now,null);
+        CommercialCapacityAuthority::reopenForLesson($lesson,(int)$applicable->id,$actor,$now);
         do_action('dzn_phase_2a2n_after_version_supersede','schedule_release',(int)$lesson->id);
         $eventId=$this->insertEvent($lesson,$facts,'released',(int)$applicable->id,null,$now,$actor);
         do_action('dzn_phase_2a2n_after_event_insert','schedule_release',(int)$lesson->id);
@@ -260,7 +263,7 @@ final class CanonicalLessonScheduleService {
         return $assignment;
     }
 
-    private function assertCapacity(int $teacherId,string $startsAt,string $occupiedEnd,int $lessonId):void{
+    private function assertCapacity(int $teacherId,string $startsAt,string $occupiedEnd,int $lessonId,?object $lesson=null):void{
         $conflicts=$this->repository->overlappingApplicable($teacherId,$startsAt,$occupiedEnd,$lessonId);
         if($conflicts){
             foreach($conflicts as$conflict)if(!CanonicalLessonScheduleValidator::validForLesson((int)$conflict->lesson_id,$this->repository,$this->lessons))throw new \InvalidArgumentException('canonical_schedule_integrity_conflict');
@@ -269,6 +272,9 @@ final class CanonicalLessonScheduleService {
         // Phase 2A.2-Q: an active pre-payment continuation hold is real Teacher capacity. The hold is
         // never a Lesson schedule, but the same capacity gate must consider both authorities.
         CanonicalContinuationCapacityAuthority::assertNoActiveHold($teacherId,$startsAt,$occupiedEnd);
+        // Phase 2A.2-R1: an active protected claim interval is real Teacher capacity too, and the
+        // interval that authorises THIS Lesson is excluded so its own successor never blocks it.
+        if($lesson!==null)CommercialCapacityAuthority::assertScheduleAllowed($lesson,$startsAt,$occupiedEnd);
     }
 
     /** Availability is an upstream constraint, never scheduling authority. */

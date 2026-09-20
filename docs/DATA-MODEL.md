@@ -1,5 +1,17 @@
 # Delnavazan Platform Conceptual Data Model
 
+> **Unmerged candidate note (Phase 2A.2-R1, Schema 25) — not on `main`:** branch
+> `phase-2a2r1-commercial-purchase-funding-authority` adds commercial purchase storage: the
+> versioned runtime commercial policy registry (class-B keys only), product/price, promotions and
+> immutable redemptions, account-specific adjustments with append-only events, immutable purchase
+> offers with their pricing snapshot, applied adjustments, applied policy versions and ordered
+> payment obligations, purchases, bounded entitlements, Term funding plans, provider-neutral payment
+> evidence/facts/settlements, the canonical Regular recurring pattern, current-Term protected
+> capacity claims with per-interval state, the commercial exception registry and digest-only
+> commercial command evidence. Money is an exact integer number of minor units with an explicit
+> currency. There is no provider-specific column, no Term/Lesson/schedule storage and no cross-Term
+> recurring-enrolment storage. Delete this note when the candidate is merged or abandoned.
+
 ## Current state — canonical Lesson authority with scheduling and delivery outcomes
 
 Authoritative `main` is Schema 24 (Phase 2A.2-Q, merged and closed). Phase 2A.2-P adds Schema 23 attendance intake/review storage that records evidence and review only and never becomes canonical delivery truth: a durable provider-neutral participant identity registry (`dzn_canonical_attendance_participant_mappings`, the only authority that decides which canonical Teacher or Student a provider account belongs to), immutable prospective cutover policies with one policy per cutover instant (`UNIQUE cutover_instant`), per-occurrence intake cases bound to their exact cutover policy, append-only evidence/decisions/anomalies, durable refused-conflict receipts and digest-only command evidence. Phase 2A.2-Q adds Schema 24 post-intro continuation storage that records the continuation decision and a bounded pre-payment hold only: `dzn_canonical_continuation_slot_authorities` (the explicit administrator-authorised first regular slot, the only source that may justify capacity, because an audit confirmed no existing proposal/arrangement source carries a recurring future class), `dzn_canonical_continuation_cases` (source introductory Lesson/occurrence, Student, Teacher, Course, optional Enrolment/Assignment/arrangement lineage, rule version, current decision), append-only `dzn_canonical_continuation_decisions` and `dzn_canonical_continuation_interventions`, the single `dzn_canonical_continuation_reservations` hold (bound `slot_authority_id`, frozen interval, frozen `expires_at`, `active`/`expired`/`released`), and digest-only `dzn_canonical_continuation_commands`. It creates no payment, Term or Lesson storage. Phase 2A.2-M additively separates existing `legacy_phase1` Lessons from `canonical_term_lesson_v1`. A canonical Lesson is identified by its canonical Term plus an immutable server-owned sequence. It snapshots the exact Teacher Assignment and Teacher identity at issuance, while canonical Term remains Teacher-neutral.

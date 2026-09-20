@@ -1,5 +1,15 @@
 # Delnavazan Platform Migration Strategy
 
+`025_commercial_purchase_funding_authority` (Phase 2A.2-R1 candidate, **unmerged**) is additive only:
+it creates the commercial purchase, offer, obligation, funding, pattern, protected-capacity and
+exception storage, performs no backfill, infers no purchase, settles no obligation, creates no
+Term/Lesson/schedule row and makes no external call. It creates no provider-specific column, no
+notification table and no cross-Term recurring-enrolment storage. Its verifier runs after migration
+025, on current-schema verification and unconditionally before Schema 25 activation (including the
+retained-025/stale-version path), and rejects provider-specific columns, mutable columns on
+append-only evidence/history/command tables, non-InnoDB tables, malformed digest columns and any
+academic or notification table smuggled into the phase.
+
 ## 1. Objective
 
 Replace Amelia as Delnavazan's business authority without interrupting the beta

@@ -1,5 +1,13 @@
 # Delnavazan Platform Module Boundaries
 
+> **Unmerged Phase 2A.2-R1 candidate boundary:** the commercial authority proposed by the unmerged R1
+> candidate owns purchase offers, pricing snapshots, promotions, account adjustments, obligations,
+> provider-neutral payment evidence, funding derivation, bounded entitlements, Term funding plans,
+> the Regular recurring pattern and current-Term protected capacity. It owns no Term, Lesson,
+> schedule, delivery, attendance or provider storage: Term creation stays with Phase L, Lesson
+> issuance with Phase M, scheduling with Phase N, and payment providers remain evidence sources only.
+> Nothing in that candidate is authoritative until it is independently reviewed and merged.
+
 ## 1. Boundary rule
 
 Core owns business identity and canonical state. Modules collaborate through

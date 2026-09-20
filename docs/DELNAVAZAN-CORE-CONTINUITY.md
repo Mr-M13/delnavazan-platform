@@ -13,7 +13,7 @@
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
 | Current authoritative main | Phase 2A.2-Q implementation merge `815a301679fdebc5d058646749e5a206ab492629`; the docs-only closeout commit that follows is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | None |
+| Active Platform candidate | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority. Branch `phase-2a2r1-commercial-purchase-funding-authority`, authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Committed on the R1 branch and awaiting independent review; not merged into `main`, not deployed.** Candidate commit/tree SHAs are recorded in the task closeout because a commit cannot embed its own hash. `main` remains Schema 24 / Phase Q. |
 | Schema | 24 |
 | Migrations | 001–024; latest `024_post_intro_continuation_slot_reservation_authority` |
 | Build identity | `phase2a2q-post-intro-continuation-slot-reservation-20260920.1` |
@@ -31,7 +31,7 @@
 | Current 2A.2-O state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3) |
 | Current 2A.2-P state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED** (final independent re-review PASS after correction rounds 1–3). Provenance: original `6a6a4ce8249f79df0371753479587e5d9c1fcd27` failed (P-1…P-11); `eda3df2a24f5de67dcbba1dbe6e4ae863b325e13` is historical incomplete; `629310e835a4cad3bc25d5406280944c2b6e6145` failed; `0d6f0f3ab18fe7989367b78610a73beb0e3d7bd9` failed; `30fe1f11c425ad7066408f20ca57e2ca084841d6` passed and was fast-forward merged. Phase P is provider-neutral intake/evidence/assessment/review authority only; Phase O remains canonical delivery/attendance consequence authority and Lesson authority owns completion. No Google/provider credential, no production cutover, no deployment; Theme/NIU untouched. |
 | Current 2A.2-Q state | **COMPLETE / INDEPENDENTLY REVIEWED / MERGED / CLOSED.** Provenance: original `33368f6a…` failed on Q-1/Q-2/Q-3; `c43a89b3…` failed on Q-R1-1/Q-R1-2/Q-R1-3; `815a301…` passed final independent re-review and was fast-forward merged. Phase Q owns exactly the post-introductory continuation decision and a bounded pre-payment hold on the single explicitly authorised first regular slot; Phase P remains complete/closed at Schema 23. No payment/Stripe, Term or Lesson materialisation, notification, provider/Google, Teacher/Student Portal or production activation occurred; Theme/NIU untouched. **Known follow-up:** the `expiry_vs_new_claim` concurrency mode's two-second window can invert its expected winner order under load while production behaviour stays correct (two consecutive full-matrix runs passed with a widened window); a bounded test-harness stability change should follow in a future correction round because the approved tree must not be altered by this merge. |
-| Next Platform action | **Requires explicit product/architecture authorisation.** No next Platform slice is approved by this record; do not begin payment/Stripe, Term or Lesson materialisation, notifications, Google/provider integration, Teacher/Student Portal work, production continuation/attendance cutover or deployment on the strength of this document. |
+| Next Platform action | **Independent review of the Phase 2A.2-R1 candidate is the only open Platform action.** No other Platform slice is approved by this record; do not begin Stripe/provider integration, cross-Term renewal/recovery execution, notifications, Google/provider integration, Portal work, production continuation/attendance cutover, merge or deployment on the strength of this document or of the R1 branch. |
 
 The completed coordination chain is:
 
@@ -360,6 +360,41 @@ Historical `canonical_lesson_cancelled_replacement_eligible` and `attested_non_d
 Attendance cutover, Google Meet/Calendar evidence ingestion, signed public join/absence links, Student/Teacher portals, notifications/WhatsApp, payment/Stripe, Finance, payability, teacher payroll, renewal automation, partial-delivery proration, legacy attendance import, retention policy, Theme/NIU work and any materialisation or scheduling of an owed occurrence remain later authority. The Phase O candidate itself creates none of them.
 
 Full contract, validation record and residual notes: [PHASE-2A-2O-CANONICAL-LESSON-DELIVERY-ATTENDANCE-AUTHORITY.md](PHASE-2A-2O-CANONICAL-LESSON-DELIVERY-ATTENDANCE-AUTHORITY.md).
+
+## Phase 2A.2-R1 candidate — Commercial Purchase, Funding & Current-Term Capacity Authority (unmerged)
+
+**CANDIDATE / INDEPENDENT REVIEW PENDING.** Branch `phase-2a2r1-commercial-purchase-funding-authority`
+from authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`. Schema 25 / migration
+`025_commercial_purchase_funding_authority` / build
+`phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Not merged into `main`, not deployed,
+no production cutover**, and no Phase J–Q accepted decision was reopened.
+
+The candidate owns canonical commercial authority only: sellable product identity and region/currency
+prices, bounded promotions, distinct account-specific adjustments, an immutable purchase offer with a
+deterministic whole-Term pricing snapshot, full and two-instalment plans decomposed into ordered
+obligations, provider-neutral payment evidence, obligation settlement, derived academic effectiveness,
+purchase acceptance, a bounded 12-session entitlement, Term binding through the existing Phase-L
+authority, the canonical Regular recurring pattern (explicit authority only, never `intro + 7 days`),
+current-Term protected capacity with the mandatory succession Phase-Q hold → R1 protected claim →
+Phase-N schedule, commercial exceptions/reconciliation and the versioned runtime commercial policy
+registry (`docs/COMMERCIAL-POLICY-REGISTRY.md`).
+
+Locked representative decisions: one 12-session commitment (two instalments never create two Terms);
+funding is derived only from accepted obligations; unfunded occurrences are never Lessons; an
+obligation may be settled while prerequisite-blocked, and tranche 2 alone never becomes academically
+effective; an existing capacity authority is never released until its successor is durable under the
+same per-Teacher scheduling root; unset policy never lapses anything; and no provider column, SDK,
+webhook, credential or subscription object exists.
+
+Detailed contract, integration table, testing evidence, exclusions and follow-ups:
+[PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md](PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md).
+Deferred to Phase R2: recurring enrolment, renewal cycles and next-Term boundary movement, automatic
+and manual collection modes, the four-week manual guarantee, recovery/lapse, refund review trajectory
+and the channel-neutral notification intents. Terms & Conditions alignment remains a separate
+downstream workstream. **Known follow-up (pre-existing, unrelated to R1):** the Phase-Q *runtime*
+suite cannot run green on a freshly built disposable runtime and fails identically on untouched
+`1b9d7aae` (`assignment_changed`), so it must be repaired before it can be quoted as regression
+evidence.
 
 ## 5. Persistent architectural boundaries
 
