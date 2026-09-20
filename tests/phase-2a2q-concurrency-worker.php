@@ -29,12 +29,32 @@ $at=(string)$state['at'];
 try{
     $svc=new CanonicalContinuationService();
     if($action==='teacher_exception')wp_set_current_user((int)$state['teacher_user']);
+    elseif(isset($state['actors'][$worker]))wp_set_current_user((int)$state['actors'][$worker]);
     else wp_set_current_user((int)$occurrence['principal']);
+    if(in_array($action,array('revoke_guardian','revoke_principal','lesson_schedule'),true))wp_set_current_user(1);
     $evidence=array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'race-'.$action.'-'.$reference,'evidence_at'=>$at);
     $result=match($action){
         'continue'=>$svc->continueWithTeacher((int)$occurrence['lesson_id'],$evidence,$key),
         'contact'=>$svc->requestContact((int)$occurrence['lesson_id'],$evidence,$key),
         'teacher_exception'=>$svc->markMatchNeedsAdmin((int)$occurrence['lesson_id'],$evidence,$key),
+        'lesson_schedule'=>(function() use($state,$at,$reference,$key):array{
+            $chain=(array)($state['chain']??array());
+            $wall=(string)($state['schedule_wall']??$at);
+            return (new \Delnavazan\Platform\Core\Application\CanonicalLessonScheduleService())->schedule((int)$chain['lesson_id'],(int)$chain['assignment_id'],array(
+                'schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),
+                'duration_minutes'=>30,'reason_code'=>'synthetic_race','evidence_channel'=>'staff_record','evidence_reference'=>'race-schedule-'.$reference,'evidence_at'=>gmdate('Y-m-d H:i:s'),
+            ),'dzn-2a2q-race-schedule-'.$key);
+        })(),
+        'revoke_guardian'=>(function() use($state):array{
+            $grant=(array)($state['guardian_grant']??array());
+            (new \Delnavazan\Platform\Core\Application\StudentAcceptanceAuthorityService())->revokeGuardian((int)$grant['id'],(int)$grant['version'],'synthetic_race_revocation',1);
+            return array('revoked_grant_id'=>(int)$grant['id']);
+        })(),
+        'revoke_principal'=>(function() use($state):array{
+            $link=(array)($state['principal_link']??array());
+            (new \Delnavazan\Platform\Core\Application\StudentAcceptanceAuthorityService())->revokePrincipal((int)$link['id'],(int)$link['version'],'synthetic_race_revocation',1);
+            return array('revoked_link_id'=>(int)$link['id']);
+        })(),
         default=>throw new RuntimeException('Unknown Phase-Q race action: '.$action),
     };
     $mark($worker.'.result',wp_json_encode(array('ok'=>true,'action'=>$action,'result'=>is_array($result)?$result:array('value'=>$result)))."\n");

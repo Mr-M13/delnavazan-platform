@@ -1,5 +1,7 @@
 <?php
 /** Verify the committed database state of one gated Phase-Q continuation race. */
+use Delnavazan\Platform\Core\Application\CanonicalContinuationRule;
+
 if(getenv('DZN_PHASE_2A2Q_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!WP_CLI){fwrite(STDERR,"Phase 2A.2-Q concurrency verifier refused.\n");exit(1);}
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 $mode=(string)getenv('DZN_PHASE_2A2Q_MODE');
@@ -77,6 +79,56 @@ switch($mode){
         $caseOne=$caseOf($firstLesson);$caseTwo=$caseOf($secondLesson);
         dzn_qv_assert($caseOne&&$caseTwo,'both unrelated continuation cases must exist');
         dzn_qv_assert($reservationOf((int)$caseOne->id)!==null&&$reservationOf((int)$caseTwo->id)!==null,'both unrelated holds must be recorded');
+        break;
+    case 'hold_vs_lesson_schedule_q_first':
+    case 'hold_vs_lesson_schedule_n_first':
+        $chain=(array)($state['chain']??array());
+        $chainLesson=(int)($chain['lesson_id']??0);
+        dzn_qv_assert($chainLesson>0,'the cross-service race needs its canonical Lesson chain');
+        $schedules=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d",$chainLesson));
+        $holds=$activeHoldCount($firstTeacher);
+        if($mode==='hold_vs_lesson_schedule_q_first'){
+            dzn_qv_assert($holds===1&&$schedules===0,'the Phase-Q hold must win with no conflicting Lesson schedule and no double occupancy');
+        }else{
+            dzn_qv_assert($schedules===1&&$holds===0,'the Phase-N schedule must win with no surviving hold and no double occupancy');
+        }
+        break;
+    case 'expiry_vs_new_claim':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_qv_assert($w1['ok']===false&&$w1['message']==='teacher_slot_conflict','a claim while the hold is still effective must fail closed');
+        dzn_qv_assert($w2['ok']===true,'a claim after the frozen expiry must succeed');
+        $chain=(array)($state['chain']??array());
+        dzn_qv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d",(int)$chain['lesson_id']))===1,'exactly one post-expiry schedule may exist');
+        $expiringCase=$caseOf((int)$state['expiring']['lesson_id']);
+        $expiringReservation=$expiringCase?$reservationOf((int)$expiringCase->id):null;
+        dzn_qv_assert($expiringReservation&&CanonicalContinuationRule::capacityEffective((string)$expiringReservation->state,(string)$expiringReservation->expires_at,gmdate('Y-m-d H:i:s'))===false,'an expired hold must no longer be capacity-effective');
+        break;
+    case 'principal_decision_first':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_qv_assert($w1['ok']===true&&$w2['ok']===true,'a committed decision must survive a later principal revocation');
+        $case=$caseOf($firstLesson);
+        dzn_qv_assert($case&&$decisionCount((int)$case->id)===1,'the committed decision must remain historical');
+        dzn_qv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT actor_basis FROM {$p}canonical_continuation_decisions WHERE continuation_case_id=%d",(int)$case->id))==='adult_principal','the decision must record its original authority basis');
+        dzn_qv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT status FROM {$p}student_principal_links WHERE id=%d",(int)$state['principal_link']['id']))==='revoked','the later revocation must be durably recorded');
+        break;
+    case 'principal_revocation_first':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_qv_assert($w1['ok']===true,'the principal revocation must succeed');
+        dzn_qv_assert($w2['ok']===false&&$w2['message']==='Unauthorized','a stale principal must not commit a continuation decision');
+        dzn_qv_assert($caseOf($firstLesson)===null,'a refused stale-principal command must leave no continuation case');
+        break;
+    case 'guardian_decision_first':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_qv_assert($w1['ok']===true&&$w2['ok']===true,'a guardian decision must survive a later guardian revocation');
+        $case=$caseOf($firstLesson);
+        dzn_qv_assert($case&&(string)$wpdb->get_var($wpdb->prepare("SELECT actor_basis FROM {$p}canonical_continuation_decisions WHERE continuation_case_id=%d",(int)$case->id))==='guardian_representative','the guardian decision must record its authority basis');
+        dzn_qv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}student_acceptance_authority_grants WHERE id=%d",(int)$state['guardian_grant']['id']))==='revoked','the later revocation must be durably recorded');
+        break;
+    case 'guardian_revocation_first':
+        $w1=$workerResult('w1');$w2=$workerResult('w2');
+        dzn_qv_assert($w1['ok']===true,'the guardian revocation must succeed');
+        dzn_qv_assert($w2['ok']===false&&$w2['message']==='Unauthorized','a revoked guardian must not commit a continuation decision');
+        dzn_qv_assert($caseOf($firstLesson)===null,'a refused revoked-guardian command must leave no continuation case');
         break;
     default:
         throw new RuntimeException('Unknown Phase-Q race mode: '.$mode);

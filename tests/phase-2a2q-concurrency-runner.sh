@@ -5,7 +5,7 @@ set -eu
 [ "${DZN_PHASE_2A2Q_RUNTIME_TEST:-}" = concurrency ] || exit 1
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 gate=$DZN_PHASE_2A2Q_GATE_DIR
-modes='continue_exact_replay command_key_changed_decision two_student_decisions continue_vs_teacher_exception competing_hold_same_slot unrelated_teachers'
+modes='continue_exact_replay command_key_changed_decision two_student_decisions continue_vs_teacher_exception competing_hold_same_slot unrelated_teachers hold_vs_lesson_schedule_q_first hold_vs_lesson_schedule_n_first expiry_vs_new_claim principal_decision_first principal_revocation_first guardian_decision_first guardian_revocation_first'
 if [ -n "${DZN_PHASE_2A2Q_MODE:-}" ]; then modes=$DZN_PHASE_2A2Q_MODE; fi
 wp(){ "$DZN_PHASE_2A2Q_WP_CLI" --path="$DZN_PHASE_2A2Q_WP_PATH" --user="$DZN_PHASE_2A2Q_WP_USER" eval-file "$1"; }
 worker(){ env "DZN_PHASE_2A2Q_WORKER=$1" "$DZN_PHASE_2A2Q_WP_CLI" --path="$DZN_PHASE_2A2Q_WP_PATH" --user="$DZN_PHASE_2A2Q_WP_USER" eval-file "$root/tests/phase-2a2q-concurrency-worker.php"; }
@@ -24,6 +24,13 @@ expect(){
     continue_vs_teacher_exception) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
     competing_hold_same_slot) [ $(( $(oks "$gate/w1.result") + $(oks "$gate/w2.result") )) -eq 1 ] && { rejected "$gate/w1.result" || rejected "$gate/w2.result"; } ;;
     unrelated_teachers) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
+    hold_vs_lesson_schedule_q_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'teacher_slot_conflict' ;;
+    hold_vs_lesson_schedule_n_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'teacher_slot_conflict' ;;
+    expiry_vs_new_claim) rejected "$gate/w1.result" && has "$gate/w1.result" 'teacher_slot_conflict' && [ "$(oks "$gate/w2.result")" = 1 ] ;;
+    principal_decision_first) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
+    principal_revocation_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'Unauthorized' ;;
+    guardian_decision_first) [ "$(oks "$gate/w1.result")" = 1 ] && [ "$(oks "$gate/w2.result")" = 1 ] ;;
+    guardian_revocation_first) [ "$(oks "$gate/w1.result")" = 1 ] && rejected "$gate/w2.result" && has "$gate/w2.result" 'Unauthorized' ;;
     *) return 1 ;;
   esac
 }
@@ -31,8 +38,24 @@ failures=0
 for mode in $modes; do
   export DZN_PHASE_2A2Q_MODE=$mode
   mkdir -p "$gate"; rm -f "$gate"/*
+  # Each race starts from a freshly prepared production-authoritative fixture so the matrix is
+  # deterministic and independent of the order in which modes run.
+  fixture >"$gate/fixture.out" 2>&1 || { echo "race=$mode fixture=FAIL"; tail -3 "$gate/fixture.out"; failures=$((failures+1)); continue; }
   if ! wp "$root/tests/phase-2a2q-concurrency-setup.php" >"$gate/setup.out" 2>&1; then
     echo "race=$mode setup=FAIL"; cat "$gate/setup.out"; failures=$((failures+1)); continue
+  fi
+  if [ "$mode" = expiry_vs_new_claim ]; then
+    # A genuinely time-crossing claim: the first attempt must lose to the still-effective hold, the
+    # second must succeed once the frozen expiry has passed.
+    worker w1 >"$gate/w1.out" 2>&1 || true
+    sleep 3
+    worker w2 >"$gate/w2.out" 2>&1 || true
+    if wp "$root/tests/phase-2a2q-concurrency-verify.php" >"$gate/verify.out" 2>&1 && expect "$mode"; then
+      printf 'race=%s outcome=pass verify=%s\n' "$mode" "$(tr -d '\n' <"$gate/verify.out")"
+    else
+      echo "race=$mode outcome=FAIL"; printf 'w1=%s\nw2=%s\n' "$(cat "$gate/w1.result")" "$(cat "$gate/w2.result")"; failures=$((failures+1))
+    fi
+    continue
   fi
   worker w1 >"$gate/w1.out" 2>&1 & p1=$!
   if ! waitfor w1.locked; then

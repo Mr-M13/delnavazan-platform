@@ -88,6 +88,74 @@ final class CanonicalContinuationService {
         }
     }
 
+    /**
+     * Record the EXPLICIT authoritative first regular class slot for one introductory occurrence.
+     *
+     * Phase Q never derives a future paid-class slot from the one-off introduction. The introduction
+     * time is only an intent; capacity may be held only against a slot that has been explicitly
+     * authorised here, with its exact timezone, wall clock, duration and provenance.
+     */
+    public function recordFirstRegularSlot(int $introLessonId,array $input,string $key):array{
+        $this->requireCapability(self::CAPABILITY_ADMIN);
+        $actor=$this->actor();
+        $evidence=$this->evidence($input);
+        $timezone=Normalizer::timezone($input['schedule_timezone']??null);
+        $localDate=(string)($input['local_wall_date']??'');
+        $localTime=(string)($input['local_wall_time']??'');
+        if(!preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D',$localDate))throw new \InvalidArgumentException('Valid local wall date required');
+        if(!preg_match('/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/D',$localTime))throw new \InvalidArgumentException('Valid local wall time required');
+        $basis=(string)($input['authority_basis']??'administrator_attestation');
+        if(!in_array($basis,CanonicalContinuationRule::SLOT_AUTHORITY_BASES,true))throw new \InvalidArgumentException('Controlled slot authority basis required');
+        $reason=(string)($input['reason_code']??'agreed_regular_slot');
+        if(!in_array($reason,CanonicalContinuationRule::SLOT_REASON_CODES,true))throw new \InvalidArgumentException('Controlled slot reason required');
+        $digest=CanonicalContinuationIdempotency::key($key);
+        $this->repository->begin();
+        try{
+            $context=$this->hydrateIntro($introLessonId,true);
+            $duration=$input['duration_minutes']??null;
+            $durationMinutes=$duration===null?(int)$context->course->default_duration_minutes:Normalizer::count($duration,5,480);
+            $bufferMinutes=(int)$context->course->default_buffer_minutes;
+            $resolved=CanonicalContinuationRule::resolveWallClock($timezone,$localDate,$localTime,$durationMinutes,$bufferMinutes);
+            if($resolved['starts_at_utc']<=(string)$context->occurrence->ends_at_utc)throw new \InvalidArgumentException('first_regular_slot_not_after_introduction');
+            $facts=array('domain'=>'canonical_continuation_v1','operation'=>'record_first_regular_slot',
+                'intro_lesson_id'=>(int)$context->lesson->id,'intro_schedule_version_id'=>(int)$context->occurrence->id,
+                'student_id'=>(int)$context->lesson->student_id,'teacher_id'=>(int)$context->lesson->teacher_id,'course_id'=>(int)$context->lesson->course_id,
+                'actor_user_id'=>$actor,'authority_basis'=>$basis,'reason_code'=>$reason,
+                'schedule_timezone'=>$resolved['schedule_timezone'],'local_wall_date'=>$resolved['local_wall_date'],'local_wall_time'=>$resolved['local_wall_time'],
+                'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'occupied_ends_at_utc'=>$resolved['occupied_ends_at_utc'],
+                'evidence_reference_digest'=>$evidence['digest']);
+            $payload=CanonicalContinuationIdempotency::payload($facts);
+            if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload,'record_first_regular_slot');$this->repository->commit();return $result;}
+            if($this->repository->slotAuthorityForIntro((int)$context->lesson->id,true))throw new \InvalidArgumentException('first_regular_slot_already_authorised');
+            $now=gmdate('Y-m-d H:i:s');
+            $id=$this->repository->insertSlotAuthority(array(
+                'uid'=>Identifier::uid(),'intro_lesson_id'=>(int)$context->lesson->id,'intro_schedule_version_id'=>(int)$context->occurrence->id,
+                'student_id'=>(int)$context->lesson->student_id,'teacher_id'=>(int)$context->lesson->teacher_id,'course_id'=>(int)$context->lesson->course_id,
+                'schedule_timezone'=>$resolved['schedule_timezone'],'local_wall_date'=>$resolved['local_wall_date'],'local_wall_time'=>$resolved['local_wall_time'],
+                'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'occupied_ends_at_utc'=>$resolved['occupied_ends_at_utc'],
+                'duration_minutes'=>(int)$resolved['duration_minutes'],'buffer_minutes'=>(int)$resolved['buffer_minutes'],
+                'authority_basis'=>$basis,'reason_code'=>$reason,
+                'evidence_channel'=>$evidence['channel'],'evidence_reference_digest'=>$evidence['digest'],'evidence_at'=>$evidence['at'],
+                'rule_version'=>CanonicalContinuationRule::RULE_VERSION,'recorded_at'=>$now,'recorded_by'=>$actor,
+            ));
+            do_action('dzn_phase_2a2q_after_slot_authority_insert',(int)$context->lesson->id,$id);
+            $this->writeCommand(array(
+                'uid'=>Identifier::uid(),'command_domain'=>'canonical_continuation_v1','operation'=>'record_first_regular_slot',
+                'command_key_digest'=>$digest,'command_payload_digest'=>$payload,
+                'continuation_case_id'=>null,'intro_lesson_id'=>(int)$context->lesson->id,
+                'student_id'=>(int)$context->lesson->student_id,'teacher_id'=>(int)$context->lesson->teacher_id,
+                'result_decision_id'=>null,'result_reservation_id'=>null,'result_intervention_id'=>null,
+                'result_slot_authority_id'=>$id,'result_state'=>'recorded','created_at'=>$now,'created_by'=>$actor,
+            ));
+            $this->repository->commit();
+            return array('slot_authority_id'=>$id,'intro_lesson_id'=>(int)$context->lesson->id,'starts_at_utc'=>$resolved['starts_at_utc'],'ends_at_utc'=>$resolved['ends_at_utc'],'schedule_timezone'=>$resolved['schedule_timezone'],'authority_basis'=>$basis);
+        }catch(\Throwable$e){
+            $this->repository->rollback();
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload,'record_first_regular_slot');
+            throw $e;
+        }
+    }
+
     /** Administrator records that an integrity/conflict condition needs human resolution (Q-D12). */
     public function flagIntegrityConflict(int $caseId,array $input,string $key):array{
         $this->requireCapability(self::CAPABILITY_ADMIN);
@@ -132,6 +200,7 @@ final class CanonicalContinuationService {
             $context=$this->hydrateIntro($introLessonId,true);
             $studentId=(int)$context->lesson->student_id;
             $authority=$this->studentAuthority($studentId,$actor,true);
+            do_action('dzn_phase_2a2q_authority_held',$introLessonId,$authority['basis']);
             $facts=array('domain'=>'canonical_continuation_v1','operation'=>'student_continuation_decision',
                 'intro_lesson_id'=>(int)$context->lesson->id,'intro_schedule_version_id'=>(int)$context->occurrence->id,
                 'student_id'=>$studentId,'teacher_id'=>(int)$context->lesson->teacher_id,'course_id'=>(int)$context->lesson->course_id,
@@ -152,7 +221,9 @@ final class CanonicalContinuationService {
             $decisionId=$this->recordDecision($case,$decision,'student',$evidence,$authority['basis'],$authority['principal_id'],$authority['grant_id'],$now,$actor,$feedback);
             $reservation=null;$interventionId=null;
             if($decision===CanonicalContinuationRule::DECISION_CONTINUE){
-                $reservation=$this->holdFirstRegularSlot($case,$decisionId,$context,$now,$actor);
+                $slot=$this->repository->slotAuthorityForIntro((int)$case->intro_lesson_id,true);
+                if($slot)$reservation=$this->holdFirstRegularSlot($case,$decisionId,$slot,$context,$now,$actor);
+                else $interventionId=$this->recordIntervention($case,$decisionId,'first_regular_slot_authority_required',$now,$actor);
             }else{
                 $this->releaseReservation($case,$now,$actor);
                 $reason=match($decision){
@@ -208,8 +279,12 @@ final class CanonicalContinuationService {
             $assignment=$this->repository->applicableAssignment((int)$enrolment->id);
             if($assignment){$enrolmentId=(int)$enrolment->id;$assignmentId=(int)$assignment->id;}
         }
-        $arrangement=$this->repository->acceptedArrangement((int)$lesson->student_id,(int)$lesson->teacher_id,(int)$lesson->course_id);
-        if($arrangement)$arrangementId=(int)$arrangement->id;
+        // Accepted-arrangement lineage is optional and must never be chosen by insertion id: exactly
+        // one candidate for this Student/Teacher/Course is authoritative; several are ambiguous and
+        // therefore fail closed.
+        $arrangements=$this->repository->acceptedArrangements((int)$lesson->student_id,(int)$lesson->teacher_id,(int)$lesson->course_id);
+        if(count($arrangements)>1)throw new \InvalidArgumentException('continuation_arrangement_ambiguous');
+        if(count($arrangements)===1)$arrangementId=(int)$arrangements[0]->id;
         $id=$this->repository->insertCase(array(
             'uid'=>Identifier::uid(),'reference_code'=>null,
             'intro_lesson_id'=>(int)$lesson->id,'intro_schedule_version_id'=>(int)$occurrence->id,
@@ -227,9 +302,18 @@ final class CanonicalContinuationService {
         return $case;
     }
 
-    /** Freeze the single expected first regular slot and hold it as real Teacher capacity (Q-D3…Q-D5). */
-    private function holdFirstRegularSlot(object $case,int $decisionId,object $context,string $now,int $actor):array{
-        $slot=CanonicalContinuationRule::expectedFirstRegularSlot($context->occurrence,$context->course);
+    /**
+     * Freeze the explicitly authorised first regular slot and hold it as real Teacher capacity.
+     *
+     * The interval comes only from the authoritative slot record — never from the introduction time.
+     */
+    private function holdFirstRegularSlot(object $case,int $decisionId,object $slotAuthority,object $context,string $now,int $actor):array{
+        if((int)$slotAuthority->intro_lesson_id!==(int)$case->intro_lesson_id||(int)$slotAuthority->intro_schedule_version_id!==(int)$case->intro_schedule_version_id)throw new \InvalidArgumentException('canonical_continuation_integrity_conflict');
+        $slot=array(
+            'starts_at_utc'=>(string)$slotAuthority->starts_at_utc,'ends_at_utc'=>(string)$slotAuthority->ends_at_utc,'occupied_ends_at_utc'=>(string)$slotAuthority->occupied_ends_at_utc,
+            'duration_minutes'=>(int)$slotAuthority->duration_minutes,'buffer_minutes'=>(int)$slotAuthority->buffer_minutes,
+            'schedule_timezone'=>(string)$slotAuthority->schedule_timezone,'local_wall_date'=>(string)$slotAuthority->local_wall_date,'local_wall_time'=>(string)$slotAuthority->local_wall_time,
+        );
         $expires=CanonicalContinuationRule::expiresAt((string)$context->occurrence->ends_at_utc,$slot['starts_at_utc']);
         $existing=$this->repository->reservationForCase((int)$case->id,true);
         if($existing){
@@ -244,6 +328,7 @@ final class CanonicalContinuationService {
         $state=CanonicalContinuationRule::capacityEffective('active',$expires,$now)?'active':'expired';
         $id=$this->repository->insertReservation(array(
             'uid'=>Identifier::uid(),'continuation_case_id'=>(int)$case->id,'decision_id'=>$decisionId,
+            'slot_authority_id'=>(int)$slotAuthority->id,
             'teacher_id'=>(int)$case->teacher_id,'student_id'=>(int)$case->student_id,'course_id'=>(int)$case->course_id,
             'source_intro_lesson_id'=>(int)$case->intro_lesson_id,'source_intro_schedule_version_id'=>(int)$case->intro_schedule_version_id,
             'starts_at_utc'=>$slot['starts_at_utc'],'ends_at_utc'=>$slot['ends_at_utc'],'occupied_ends_at_utc'=>$slot['occupied_ends_at_utc'],
@@ -347,6 +432,7 @@ final class CanonicalContinuationService {
             'continuation_case_id'=>(int)$case->id,'intro_lesson_id'=>(int)$case->intro_lesson_id,
             'student_id'=>(int)$case->student_id,'teacher_id'=>(int)$case->teacher_id,
             'result_decision_id'=>$decisionId,'result_reservation_id'=>$reservationId,'result_intervention_id'=>$interventionId,
+            'result_slot_authority_id'=>null,
             'result_state'=>$state,'created_at'=>$now,'created_by'=>$actor,
         );
     }
@@ -367,6 +453,7 @@ final class CanonicalContinuationService {
             'decision_id'=>$command->result_decision_id===null?null:(int)$command->result_decision_id,
             'reservation_id'=>$command->result_reservation_id===null?null:(int)$command->result_reservation_id,
             'intervention_id'=>$command->result_intervention_id===null?null:(int)$command->result_intervention_id,
+            'slot_authority_id'=>$command->result_slot_authority_id===null?null:(int)$command->result_slot_authority_id,
             'state'=>(string)$command->result_state,
         );
     }

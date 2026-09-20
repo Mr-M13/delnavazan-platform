@@ -5,7 +5,7 @@ use Delnavazan\Platform\Core\Infrastructure\Migration\Migrator;
 
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_qm_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
-$tables=array('canonical_continuation_cases','canonical_continuation_decisions','canonical_continuation_reservations','canonical_continuation_interventions','canonical_continuation_commands');
+$tables=array('canonical_continuation_cases','canonical_continuation_decisions','canonical_continuation_reservations','canonical_continuation_interventions','canonical_continuation_commands','canonical_continuation_slot_authorities');
 $mutable=array('canonical_continuation_cases','canonical_continuation_reservations');
 $exists=static function(string $table) use($wpdb,$p):bool{return(string)$wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.$table))===$p.$table;};
 $engine=static function(string $table) use($wpdb,$p):string{return strtolower((string)$wpdb->get_var($wpdb->prepare('SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s',$p.$table)));};
@@ -23,7 +23,9 @@ foreach(array('dzn_manage_canonical_continuation','dzn_view_canonical_continuati
 dzn_qm_assert(get_role('dzn_teacher')&&get_role('dzn_teacher')->has_cap('dzn_submit_own_continuation_match_exception'),'Teacher role must hold its own match-exception grant');
 dzn_qm_assert(!get_role('dzn_teacher')->has_cap('dzn_manage_canonical_continuation'),'Teacher role must not hold administrative continuation authority');
 dzn_qm_assert((string)get_option('dzn_platform_capability_version_2a2q')==='2a2q','Phase Q capability marker was not advanced');
-foreach(array(array('canonical_continuation_cases','intro_lesson',true),array('canonical_continuation_decisions','decision_sequence',true),array('canonical_continuation_reservations','continuation_case',true),array('canonical_continuation_interventions','case_reason_sequence',true),array('canonical_continuation_commands','command_key_digest',true))as$index)dzn_qm_assert((bool)$wpdb->get_row("SHOW INDEX FROM {$p}{$index[0]} WHERE Key_name='{$index[1]}'"),'Missing Phase Q index '.$index[1]);
+foreach(array(array('canonical_continuation_cases','intro_lesson',true),array('canonical_continuation_decisions','decision_sequence',true),array('canonical_continuation_reservations','continuation_case',true),array('canonical_continuation_interventions','case_reason_sequence',true),array('canonical_continuation_commands','command_key_digest',true),array('canonical_continuation_slot_authorities','intro_lesson',true),array('canonical_continuation_slot_authorities','teacher_slot',false))as$index)dzn_qm_assert((bool)$wpdb->get_row("SHOW INDEX FROM {$p}{$index[0]} WHERE Key_name='{$index[1]}'"),'Missing Phase Q index '.$index[1]);
+dzn_qm_assert((bool)$wpdb->get_row("SHOW COLUMNS FROM {$p}canonical_continuation_reservations LIKE 'slot_authority_id'"),'The reservation must bind the explicit slot authority');
+dzn_qm_assert((bool)$wpdb->get_row("SHOW COLUMNS FROM {$p}canonical_continuation_slot_authorities LIKE 'authority_basis'"),'The slot authority must record its authority basis');
 foreach($tables as$table)if(!in_array($table,$mutable,true))dzn_qm_assert(!$wpdb->get_row("SHOW COLUMNS FROM {$p}{$table} LIKE 'updated_at'"),'Phase Q append-only table must stay immutable: '.$table);
 
 // 2. Partial capability repair must be deterministic and least-privileged.
@@ -73,6 +75,8 @@ $failClosed('nullable command digest',fn()=>$wpdb->query("ALTER TABLE {$p}canoni
 $failClosed('non-transactional reservation table',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_reservations ENGINE=MyISAM"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_reservations ENGINE=InnoDB"));
 $failClosed('provider-specific column',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_cases ADD COLUMN google_meet_code varchar(64) NULL"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_cases DROP COLUMN google_meet_code"));
 $failClosed('payment authority column',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_cases ADD COLUMN payment_state varchar(24) NULL"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_cases DROP COLUMN payment_state"));
+$failClosed('dropped slot-authority uniqueness',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_slot_authorities DROP INDEX intro_lesson"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_slot_authorities ADD UNIQUE KEY intro_lesson(intro_lesson_id)"));
+$failClosed('mutable slot authority',fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_slot_authorities ADD COLUMN updated_at datetime NULL"),fn()=>$wpdb->query("ALTER TABLE {$p}canonical_continuation_slot_authorities DROP COLUMN updated_at"));
 
 // 5. Retained-024 / stale-version activation path.
 dzn_qm_assert(in_array('024_post_intro_continuation_slot_reservation_authority',(array)get_option('dzn_platform_completed_migrations',array()),true),'Retained-024 regression requires migration 024 to stay recorded');
@@ -87,4 +91,4 @@ Migrator::maybe_upgrade();
 dzn_qm_assert((string)get_option('dzn_platform_schema_version')===(string)DZN_PLATFORM_SCHEMA_VERSION,'Repaired retained-024 storage did not recover');
 dzn_qm_assert(count(array_keys((array)get_option('dzn_platform_completed_migrations',array()),'024_post_intro_continuation_slot_reservation_authority',true))===1,'Recovery must keep migration 024 recorded exactly once');
 
-echo "fresh_schema_24=pass\nschema_23_to_24_upgrade=pass\nrepeat_migration=pass\npartial_capability_repair=pass\nno_backfill=pass\nno_payment_or_term_creation=pass\nprovider_neutral_storage=pass\nmalformed_storage_fail_closed=pass cases=8\nretained_024_preactivation_fail_closed=pass\nPhase 2A.2-Q migration runtime passed\n";
+echo "fresh_schema_24=pass\nschema_23_to_24_upgrade=pass\nrepeat_migration=pass\npartial_capability_repair=pass\nno_backfill=pass\nno_payment_or_term_creation=pass\nprovider_neutral_storage=pass\nslot_authority_storage=pass\nmalformed_storage_fail_closed=pass cases=10\nretained_024_preactivation_fail_closed=pass\nPhase 2A.2-Q migration runtime passed\n";

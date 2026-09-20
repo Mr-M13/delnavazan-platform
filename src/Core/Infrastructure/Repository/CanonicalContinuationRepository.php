@@ -43,6 +43,14 @@ final class CanonicalContinuationRepository {
     public function reservationForCase(int $caseId,bool $lock=false):?object{
         return $this->one("SELECT * FROM {$this->p}canonical_continuation_reservations WHERE continuation_case_id=%d".($lock?' FOR UPDATE':''),$caseId);
     }
+    /** The explicit authoritative first-regular-slot record for one introductory occurrence, if any. */
+    public function slotAuthorityForIntro(int $introLessonId,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d".($lock?' FOR UPDATE':''),$introLessonId);
+    }
+    public function slotAuthorityById(int $slotAuthorityId,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}canonical_continuation_slot_authorities WHERE id=%d".($lock?' FOR UPDATE':''),$slotAuthorityId);
+    }
+    public function insertSlotAuthority(array $data):int{return $this->insert('canonical_continuation_slot_authorities',$data,'Continuation slot authority persistence failed');}
     public function reservationById(int $id,bool $lock=false):?object{
         return $this->one("SELECT * FROM {$this->p}canonical_continuation_reservations WHERE id=%d".($lock?' FOR UPDATE':''),$id);
     }
@@ -118,9 +126,17 @@ final class CanonicalContinuationRepository {
     public function arrangementByIdForValidation(int $arrangementId):?object{
         return $this->one("SELECT * FROM {$this->p}accepted_service_arrangements WHERE id=%d",$arrangementId);
     }
-    /** Optional accepted-arrangement lineage for this exact Student/Teacher/Course. */
-    public function acceptedArrangement(int $studentId,int $teacherId,int $courseId):?object{
-        return $this->one("SELECT * FROM {$this->p}accepted_service_arrangements WHERE student_id=%d AND teacher_id=%d AND course_id=%d ORDER BY id LIMIT 1",$studentId,$teacherId,$courseId);
+    /**
+     * Every accepted-arrangement candidate for this exact Student/Teacher/Course.
+     *
+     * The caller applies the authority rule (none / exactly one / ambiguous). Insertion id is never
+     * used to choose authoritative lineage.
+     *
+     * @return array<int,object>
+     */
+    public function acceptedArrangements(int $studentId,int $teacherId,int $courseId):array{
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}accepted_service_arrangements WHERE student_id=%d AND teacher_id=%d AND course_id=%d ORDER BY accepted_at,id",$studentId,$teacherId,$courseId))?:array();
     }
     /** Phase-N applicable Lesson schedules overlapping the interval (capacity arbitration parity). */
     public function overlappingLessonSchedules(int $teacherId,string $startsAt,string $occupiedEnd):array{

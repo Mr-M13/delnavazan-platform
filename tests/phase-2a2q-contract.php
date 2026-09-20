@@ -34,7 +34,16 @@ if(!str_contains($migration,'CAPABILITY_OPTION_Q')||!str_contains($migration,'dz
 foreach(array("RULE_VERSION='canonical_continuation_v1'","HOLD_DAYS=6","DECISION_CONTINUE='continue_with_teacher'","DECISION_DIFFERENT_TEACHER='different_teacher'","DECISION_CONTACT_ME='contact_me'","DECISION_NOT_CONTINUING='not_continuing'","DECISION_TEACHER_UNSUITABLE='teacher_unsuitable'","HOLDING_DECISIONS=array(self::DECISION_CONTINUE)","RESERVATION_STATES=array('active','expired','released')")as$n)if(!str_contains($rule,$n))throw new RuntimeException('Missing locked Phase Q rule constant: '.$n);
 foreach(array('teacher_fit','schedule','price','changed_mind','technical_experience','other','prefer_not_to_say')as$n)if(!str_contains($rule,$n))throw new RuntimeException('Missing controlled feedback reason: '.$n);
 foreach(array('student_requested_different_teacher','student_requested_contact','teacher_match_unsuitable','integrity_conflict')as$n)if(!str_contains($rule,$n))throw new RuntimeException('Missing controlled intervention reason: '.$n);
-if(!str_contains($rule,'$next=$local->modify(\'+7 days\')'))throw new RuntimeException('The expected first regular slot must derive from the introductory wall-clock day/time');
+// Q-1: no weekly-recurrence derivation may exist. The introduction time is only an intent; an
+// explicit authoritative slot record is required before any capacity may be held.
+if(str_contains($rule,'+7 days')||str_contains($rule,'expectedFirstRegularSlot'))throw new RuntimeException('Phase Q must never derive a future paid slot from the introduction time');
+if(!str_contains($rule,'public static function resolveWallClock')||str_contains($rule,'$next='))throw new RuntimeException('The slot rule must only resolve an explicitly authorised wall clock');
+foreach(array("SLOT_AUTHORITY_BASES=array('administrator_attestation')",'first_regular_slot_authority_required')as$n)if(!str_contains($rule,$n))throw new RuntimeException('Missing Phase Q slot-authority contract: '.$n);
+if(!str_contains($service,'recordFirstRegularSlot')||!str_contains($service,'first_regular_slot_not_after_introduction')||!str_contains($service,'first_regular_slot_already_authorised'))throw new RuntimeException('Phase Q must expose one explicit first-regular-slot authority command');
+if(!str_contains($repo,'canonical_continuation_slot_authorities')||!str_contains($validator,'slotAuthority')||!str_contains($validator,'resolveWallClock'))throw new RuntimeException('The slot authority must be persisted and validated');
+// Q-3: accepted-arrangement lineage is optional and never chosen by insertion id.
+if(!str_contains($repo,'acceptedArrangements')||str_contains($repo,'acceptedArrangement('))throw new RuntimeException('Accepted-arrangement lineage must be resolved without an id-ordered single row');
+if(!str_contains($service,'continuation_arrangement_ambiguous'))throw new RuntimeException('Ambiguous accepted-arrangement lineage must fail closed');
 if(!str_contains($rule,'HOLD_DAYS*86400'))throw new RuntimeException('The six-day hold bound must be an exact duration from the introductory occurrence boundary');
 if(!str_contains($rule,'return $slotStartUtc<$boundary?$slotStartUtc:$boundary;'))throw new RuntimeException('Hold expiry must be the earlier of the slot start and the six-day bound');
 if(!str_contains($rule,'$state===\'active\'&&$expiresAt>$now'))throw new RuntimeException('Capacity effectivity must be active AND unexpired');
@@ -51,7 +60,7 @@ foreach(array('canonical_term_lesson_v1','createStandard','createReplacement','c
 if(str_contains($service,'setCurrentSchedule')||str_contains($service,'lesson_schedule_versions'))throw new RuntimeException('A temporary hold must never become a Lesson schedule');
 
 // Slot derivation and reservation coherence.
-if(!str_contains($validator,'expectedFirstRegularSlot')||!str_contains($validator,'expiresAt'))throw new RuntimeException('The validator must recompute the derived slot and frozen expiry');
+if(!str_contains($validator,'slotAuthority')||!str_contains($validator,'expiresAt'))throw new RuntimeException('The validator must validate the authoritative slot record and frozen expiry');
 if(!str_contains($validator,'HOLDING_DECISIONS'))throw new RuntimeException('Only a holding decision may own a reservation');
 if(!str_contains($validator,"'legacy_phase1'")||!str_contains($validator,"'introductory'"))throw new RuntimeException('The validator must bind a legacy introductory Lesson, never a paid Term Lesson');
 

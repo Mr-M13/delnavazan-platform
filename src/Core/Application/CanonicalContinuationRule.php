@@ -31,39 +31,47 @@ final class CanonicalContinuationRule {
     public const FEEDBACK_REASONS=array('teacher_fit','schedule','price','changed_mind','technical_experience','other','prefer_not_to_say');
     public const INTERVENTION_REASONS=array(
         'student_requested_different_teacher','student_requested_contact','teacher_match_unsuitable','integrity_conflict',
+        'first_regular_slot_authority_required',
     );
     public const RESERVATION_STATES=array('active','expired','released');
 
     /**
-     * Derive the expected first regular slot from the exact introductory occurrence.
+     * Resolve one EXPLICITLY AUTHORISED local wall-clock slot into exact UTC instants.
      *
-     * @param object $occurrence authoritative introductory occurrence (starts/ends UTC + local wall provenance)
-     * @param object $course authoritative Course of the introductory Lesson
+     * This helper performs no recurrence reasoning and invents no future class: the slot, its
+     * timezone and its wall clock must already come from an authoritative record (the Phase-Q
+     * first-regular-slot authority). It only converts an authoritative wall clock into the exact UTC
+     * interval plus wall-clock provenance, failing closed on an invalid, nonexistent or ambiguous
+     * local time.
+     *
      * @return array{starts_at_utc:string,ends_at_utc:string,occupied_ends_at_utc:string,duration_minutes:int,buffer_minutes:int,schedule_timezone:string,local_wall_date:string,local_wall_time:string}
      */
-    public static function expectedFirstRegularSlot(object $occurrence,object $course):array{
-        $timezone=(string)($occurrence->schedule_timezone??'');
-        $localDate=(string)($occurrence->local_wall_date??'');
-        $localTime=(string)($occurrence->local_wall_time??'');
+    public static function resolveWallClock(string $timezone,string $localDate,string $localTime,int $durationMinutes,int $bufferMinutes):array{
         if($timezone===''||$localDate===''||$localTime==='')throw new \InvalidArgumentException('continuation_intro_provenance_required');
         try{$zone=new \DateTimeZone($timezone);}catch(\Throwable$e){throw new \InvalidArgumentException('continuation_intro_provenance_required');}
         $local=\DateTimeImmutable::createFromFormat('!Y-m-d H:i:s',$localDate.' '.$localTime,$zone);
-        if(!$local||$local->format('Y-m-d H:i:s')!==$localDate.' '.$localTime)throw new \InvalidArgumentException('continuation_intro_provenance_required');
-        $duration=(int)($course->default_duration_minutes??0);
+        if(!$local||$local->format('Y-m-d H:i:s')!==$localDate.' '.$localTime)throw new \InvalidArgumentException('continuation_slot_wall_clock_invalid');
+        $duration=$durationMinutes;
+        $buffer=max(0,min(240,$bufferMinutes));
         if($duration<5||$duration>480)throw new \InvalidArgumentException('continuation_course_duration_required');
-        $buffer=max(0,min(240,(int)($course->default_buffer_minutes??0)));
-        $next=$local->modify('+7 days');
-        if($next->format('H:i:s')!==$localTime)throw new \InvalidArgumentException('continuation_slot_not_derivable');
-        $nextEnd=$next->modify('+'.$duration.' minutes');
-        if($nextEnd<=$next||$nextEnd->format('H:i:s')===null)throw new \InvalidArgumentException('continuation_slot_not_derivable');
+        $end=$local->modify('+'.$duration.' minutes');
+        if($end<=$local)throw new \InvalidArgumentException('continuation_slot_wall_clock_invalid');
+        // Reject a wall clock the zone skips or repeats (DST gap / ambiguity): the authority must be
+        // unambiguous before capacity can be held against it.
+        $offsets=array();
+        foreach($zone->getTransitions($local->getTimestamp()-172800,$end->getTimestamp()+172800)as$transition){
+            $candidate=(new \DateTimeImmutable('@'.(strtotime($localDate.' '.$localTime.' UTC')-(int)$transition['offset'])))->setTimezone($zone);
+            if($candidate->format('Y-m-d H:i:s')===$localDate.' '.$localTime)$offsets[(int)$transition['offset']]=true;
+        }
+        if(count($offsets)>1)throw new \InvalidArgumentException('continuation_slot_wall_clock_ambiguous');
         $utc=new \DateTimeZone('UTC');
-        $starts=$next->setTimezone($utc)->format('Y-m-d H:i:s');
-        $ends=$nextEnd->setTimezone($utc)->format('Y-m-d H:i:s');
-        $occupied=$nextEnd->modify('+'.$buffer.' minutes')->setTimezone($utc)->format('Y-m-d H:i:s');
+        $starts=$local->setTimezone($utc)->format('Y-m-d H:i:s');
+        $ends=$end->setTimezone($utc)->format('Y-m-d H:i:s');
+        $occupied=$end->modify('+'.$buffer.' minutes')->setTimezone($utc)->format('Y-m-d H:i:s');
         return array(
             'starts_at_utc'=>$starts,'ends_at_utc'=>$ends,'occupied_ends_at_utc'=>$occupied,
             'duration_minutes'=>$duration,'buffer_minutes'=>$buffer,
-            'schedule_timezone'=>$timezone,'local_wall_date'=>$next->format('Y-m-d'),'local_wall_time'=>$localTime,
+            'schedule_timezone'=>$timezone,'local_wall_date'=>$localDate,'local_wall_time'=>$localTime,
         );
     }
 
@@ -76,6 +84,10 @@ final class CanonicalContinuationRule {
         $boundary=gmdate('Y-m-d H:i:s',strtotime($introOccurrenceEndUtc.' UTC')+self::HOLD_DAYS*86400);
         return $slotStartUtc<$boundary?$slotStartUtc:$boundary;
     }
+
+    /** Controlled authority basis for an explicit post-intro first regular slot record. */
+    public const SLOT_AUTHORITY_BASES=array('administrator_attestation');
+    public const SLOT_REASON_CODES=array('agreed_regular_slot','intro_slot_becomes_regular','rescheduled_agreement');
 
     /** A reservation is capacity-effective only while it is active AND its frozen expiry has not passed. */
     public static function capacityEffective(string $state,string $expiresAt,string $now):bool{

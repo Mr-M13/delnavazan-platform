@@ -1,6 +1,12 @@
 # Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority
 
-Status: **IMPLEMENTATION CANDIDATE — owner-verified, NOT merged, NOT deployed, awaiting independent review.**
+Status: **CORRECTION ROUND 1 CANDIDATE — owner-verified, NOT merged, NOT deployed, awaiting independent re-review.**
+
+The independently reviewed candidate `33368f6a37c128b476419542e507462952909702` (tree
+`a20c48d8c8f5aaf61688d029c5b5084daa113327`) **failed independent review** on Q-1 (a future first-paid
+slot was derived from the one-off introductory occurrence), Q-2 (four cross-authority concurrency
+modes were not process-proven) and Q-3 (accepted-arrangement lineage used insertion-id ordering).
+Correction Round 1 corrects all three as descendant commits on the existing branch.
 
 Schema 24 (candidate only) / migration `024_post_intro_continuation_slot_reservation_authority` / build
 `phase2a2q-post-intro-continuation-slot-reservation-20260920.1`, from authoritative base
@@ -24,13 +30,43 @@ whether a Term or the twelve paid Lessons should exist, or whether the introduct
 | --- | --- |
 | Introductory Lesson | a `legacy_phase1` Lesson with `lesson_type='introductory'`, Student/Teacher/Course set and **no** Enrolment or Term (created by `LessonService::create`). It is deliberately *not* a canonical Term Lesson. |
 | Introductory occurrence | the single current (non-superseded) `lesson_schedule_versions` row that the Lesson's `current_schedule_version_id` points at, with UTC anchors plus `schedule_timezone`, `local_wall_date`, `local_wall_time`. |
+| Expected first regular slot | **no existing source authorises a recurring future class.** `proposal_versions` and `accepted_service_arrangements` carry only `frequency_per_week`, `schedule_constraints`, `commencement_window_start/end` and `timezone` — a commencement **window**, never a weekday/wall-clock slot. Phase Q therefore introduces the narrowest explicit fact it can justify (below) rather than extending Phase G or assuming recurrence. |
 | Student authority | Phase-F `student_principal_links` (adult) and `student_acceptance_authority_grants` with `authority_type='guardian_representative'` (minor), scoped by the Student's current acceptance capacity classification. |
 | Teacher authority | Phase-J `teacher_principal_links`. |
 | Optional canonical lineage | the applicable canonical Enrolment for the same Student/Teacher/Course (recorded only when it already exists), its applicable Teacher Assignment, and any `accepted_service_arrangements` row for the same Student/Teacher/Course. |
 | Teacher capacity | Phase-N `canonical_lesson_schedule_versions` plus the per-Teacher `teacher_schedule_roots` serialization device. |
 
-Phase Q invents none of these. It never forces an introductory Lesson into a paid Term, and it never
-fabricates a delivery/attendance fact.
+Phase Q invents none of the identity, lesson, occurrence or capacity truths above, and it never forces
+an introductory Lesson into a paid Term or fabricates a delivery/attendance fact. It **does** own one
+new explicit fact — the authorised first regular slot — because no existing authority carries one; that
+fact is recorded deliberately and is never calculated.
+
+### Q-1 — explicit first regular slot authority
+
+The product intent remains that the introductory day/time is *normally* intended to become the ongoing
+regular time, but that intent is not authority. Phase Q therefore exposes one administrator command,
+`recordFirstRegularSlot()`, requiring `dzn_manage_canonical_continuation`, which records an immutable
+`dzn_canonical_continuation_slot_authorities` row containing:
+
+* the exact introductory Lesson and its bound occurrence/version;
+* the exact Student, Teacher and Course;
+* the exact timezone, local wall date and local wall time of the agreed first regular class;
+* the resolved UTC start/end and the occupied (buffer-inclusive) interval;
+* the controlled authority basis (`administrator_attestation`) and reason code;
+* the evidence channel, keyed evidence-reference digest and evidence instant;
+* the frozen rule version, recency and recording actor.
+
+The command refuses a slot that is not strictly after the introductory occurrence
+(`first_regular_slot_not_after_introduction`), refuses a second slot for the same introduction
+(`first_regular_slot_already_authorised`), and refuses a nonexistent (`continuation_slot_wall_clock_invalid`)
+or ambiguous (`continuation_slot_wall_clock_ambiguous`) local wall clock. No weekly recurrence, no
+`+7 days`, and no future availability/acceptance assumption is ever made: a slot that is not in this
+table cannot hold capacity.
+
+If a Student continues before any slot has been authorised, the decision is recorded, **no capacity is
+held**, and an administrator-intervention item `first_regular_slot_authority_required` is raised. The
+aggregate is invalid if a continuing case has neither an authoritative slot with its hold nor that
+explicit requirement.
 
 ## Post-intro eligibility gate
 
@@ -79,17 +115,17 @@ durable digest-only command evidence, and is idempotent: an exact replay converg
 result, while the same command key with a changed context fails `Idempotency conflict`. The replay
 path requires a non-null expected digest and compares unconditionally.
 
-## Slot derivation, hold lifecycle and expiry
+## Slot authority, hold lifecycle and expiry
 
-The expected first regular slot is derived from the introductory occurrence's own wall-clock
-provenance: the same local weekday and time one week later, in the same timezone, using the Course's
-authoritative duration and buffer for the occupied interval. The derivation is DST-safe (a wall time
-that does not exist in the target zone fails closed as `continuation_slot_not_derivable`).
+The hold is bound to the exact `slot_authority_id` that authorised it and freezes that record's interval
+verbatim. The validator re-resolves the authorised timezone/wall clock into UTC and requires an exact
+match with the stored slot record and the reserved interval, so neither the authority record nor the
+hold can drift from the agreed slot. Nothing is derived from the introduction time.
 
-The reservation freezes `starts_at_utc`, `ends_at_utc`, `occupied_ends_at_utc`, timezone/wall-clock
-provenance, `reserved_at`, `expires_at`, rule version and reservation version. Lifecycle is deliberately
-minimal: `active` → `expired` → `released`. The later payment slice may consume the state; Phase Q
-reserves that vocabulary without implementing the later transition.
+The reservation freezes `slot_authority_id`, `starts_at_utc`, `ends_at_utc`, `occupied_ends_at_utc`,
+timezone/wall-clock provenance, `reserved_at`, `expires_at`, rule version and reservation version.
+Lifecycle is deliberately minimal: `active` → `expired` → `released`. The later payment slice may
+consume the state; Phase Q reserves that vocabulary without implementing the later transition.
 
 Expiry is deterministic and lazy: `expires_at` is frozen at creation and never recomputed from "now";
 a reservation is capacity-effective only while `state='active'` **and** `expires_at > now`. A hold
@@ -150,10 +186,27 @@ continuation authority.
 | --- | --- |
 | Phase-Q contract | pass |
 | Authority runtime | pass (continue + real hold, slot derivation, frozen expiry, exact replay and changed-context conflict, admin interventions, not-continuing closure with optional feedback, Teacher match exception, Student/guardian authority, capacity arbitration against both a second hold and canonical Lesson scheduling, expired-hold non-blocking, absolute boundaries) |
-| Corruption runtime | **24 fail-closed cases with repair/recovery** |
-| Failure-injection runtime | **5 write boundaries** (case, decision, reservation, intervention, command evidence) with complete rollback, no false admin item, no capacity leak and retry convergence |
-| Migration runtime | fresh Schema 24, 23→24 rehearsal, repeat, partial capability repair, no backfill, no payment/Term creation, provider-neutral storage, 8 malformed-storage cases, retained-024 fail-closed |
-| Concurrency runner | **6 deterministic gated modes**: exact continuation replay, same key + changed decision, two Student decisions, continue vs Teacher exception, competing hold on the same Teacher slot, unrelated Teachers |
+| Corruption runtime | **34 fail-closed cases with repair/recovery** (including slot-authority identity/interval/wall-clock/basis/rule/provenance and accepted-arrangement lineage corruption) |
+| Failure-injection runtime | **6 write boundaries** (slot authority, case, decision, reservation, intervention, command evidence) with complete rollback, no false admin item, no partial future-slot authority, no capacity leak and retry convergence |
+| Migration runtime | fresh Schema 24, 23→24 rehearsal, repeat, partial capability repair, no backfill, no payment/Term creation, provider-neutral storage, slot-authority storage, 10 malformed-storage cases, retained-024 fail-closed |
+| Concurrency runner | **13 deterministic gated modes**: exact continuation replay, same key + changed decision, two Student decisions, continue vs Teacher exception, competing hold on the same Teacher slot, unrelated Teachers, and four cross-authority races — Phase-Q hold vs Phase-N Lesson scheduling in **both** commit orders, hold-expiry vs new capacity claim across the frozen boundary, guardian decision vs guardian revocation and Student principal change vs decision (both orders) |
+
+### Q-3 — accepted-arrangement lineage
+
+Optional accepted-arrangement lineage is never selected by insertion id. Exactly one arrangement for the
+Student/Teacher/Course is authoritative, none leaves the lineage absent, and several raise
+`continuation_arrangement_ambiguous` rather than silently binding an arbitrary historical row. A bound
+arrangement must also still be an intact accepted record (fingerprint digest, acceptance instants and
+matching Student/Teacher/Course).
+
+### Lock order
+
+The complete hierarchy is: Phase-F authority rows (WordPress user → principal link / guardian grant) →
+Phase-Q introductory Lesson and slot authority → Phase-Q continuation case → per-Teacher scheduling root
+→ Phase-N Lesson schedule versions. Phase Q takes the Phase-F authority rows first and the Teacher root
+last; Phase N takes only the Teacher root and never touches Phase-Q or Phase-F rows, so no reverse order
+or cycle exists. Both capacity authorities therefore serialize on one device in one direction, and the
+cross-service races prove a genuine wait, a post-wait revalidation and exactly one winner.
 
 Phase-P, Phase-O, Phase-N, Phase-M, Phase-M0 and Phase-L regressions were re-run unchanged. No
 deployment, production, Theme/NIU, Google/provider or payment work occurred.

@@ -9,7 +9,7 @@ function dzn_qc_key(string $label):string{return 'dzn-2a2qc-'.$label.'-'.wp_gene
 $fixture=get_option('dzn_phase_2a2j_fixture');
 dzn_qc_assert(is_array($fixture)&&count($fixture['sources']??array())>=4,'Phase-J production fixture required');
 $sources=$fixture['sources'];
-foreach(array('canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases')as$t)dzn_qc_assert($wpdb->query("DELETE FROM {$p}{$t}")!==false,'Failed to reset disposable Phase Q storage');
+foreach(array('canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities')as$t)dzn_qc_assert($wpdb->query("DELETE FROM {$p}{$t}")!==false,'Failed to reset disposable Phase Q storage');
 $svc=new CanonicalContinuationService();$read=new CanonicalContinuationReadService();
 $previous=get_current_user_id();wp_set_current_user(1);
 $principalOf=static function(int $studentId) use($wpdb,$p):int{$id=(int)$wpdb->get_var($wpdb->prepare("SELECT wordpress_user_id FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND active_slot=1 LIMIT 1",$studentId));if($id<1)throw new RuntimeException('principal fixture required');return $id;};
@@ -23,6 +23,7 @@ $introOf=function(int $index,string $label,int $sequence) use($sources,$wpdb,$p)
 };
 // Fixtures: one continuing case with an active hold, one non-continuing case with an intervention.
 $continueFixture=$introOf(0,'corrupt-continue',1);
+$continueFixture['slot']=$svc->recordFirstRegularSlot((int)$continueFixture['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>gmdate('Y-m-d',time()+7200),'local_wall_time'=>gmdate('H:i:s',time()+7200),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'corrupt-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_qc_key('corrupt-slot'));
 wp_set_current_user($principalOf((int)$continueFixture['student_id']));
 $svc->continueWithTeacher((int)$continueFixture['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'corrupt-continue'),dzn_qc_key('corrupt-continue'));
 wp_set_current_user(1);
@@ -85,6 +86,25 @@ $failClosed('intervention decision linkage',$stopCase,"UPDATE {$p}canonical_cont
 $failClosed('cross-continuation intervention',$stopCase,"UPDATE {$p}canonical_continuation_interventions SET continuation_case_id=".(int)$continueCase->id." WHERE id={$interventionId}","UPDATE {$p}canonical_continuation_interventions SET continuation_case_id=".(int)$stopCase->id." WHERE id={$interventionId}",array('canonical_continuation_integrity_conflict'));$cases++;
 // 21: corrupted Teacher-capacity source must fail closed rather than silently releasing capacity.
 $failClosed('capacity source teacher',$continueCase,"UPDATE {$p}canonical_continuation_reservations SET teacher_id=teacher_id+100000 WHERE id={$reservationId}","UPDATE {$p}canonical_continuation_reservations SET teacher_id=teacher_id-100000 WHERE id={$reservationId}",$integrity);$cases++;
+// 22-27: the explicit first-regular-slot authority must be intact and exactly bound (Q-1).
+$slotId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$continueFixture['lesson_id']));
+dzn_qc_assert($slotId>0,'Phase Q slot authority fixture missing');
+$failClosed('slot authority student',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET student_id={$otherStudent} WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET student_id=".(int)$continueCase->student_id." WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('slot authority teacher',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET teacher_id={$otherTeacher} WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET teacher_id=".(int)$continueCase->teacher_id." WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('slot authority interval',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET starts_at_utc=DATE_ADD(starts_at_utc, INTERVAL 3600 SECOND) WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET starts_at_utc=DATE_SUB(starts_at_utc, INTERVAL 3600 SECOND) WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('slot authority wall clock',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET local_wall_time=ADDTIME(local_wall_time,'01:00:00') WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET local_wall_time=SUBTIME(local_wall_time,'01:00:00') WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('slot authority basis',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET authority_basis='caller_asserted' WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET authority_basis='administrator_attestation' WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('slot authority rule version',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET rule_version='canonical_continuation_v0' WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET rule_version='canonical_continuation_v1' WHERE id={$slotId}",$integrity);$cases++;
+$originalSlotDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT evidence_reference_digest FROM {$p}canonical_continuation_slot_authorities WHERE id=%d",$slotId));
+$failClosed('slot authority provenance digest',$continueCase,"UPDATE {$p}canonical_continuation_slot_authorities SET evidence_reference_digest='short' WHERE id={$slotId}","UPDATE {$p}canonical_continuation_slot_authorities SET evidence_reference_digest='{$originalSlotDigest}' WHERE id={$slotId}",$integrity);$cases++;
+$failClosed('reservation slot binding',$continueCase,"UPDATE {$p}canonical_continuation_reservations SET slot_authority_id=999999 WHERE id={$reservationId}","UPDATE {$p}canonical_continuation_reservations SET slot_authority_id={$slotId} WHERE id={$reservationId}",$integrity);$cases++;
+// 28-29: arrangement lineage (Q-3) — arbitrary historical lineage is never authoritative.
+$arrangementId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_continuation_cases WHERE id=%d",(int)$continueCase->id));
+$existingArrangement=(int)($continueCase->accepted_service_arrangement_id??0);
+if($existingArrangement>0){
+    $failClosed('accepted arrangement lineage',$continueCase,"UPDATE {$p}accepted_service_arrangements SET student_id={$otherStudent} WHERE id={$existingArrangement}","UPDATE {$p}accepted_service_arrangements SET student_id=".(int)$continueCase->student_id." WHERE id={$existingArrangement}",$integrity);$cases++;
+    $failClosed('accepted arrangement provenance',$continueCase,"UPDATE {$p}accepted_service_arrangements SET arrangement_fingerprint='short' WHERE id={$existingArrangement}","UPDATE {$p}accepted_service_arrangements SET arrangement_fingerprint=REPEAT('a',64) WHERE id={$existingArrangement}",$integrity);$cases++;
+}
 
 wp_set_current_user($previous);
 echo "corruption_cases=".$cases."\ncontinuation_authority_fail_closed=pass\nrepair_recovery=pass\nPhase 2A.2-Q corruption runtime passed\n";

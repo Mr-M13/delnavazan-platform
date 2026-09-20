@@ -26,6 +26,7 @@ final class CanonicalContinuationValidator {
         $enrolment=$case->enrolment_id===null?null:$repository->caseEnrolmentForValidation((int)$case->enrolment_id);
         $assignment=$case->teacher_assignment_id===null?null:$repository->assignmentByIdForValidation((int)$case->teacher_assignment_id);
         $arrangement=$case->accepted_service_arrangement_id===null?null:$repository->arrangementByIdForValidation((int)$case->accepted_service_arrangement_id);
+        $slotAuthority=$repository->slotAuthorityForIntro((int)$case->intro_lesson_id,$lock);
         return self::valid(
             $case,
             $repository->decisionsForCase($caseId,$lock),
@@ -36,12 +37,13 @@ final class CanonicalContinuationValidator {
             $course,
             $enrolment,
             $assignment,
-            $arrangement
+            $arrangement,
+            $slotAuthority
         );
     }
 
     /** Pure aggregate validation over hydrated rows. */
-    public static function valid(object $case,array $decisions,?object $reservation,array $interventions,?object $lesson,?object $occurrence,?object $course,?object $enrolment=null,?object $assignment=null,?object $arrangement=null):bool{
+    public static function valid(object $case,array $decisions,?object $reservation,array $interventions,?object $lesson,?object $occurrence,?object $course,?object $enrolment=null,?object $assignment=null,?object $arrangement=null,?object $slotAuthority=null):bool{
         $caseId=(int)($case->id??0);
         if($caseId<1||(string)($case->uid??'')==='')return false;
         foreach(array('intro_lesson_id','intro_schedule_version_id','student_id','teacher_id','course_id')as$field)if((int)($case->{$field}??0)<1)return false;
@@ -82,6 +84,34 @@ final class CanonicalContinuationValidator {
         if($arrangement!==null){
             if((int)$arrangement->student_id!==(int)$case->student_id||(int)$arrangement->teacher_id!==(int)$case->teacher_id)return false;
             if($arrangement->course_id!==null&&(int)$arrangement->course_id!==(int)$case->course_id)return false;
+            // Optional lineage must be an intact accepted record, not a rewritten historical row.
+            if(!self::digest($arrangement->arrangement_fingerprint??null))return false;
+            if(!self::utc($arrangement->accepted_at??null)||!self::utc($arrangement->confirmed_at??null))return false;
+        }
+        // The EXPLICIT authoritative first-regular-slot record: identity, provenance and wall-clock
+        // coherence are all required before any capacity may be held against it.
+        $slotInterval=null;
+        if($slotAuthority!==null){
+            if((int)$slotAuthority->intro_lesson_id!==(int)$case->intro_lesson_id)return false;
+            if((int)$slotAuthority->intro_schedule_version_id!==(int)$case->intro_schedule_version_id)return false;
+            if((int)$slotAuthority->student_id!==(int)$case->student_id||(int)$slotAuthority->teacher_id!==(int)$case->teacher_id||(int)$slotAuthority->course_id!==(int)$case->course_id)return false;
+            if((string)($slotAuthority->rule_version??'')!==CanonicalContinuationRule::RULE_VERSION)return false;
+            if(!in_array((string)($slotAuthority->authority_basis??''),CanonicalContinuationRule::SLOT_AUTHORITY_BASES,true))return false;
+            if(!in_array((string)($slotAuthority->reason_code??''),CanonicalContinuationRule::SLOT_REASON_CODES,true))return false;
+            if(!self::digest($slotAuthority->evidence_reference_digest??null))return false;
+            if(!self::utc($slotAuthority->evidence_at??null)||!self::utc($slotAuthority->recorded_at??null)||(int)($slotAuthority->recorded_by??0)<1)return false;
+            try{
+                $slotInterval=CanonicalContinuationRule::resolveWallClock(
+                    (string)$slotAuthority->schedule_timezone,(string)$slotAuthority->local_wall_date,(string)$slotAuthority->local_wall_time,
+                    (int)$slotAuthority->duration_minutes,(int)$slotAuthority->buffer_minutes
+                );
+            }catch(\Throwable$e){
+                return false;
+            }
+            foreach(array('starts_at_utc','ends_at_utc','occupied_ends_at_utc')as$field){
+                if((string)$slotAuthority->{$field}!==(string)$slotInterval[$field])return false;
+            }
+            if((string)$slotInterval['starts_at_utc']<=$end)return false;
         }
         $sequence=1;$latest=0;$bySequence=array();$byId=array();
         foreach($decisions as$decision){
@@ -112,7 +142,9 @@ final class CanonicalContinuationValidator {
             $owner=$byId[(int)($reservation->decision_id??0)]??null;
             if(!$owner)return false;
             if(!in_array((string)$owner->decision,CanonicalContinuationRule::HOLDING_DECISIONS,true))return false;
-            $derived=CanonicalContinuationRule::expectedFirstRegularSlot($occurrence,$course);
+            if($slotAuthority===null||$slotInterval===null)return false;
+            if((int)($reservation->slot_authority_id??0)!==(int)$slotAuthority->id)return false;
+            $derived=$slotInterval;
             foreach(array('starts_at_utc','ends_at_utc','occupied_ends_at_utc','schedule_timezone','local_wall_date','local_wall_time')as$field){
                 if((string)$reservation->{$field}!==(string)$derived[$field])return false;
             }
@@ -143,6 +175,10 @@ final class CanonicalContinuationValidator {
             default=>null,
         };
         if($required!==null&&!isset($seenReasons[$required]))return false;
+        // Continuing without an authoritative first-regular-slot record must be an explicit
+        // administrator requirement, never a silent absence of capacity authority.
+        if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority===null&&!isset($seenReasons['first_regular_slot_authority_required']))return false;
+        if((string)$case->current_decision===CanonicalContinuationRule::DECISION_CONTINUE&&$slotAuthority!==null&&$reservation===null)return false;
         return true;
     }
 
@@ -152,6 +188,7 @@ final class CanonicalContinuationValidator {
             'student_requested_contact'=>CanonicalContinuationRule::DECISION_CONTACT_ME,
             'teacher_match_unsuitable'=>CanonicalContinuationRule::DECISION_TEACHER_UNSUITABLE,
             'integrity_conflict'=>'',
+            'first_regular_slot_authority_required'=>CanonicalContinuationRule::DECISION_CONTINUE,
             default=>'',
         };
     }

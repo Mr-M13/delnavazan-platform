@@ -26,7 +26,7 @@ $principalOf=static function(int $studentId) use($wpdb,$p):int{
     return $id;
 };
 /** Create a legacy introductory Lesson with one past authoritative occurrence. */
-$introOf=function(int $index,string $label,int $daysAgo=3) use($sources,$lessonsSvc,$scheduleSvc,$wpdb,$p):array{
+$introOf=function(int $index,string $label,int $daysAgo=3,bool $withSlot=true,int $slotOffsetDays=7,?string $explicitSlotWall=null) use($sources,$lessonsSvc,$scheduleSvc,$wpdb,$p,$svc,$admin):array{
     static $sequence=0;$sequence++;
     $src=$sources[$index%count($sources)];
     $lessonId=(int)$lessonsSvc->create(array('student_id'=>(int)$src['student_id'],'teacher_id'=>(int)$src['teacher_id'],'course_id'=>(int)$src['course_id'],'lesson_type'=>'introductory','status'=>'draft'));
@@ -36,7 +36,14 @@ $introOf=function(int $index,string $label,int $daysAgo=3) use($sources,$lessons
     (new LessonScheduleService())->initial($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),'reason'=>$label));
     $occurrence=$wpdb->get_row($wpdb->prepare("SELECT v.* FROM {$p}lesson_schedule_versions v INNER JOIN {$p}lessons l ON l.id=v.lesson_id AND l.current_schedule_version_id=v.id WHERE v.lesson_id=%d AND v.superseded_at IS NULL",$lessonId));
     if(!$occurrence)throw new RuntimeException('Phase Q intro occurrence fixture missing');
-    return array('lesson_id'=>$lessonId,'student_id'=>(int)$src['student_id'],'teacher_id'=>(int)$src['teacher_id'],'course_id'=>(int)$src['course_id'],'occurrence'=>$occurrence);
+    $slot=null;
+    if($withSlot){
+        // The first regular slot is an EXPLICIT authorised fact recorded by the administrator, never
+        // derived from the one-off introduction.
+        $slotWall=$explicitSlotWall??gmdate('Y-m-d H:i:s',strtotime($wall)+$slotOffsetDays*86400);
+        $slot=$svc->recordFirstRegularSlot($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'slot-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('slot-'.$label));
+    }
+    return array('lesson_id'=>$lessonId,'student_id'=>(int)$src['student_id'],'teacher_id'=>(int)$src['teacher_id'],'course_id'=>(int)$src['course_id'],'occurrence'=>$occurrence,'slot'=>$slot);
 };
 $caseOf=static function(int $lessonId) use($wpdb,$p):?object{return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_cases WHERE intro_lesson_id=%d",$lessonId));};
 $reservationOf=static function(int $caseId) use($wpdb,$p):?object{return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_reservations WHERE continuation_case_id=%d",$caseId));};
@@ -56,9 +63,9 @@ $a=$introOf(0,'continue');
 $obligationBefore=$obligationCount();
 $principalA=$principalOf((int)$a['student_id']);
 $holdBefore=$qReservationCount();$termBefore=$termCount();$lessonBefore=$lessonCount();$outcomeBefore=$outcomeCount();
-$course=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}courses WHERE id=%d",(int)$a['course_id']));
-$derived=CanonicalContinuationRule::expectedFirstRegularSlot($a['occurrence'],$course);
-$expectedExpiry=CanonicalContinuationRule::expiresAt((string)$a['occurrence']->ends_at_utc,$derived['starts_at_utc']);
+$slotA=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$a['lesson_id']));
+dzn_q_assert($slotA&&(string)$slotA->authority_basis==='administrator_attestation','the fixture must record an explicit authoritative first-regular-slot fact');
+$expectedExpiry=CanonicalContinuationRule::expiresAt((string)$a['occurrence']->ends_at_utc,(string)$slotA->starts_at_utc);
 wp_set_current_user($principalA);
 $continued=$svc->continueWithTeacher((int)$a['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'continue-a'),dzn_q_key('continue-a'));
 wp_set_current_user($admin);
@@ -68,8 +75,9 @@ dzn_q_assert($qReservationCount()===$holdBefore+1,'a continuing decision must cr
 dzn_q_assert($termCount()===$termBefore&&$outcomeCount()===$outcomeBefore,'Phase Q must not create a Term or delivery outcome');
 $caseA=$caseOf((int)$a['lesson_id']);
 $reservationA=$reservationOf((int)$caseA->id);
-dzn_q_assert((string)$reservationA->starts_at_utc===$derived['starts_at_utc']&&(string)$reservationA->ends_at_utc===$derived['ends_at_utc'],'the hold must bind the derived expected first regular slot');
-dzn_q_assert((string)$reservationA->schedule_timezone===$derived['schedule_timezone']&&(string)$reservationA->local_wall_time===$derived['local_wall_time'],'the hold must preserve wall-clock/timezone provenance');
+dzn_q_assert((int)$reservationA->slot_authority_id===(int)$slotA->id,'the hold must bind the exact authoritative slot record');
+dzn_q_assert((string)$reservationA->starts_at_utc===(string)$slotA->starts_at_utc&&(string)$reservationA->ends_at_utc===(string)$slotA->ends_at_utc,'the hold must bind the authorised slot interval, not the introduction time');
+dzn_q_assert((string)$reservationA->schedule_timezone===(string)$slotA->schedule_timezone&&(string)$reservationA->local_wall_time===(string)$slotA->local_wall_time,'the hold must preserve the authorised wall-clock/timezone provenance');
 dzn_q_assert((string)$reservationA->expires_at===$expectedExpiry,'the hold expiry must be frozen at min(slot start, intro boundary + 6 days)');
 dzn_q_assert($expectedExpiry<=(string)gmdate('Y-m-d H:i:s',strtotime((string)$a['occurrence']->ends_at_utc.' UTC')+6*86400),'the hold must never exceed six days after the introductory occurrence boundary');
 $readA=$read->forIntroLesson((int)$a['lesson_id']);
@@ -205,14 +213,16 @@ dzn_q_assert(CanonicalContinuationValidator::validForCase((int)$caseF->id),'the 
 // 7. Real capacity arbitration: an active hold blocks conflicting commitments only.
 // ---------------------------------------------------------------------------
 $g=$introOf(0,'capacity-hold');
+$gSlot=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_continuation_slot_authorities WHERE intro_lesson_id=%d",(int)$g['lesson_id']));
+dzn_q_assert($gSlot!==null,'the capacity fixture must hold an authorised slot');
 $principalH=$principalOf((int)$g['student_id']);
 wp_set_current_user($principalH);
 $svc->continueWithTeacher((int)$g['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'capacity-hold'),dzn_q_key('capacity-hold'));
 wp_set_current_user($admin);
 $caseG=$caseOf((int)$g['lesson_id']);$holdG=$reservationOf((int)$caseG->id);
 dzn_q_assert((string)$holdG->state==='active','the capacity fixture must hold an active reservation');
-// A second Student continuing with the SAME Teacher at the SAME expected slot must fail closed.
-$h=$introOf(1,'capacity-conflict');
+// A second Student continuing with the SAME Teacher at the SAME authorised slot must fail closed.
+$h=$introOf(1,'capacity-conflict',3,true,7,(string)$gSlot->local_wall_date.' '.(string)$gSlot->local_wall_time);
 $wpdb->update($p.'lessons',array('teacher_id'=>(int)$g['teacher_id']),array('id'=>(int)$h['lesson_id']));
 $wpdb->update($p.'lesson_schedule_versions',array('starts_at_utc'=>(string)$g['occurrence']->starts_at_utc,'ends_at_utc'=>(string)$g['occurrence']->ends_at_utc,'local_wall_date'=>(string)$g['occurrence']->local_wall_date,'local_wall_time'=>(string)$g['occurrence']->local_wall_time),array('lesson_id'=>(int)$h['lesson_id']));
 $principalI=$principalOf((int)$h['student_id']);
@@ -269,6 +279,64 @@ dzn_q_assert((int)$afterExpiry['reservation']['reservation_id']>0&&$afterExpiry[
 // ---------------------------------------------------------------------------
 // 9. Absolute boundaries: no Term, no Lesson, no payment, no delivery truth, no notification.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 9b. Q-1: capacity may only be held against an EXPLICIT authoritative slot, never a +7-day guess.
+// ---------------------------------------------------------------------------
+$introEnd=static function(array $o):string{return (string)$o['occurrence']->ends_at_utc;};
+$slotCases=array(
+    'before_six_day_limit'=>array('offsetDays'=>2,'expect'=>'slot'),
+    'exactly_six_day_limit'=>array('offsetDays'=>6,'expect'=>'equal'),
+    'after_six_day_limit'=>array('offsetDays'=>10,'expect'=>'six_day'),
+);
+foreach($slotCases as$caseLabel=>$spec){
+    $o=$introOf(2,$caseLabel,3,false);
+    $authorisedWall=gmdate('Y-m-d H:i:s',strtotime($introEnd($o).' UTC')+((int)$spec['offsetDays'])*86400);
+    $svc->recordFirstRegularSlot((int)$o['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($authorisedWall,0,10),'local_wall_time'=>substr($authorisedWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'boundary-'.$caseLabel,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('boundary-slot-'.$caseLabel));
+    $principal=$principalOf((int)$o['student_id']);
+    wp_set_current_user($principal);
+    $result=$svc->continueWithTeacher((int)$o['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'boundary-'.$caseLabel),dzn_q_key('boundary-'.$caseLabel));
+    wp_set_current_user($admin);
+    $case=$caseOf((int)$o['lesson_id']);
+    $reservation=$reservationOf((int)$case->id);
+    $sixDay=gmdate('Y-m-d H:i:s',strtotime($introEnd($o).' UTC')+6*86400);
+    $expected=match($spec['expect']){
+        'slot'=>$authorisedWall,
+        'equal'=>$authorisedWall,
+        'six_day'=>$sixDay,
+    };
+    dzn_q_assert((string)$reservation->starts_at_utc===$authorisedWall,'the hold must bind the explicitly authorised slot, not a derived one ('.$caseLabel.')');
+    dzn_q_assert((string)$reservation->expires_at===$expected,'the frozen expiry must follow the earlier of slot and six-day bound ('.$caseLabel.')');
+    dzn_q_assert($caseLabel!=='exactly_six_day_limit'||(string)$reservation->expires_at===$authorisedWall,'an exactly-equal slot and six-day bound must agree ('.$caseLabel.')');
+}
+// The introduction time itself never authorises a slot: continue without a slot record holds nothing.
+$noSlot=$introOf(3,'no-slot-authority',3,false);
+$principalNoSlot=$principalOf((int)$noSlot['student_id']);
+wp_set_current_user($principalNoSlot);
+$noSlotResult=$svc->continueWithTeacher((int)$noSlot['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'no-slot'),dzn_q_key('no-slot'));
+wp_set_current_user($admin);
+dzn_q_assert($noSlotResult['decision']==='continue_with_teacher'&&$noSlotResult['reservation']===null,'a continuing decision without an authoritative slot must hold no capacity');
+dzn_q_assert((int)$noSlotResult['intervention_id']>0,'a missing slot authority must raise an explicit administrator requirement');
+$noSlotCase=$caseOf((int)$noSlot['lesson_id']);
+dzn_q_assert($reservationOf((int)$noSlotCase->id)===null,'no reservation may exist without an authoritative slot');
+dzn_q_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_interventions WHERE continuation_case_id=%d AND reason_code='first_regular_slot_authority_required'",(int)$noSlotCase->id))===1,'the missing-slot intervention must carry its controlled reason');
+$noSlotRead=$read->forIntroLesson((int)$noSlot['lesson_id']);
+dzn_q_assert($noSlotRead['case']['admin_action_required']===true&&$noSlotRead['reservation']===null,'the protected read must expose the missing slot authority without inventing a hold');
+// An explicit slot that is not the introduction day/time is honoured exactly (proof of no derivation).
+$explicit=$introOf(4,'explicit-slot',3,false);
+$explicitWall=gmdate('Y-m-d H:i:s',strtotime($introEnd($explicit).' UTC')+3*86400+7200);
+$explicitSlot=$svc->recordFirstRegularSlot((int)$explicit['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($explicitWall,0,10),'local_wall_time'=>substr($explicitWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'rescheduled_agreement','evidence_channel'=>'phone','evidence_reference'=>'explicit-slot','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('explicit-slot'));
+wp_set_current_user($principalOf((int)$explicit['student_id']));
+$explicitResult=$svc->continueWithTeacher((int)$explicit['lesson_id'],array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'explicit-slot'),dzn_q_key('explicit-slot-continue'));
+wp_set_current_user($admin);
+dzn_q_assert((string)$explicitResult['reservation']['starts_at_utc']===(string)$explicitSlot['starts_at_utc'],'the hold must honour the explicitly authorised slot exactly');
+$derivedGuess=gmdate('Y-m-d H:i:s',strtotime((string)$explicit['occurrence']->starts_at_utc.' UTC')+7*86400);
+dzn_q_assert($explicitResult['reservation']['starts_at_utc']!==$derivedGuess,'the hold must never be a +7-day derivation of the introduction time');
+// DST boundaries: a nonexistent and an ambiguous local wall clock must both fail closed.
+$dst=$introOf(5,'dst',3,false);
+dzn_q_rejected(fn()=>$svc->recordFirstRegularSlot((int)$dst['lesson_id'],array('schedule_timezone'=>'Australia/Sydney','local_wall_date'=>'2026-10-04','local_wall_time'=>'02:30:00','evidence_channel'=>'staff_record','evidence_reference'=>'dst-gap','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('dst-gap')),'continuation_slot_wall_clock_invalid','a nonexistent local wall clock (DST gap)');
+dzn_q_rejected(fn()=>$svc->recordFirstRegularSlot((int)$dst['lesson_id'],array('schedule_timezone'=>'Australia/Sydney','local_wall_date'=>'2026-04-05','local_wall_time'=>'02:30:00','evidence_channel'=>'staff_record','evidence_reference'=>'dst-ambiguous','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('dst-ambiguous')),'continuation_slot_wall_clock_ambiguous','an ambiguous local wall clock (DST repeat)');
+dzn_q_rejected(fn()=>$svc->recordFirstRegularSlot((int)$dst['lesson_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr(gmdate('Y-m-d H:i:s',strtotime((string)$dst['occurrence']->starts_at_utc.' UTC')),0,10),'local_wall_time'=>substr((string)$dst['occurrence']->starts_at_utc,11,8),'evidence_channel'=>'staff_record','evidence_reference'=>'dst-past','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_q_key('dst-past')),'first_regular_slot_not_after_introduction','a slot that is not after the introduction');
+
 dzn_q_assert($termCount()===$termBefore+1,'Phase Q must create no Term beyond the fixture chain used for capacity parity');
 dzn_q_assert($outcomeCount()===$outcomeBefore,'Phase Q must create no canonical delivery/attendance outcome');
 dzn_q_assert($obligationCount()===$obligationBefore,'Phase Q must create no academy obligation');
