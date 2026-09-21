@@ -723,3 +723,13 @@ Current next critical path:
 Automation architecture note: DeepSeek implementation now runs through monitored local `codex exec`; independent review runs through a separate authenticated OpenAI Codex profile in an isolated read-only clone. Browser-composer wake is no longer relied upon for core execution transitions. Human-visible progress can be observed directly with `tail -f` on each run's `events.jsonl`.
 
 **HAMED ACTION REQUIRED:** none.
+
+### Operational checkpoint — Theme 0.7.0 final package verified — 2026-09-22
+
+The final merged Theme 0.7.0 package was built from exact authoritative Theme main `e39f5b5c88b139163bd2a3906631e3d79325b1b5`, tree `34355ca2a76a56933f6c7312ba38b46244e4c538`, with a clean/non-divergent source checkout. Canonical build completed with static Theme validation and Portal dialog tests passing; PHP CLI was unavailable and PHP/runtime validation remains explicitly deferred to the staging gate.
+
+Verified archive: `delnavazan-production-theme-0.7.0.zip`, size `3,733,254` bytes, SHA-256 `a6f00d658d373614bc37801e71b9b059df6474d76cf309fc3be377fe0d0e04dc`. Internal `style.css` reports Version 0.7.0. Fresh extraction contained 84 files / 14 directories; static validation, Portal dialog tests and `node --check` passed; `diff -r` showed packaged Theme source byte-identical to Git `HEAD:theme`; junk/secret/workspace-path audit passed.
+
+Stable local artifacts are under `~/Library/Application Support/DelnavazanAgentBridge/artifacts/theme-0.7.0/`. No staging or production deployment occurred. User-facing Library publication remains pending because the current remote-Mac tool path does not directly expose those binary files to the ChatGPT file Library/container.
+
+The separate `AUTOMATION-ORCHESTRATOR-V1` run currently has an empty `final.txt`; do not treat it as complete. Continue daemon investigation/testing independently of the closed Theme implementation/review/merge/package chain.
