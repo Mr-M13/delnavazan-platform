@@ -529,15 +529,32 @@ Reviewer runtime limitation remains non-authoritative: Hamed Cloud lacked a full
 
 | Agent | Role / environment | Last completed work | Current status | Next expected task |
 |---|---|---|---|---|
-| CD / ChatGPT | Architect, sequencer, reviewer, continuity owner | Consolidated current state and identified R1 C2 path | Active through handover, then new CD takes over | Maintain this file; prepare complete C2 handoff; review returned candidate |
-| Hamed | Human project owner / messenger | Routed reviews and implementation results | No product decision pending | Paste complete CD instructions to named agent and return complete result |
-| DeepSeek / Codex Desktop | Platform implementation owner | R1 Correction Round 3 published as `2ff3d6e...` | **Next up for C4** | Fix only NEW-C3-001/002/003 additively from `2ff3d6e...`, preserve all prior passes, test/publish/fresh-clone verify |
-| Hamed Cloud | Independent Platform reviewer | Final independent re-review of C3: FAIL on NEW-C3-001/002/003 | Idle | Review exact immutable C4 SHA/tree only after CD pre-review |
-| Ina / Ina Cloud | Theme implementation/correction owner | Student Portal V1 and Teacher Portal V1 complete; content-page candidate recovery attempt blocked | Parked | Reconstruct Single Content Page V1 later from authoritative Theme main if original object remains unavailable |
+| CD / ChatGPT | Architect, sequencer, reviewer, continuity owner; dedicated Chrome Profile 6 | Routed C4 implementation/review, extracted C4 FAIL, published C5 task; proved CD wake loop | **Active orchestrator** | Monitor DeepSeek C5, pre-review candidate, route immutable C5 to Hamed Cloud, continue additive loop |
+| Hamed | Human project owner | Created dedicated Chrome profiles and performed one-time extension reload/install steps | **No courier role on normal path** | Intervene only for concrete business/product decisions or exceptional local repair |
+| DeepSeek / Codex Desktop | Platform implementation owner | C4 candidate `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` published and independently reviewed FAIL | **C5 task queued/active** | Fix only the three C4-review MAJOR findings additively from `6de25b8...`, validate, push, fresh-clone verify |
+| Hamed Cloud | Independent Platform reviewer; Chrome Profile 1 | Independent C4 re-review: **FAIL — CORRECTION REQUIRED** on three MAJOR findings | Idle pending C5 | Review exact immutable C5 SHA/tree only after CD pre-review |
+| Ina / Ina Cloud | Theme implementation/correction owner; Chrome Profile 5 | Student Portal V1 and Teacher Portal V1 complete; content-page candidate recovery attempt blocked | Parked | Reconstruct Single Content Page V1 later from authoritative Theme main after Platform R1 closes |
 
-Operational model is manual:
-`Hamed ↔ CD → CD prepares one complete copy/paste instruction → Hamed sends it to the specified agent → Hamed returns the complete result → CD critically reviews → CD prepares the next instruction`.
-Do not rely on autonomous background orchestration, live-log monitoring, or automatic handoffs.
+### Orchestration automation status — 2026-09-21
+
+The previous Hamed-as-manual-courier operating model is superseded.
+
+Current transport:
+- CD / Orchestrator: dedicated Chrome Profile 6 with `Delnavazan Agent Bridge - CD Orchestrator`.
+- Hamed Cloud: dedicated Chrome Profile 1 with hard-routed Hamed bridge extension.
+- Ina Cloud: dedicated Chrome Profile 5 with hard-routed Ina bridge extension.
+- DeepSeek: direct Codex Desktop thread queue.
+- Full task instructions are published immutably in Git; browser messages are short wake-up pointers only.
+- Local bridge runs persistently at `127.0.0.1:8765` from `~/Library/Application Support/DelnavazanAgentBridge`.
+- Outbound browser task execution is proven using the real Codex Cloud ProseMirror task composer.
+- CD wake-up is proven end-to-end by synthetic result `CD-WAKE-E2E-001`: bridge completion → CD extension → this CD conversation receives a new user turn.
+- Desktop Commander is no longer intended as the normal orchestration transport; retain it as an exceptional repair/inspection path.
+
+Known automation limitations that must not be overstated:
+- Hamed Cloud task completion detection/result extraction is not yet fully autonomous; C4 final report was retrieved by opening the exact finished task card. The earlier list-page detector produced false `complete` results and must not be treated as authoritative.
+- DeepSeek completion detection has not yet been wired into the bridge/CD wake path. DeepSeek outbound routing itself is proven.
+- Browser bridge verification must key off the exact Codex task/result, not generic task-list mutations, to avoid duplicate task creation.
+- Until those two return detectors are hardened, CD must verify exact task identity before treating a result as complete.
 
 ### Theme current state
 
@@ -579,15 +596,16 @@ Do not waste quota repeatedly searching the old cloud filesystem. Once Platform 
 
 ### Exact next actions
 
-1. CD records the C3 independent FAIL and prepares one self-contained Correction Round 4 instruction for DeepSeek.
-2. DeepSeek starts from exact published candidate `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531` and fixes only NEW-C3-001/002/003 as additive descendants.
-3. C4 must prove the complete acceptance-evidence → settlement → payment-fact → purchase chain, exact mandatory predecessor reservation plus active/full claim aggregate validity, and full commitment/result revalidation before replay success.
-4. DeepSeek runs focused corruption/replay tests plus the existing R1 regression/concurrency matrix, normal-pushes the candidate and fresh-clone verifies it.
-5. CD verifies candidate identity/scope/tests, then Hamed Cloud independently re-reviews the immutable C4 SHA/tree.
-6. Repeat additive correction rounds if required; only independent PASS permits merge planning.
-7. After R1 is safely merged/closed, return to parked Theme Single Content Page V1 reconstruction with Ina.
+1. DeepSeek executes Correction Round 5 from exact C4 candidate `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` / tree `24cf30abbb689d8668fc90aee2793114a736685b`.
+2. C5 must close the three independently found MAJOR gaps: exact released-lifecycle replay integrity; settlement occurrence/currency plus payment-fact currency integrity; full Term-replay command result/ownership validation.
+3. DeepSeek runs the full R1 validation/regression/concurrency matrix, normal-pushes only, fresh-clone verifies, and returns a new immutable candidate SHA/tree.
+4. CD verifies C5 provenance, scope, diff and owner validation claims; no owner claim becomes independent PASS by itself.
+5. CD publishes one immutable C5 independent-review task and routes it to Hamed Cloud through the browser bridge.
+6. Hamed Cloud independently reviews exact C5 SHA/tree. Any FAIL produces another additive correction round; only independent PASS permits merge planning.
+7. In parallel with no interference to Platform history, harden return automation: exact Hamed/Ina completed-task extraction and DeepSeek completion watcher → durable bridge result → CD wake.
+8. After R1 is independently passed/merged/closed, return to parked Theme Single Content Page V1 reconstruction with Ina.
 
-**HAMED ACTION REQUIRED:** none at handover time unless CD presents a concrete copy/paste instruction or a genuine product/business-policy choice.
+**HAMED ACTION REQUIRED:** none unless CD presents a concrete business/product-policy decision or an exceptional one-time local repair step.
 
 ## 11. Continuity Maintenance Protocol
 
