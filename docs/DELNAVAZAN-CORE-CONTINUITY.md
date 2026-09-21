@@ -664,3 +664,24 @@ The intended chain is self-maintaining: CD1 maintains → final consolidation �
 
 A sufficient future bootstrap is:
 > Read `docs/DELNAVAZAN-CORE-CONTINUITY.md` as the authoritative continuity handover. Resume from **Current checkpoint**, **Agent board** and **Exact next actions**. Do not reconstruct state from assumptions.
+
+
+### Operational checkpoint — R1 C5 independent review / C6 routing — 2026-09-21
+
+C5 immutable candidate `2af26260d1ba711a18f9fc73c15923531cab69cd`, tree `46c712744ad545d7a7cb49ec03defddc97080f1a`, exactly one additive commit after C4, received formal Hamed Cloud independent verdict **FAIL — CORRECTION REQUIRED**.
+
+Independently accepted at C5:
+- settlement occurrence binding to evidence `ingested_at` is consistent with the existing acceptance write path;
+- settlement currency and payment-fact currency validation;
+- exact released-lifecycle replay semantics;
+- prior R1 passes/regressions and established lock order remained intact.
+
+Single remaining independent MAJOR: complete operation-specific `commercial_commands` selector shape is not yet enforced. Inapplicable nullable selectors can be contaminated and ignored during same-key replay. Demonstrated gaps include binding `teacher_id` / `obligation_id`, and handoff/release `term_id` / `obligation_id`; all command columns must be audited so applicable selectors match authority and inapplicable selectors remain exactly NULL.
+
+Correction Round 6 task is published at `docs/agent-tasks/platform/R1-C6-DEEPSEEK.md`, continuity commit `bb10b2c19a92a2c3c9a774e8b73227762de3c3dc`, and queued to DeepSeek message `01a0c2b1-a5e3-7bc0-9224-fe6de4abf0b7`. C6 must be an additive descendant of exact C5. Do not merge or deploy.
+
+Ina Cloud parallel static precheck was also launched as non-authoritative extra defect discovery; it does not replace the formal Hamed Cloud verdict.
+
+DeepSeek completion watcher has been retargeted to `R1-C6-DEEPSEEK` so completion should wake the CD Chrome conversation automatically.
+
+**HAMED ACTION REQUIRED:** none.
