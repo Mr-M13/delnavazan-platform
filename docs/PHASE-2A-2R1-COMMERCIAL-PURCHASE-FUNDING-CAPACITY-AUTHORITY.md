@@ -6,14 +6,13 @@ production cutover.** Schema 25 / migration `025_commercial_purchase_funding_aut
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
 tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
 
-Correction round 5 is the current candidate: additive descendants of the reviewed correction-round-4
-commit `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa`, closing the three findings the correction-round-4
-independent re-review returned (`C5-MAJOR-001` release replay lifecycle/result integrity,
-`C5-MAJOR-002` settlement occurrence/currency and payment-fact currency, `C5-MAJOR-003` full Term
-command-result validation — §0e). The independent re-reviews of correction rounds 1–4 each FAILED on
-their then-open findings while passing everything else, and remain historical review evidence.
-Independent re-review of correction round 5 has **not** occurred, so this state is `CORRECTION ROUND 5
-CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
+Correction round 6 is the current candidate: additive descendants of the reviewed correction-round-5
+commit `2af26260d1ba711a18f9fc73c15923531cab69cd`, closing the one finding the correction-round-5
+independent re-review returned (`C6-MAJOR-001` complete operation-specific `commercial_commands`
+selector shape — §0f). The independent re-reviews of correction rounds 1–5 each FAILED on their
+then-open findings while passing everything else, and remain historical review evidence. Independent
+re-review of correction round 6 has **not** occurred, so this state is `CORRECTION ROUND 6 CANDIDATE —
+AWAITING INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
 
 ## 0. Independent review correction round 1
 
@@ -112,8 +111,8 @@ and normal convergence afterwards, and the release replay is covered positively 
 The independent re-review of correction round 4 candidate
 `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` (tree `24cf30abbb689d8668fc90aee2793114a736685b`)
 **FAILED** on three MAJOR findings in the round-4 work; everything else passed and is unchanged.
-Correction round 1, Correction round 2, Correction round 3 and Correction round 4 remain historical
-review evidence.
+Correction round 1, Correction round 2, Correction round 3, Correction round 4 and Correction
+round 5 remain historical review evidence.
 
 | Finding | Correction |
 | --- | --- |
@@ -128,6 +127,43 @@ contamination probes for `result_state`, `result_id`, `term_id`, `entitlement_id
 `offer_id`, `claim_id` and `student_id` on Term binding plus `result_state`, `claim_id` and `offer_id`
 on the capacity handoff and release commands. Every probe asserts fail-closed behaviour, zero
 duplicate result/mutation, no silent repair, and idempotent replay after exact restoration.
+
+## 0f. Independent review correction round 6
+
+The independent re-review of correction round 5 candidate
+`2af26260d1ba711a18f9fc73c15923531cab69cd` (tree `46c712744ad545d7a7cb49ec03defddc97080f1a`)
+**FAILED** on one MAJOR finding; everything else passed and is unchanged. Correction round 1,
+Correction round 2, Correction round 3, Correction round 4 and Correction round 5 remain historical
+review evidence.
+
+| Finding | Correction |
+| --- | --- |
+| `C6-MAJOR-001` complete operation-specific `commercial_commands` selector shape | Replay previously validated the populated result/ownership fields but ignored selectors that should be NULL for the operation. `CommercialCommandShape` is now the one canonical complete-shape check: it enumerates every nullable command selector (`student_id`, `teacher_id`, `offer_id`, `obligation_id`, `purchase_id`, `entitlement_id`, `claim_id`, `term_id`), declares the exact selector set each operation owns, requires every owned selector to equal the revalidated aggregate, requires every other selector to be **exactly NULL** (so no foreign-but-valid identifier can be ignored), requires the command domain/operation, `result_state` and `result_id` to be exactly the revalidated result, and requires the recorded audit fields to be a valid persisted fact. |
+
+The operation-specific selector matrix proved by replay:
+
+| Operation | Owned selectors (must equal the revalidated aggregate) | Selectors that must be exactly NULL |
+| --- | --- | --- |
+| `establish_protected_capacity` | `student_id`, `teacher_id`, `offer_id`, `purchase_id`, `entitlement_id`, `claim_id` | `obligation_id`, `term_id` |
+| `release_protected_capacity` | `student_id`, `teacher_id`, `purchase_id`, `entitlement_id`, `claim_id` | `offer_id`, `obligation_id`, `term_id` |
+| `bind_entitlement_to_term` | `student_id`, `offer_id`, `purchase_id`, `entitlement_id`, `claim_id`, `term_id` | `teacher_id`, `obligation_id` |
+
+Why these shapes: a capacity handoff is committed before any Term or obligation truth exists, so it
+owns neither; a release is anchored on the claim alone (its offer is proved through the commitment
+chain), so it owns no offer identity; and a Term binding is anchored on the Term, Enrolment and claim
+— the Teacher authority for a bound Term travels with the claim and the Enrolment, so the command owns
+no `teacher_id` and no `obligation_id`. The remaining `commercial_commands` columns are the row
+identity (`id`, the generated surrogate `uid`), the replay lookup key (`command_key_digest`), the
+compared payload digest (`command_payload_digest`), the shape-validated result pair
+(`result_state`, `result_id`) and the audit pair (`created_at`, `created_by`); every selector is now
+shape-validated, so no nullable selector can remain an unvalidated bypass.
+
+Round-6 corruption evidence: same-key contamination probes that install a foreign-but-valid
+identifier into each inapplicable selector — `obligation_id` and `term_id` on the handoff command,
+`obligation_id`, `term_id` and `offer_id` on the release command, and `teacher_id` and `obligation_id`
+on the binding command — plus a positive assertion that those selectors are genuinely NULL in the
+written commands before any probe runs. Each probe proves rejection, preserved corruption, no
+duplicate command or downstream truth, exact restoration and a successful idempotent replay.
 
 ## 1. What this phase owns
 

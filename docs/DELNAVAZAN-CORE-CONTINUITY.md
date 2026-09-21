@@ -13,7 +13,7 @@
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
 | Current authoritative main | Phase 2A.2-Q implementation merge `815a301679fdebc5d058646749e5a206ab492629`; the docs-only closeout commit that follows is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority. Branch `phase-2a2r1-commercial-purchase-funding-authority`, authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Correction round 5 is the current candidate on the R1 branch, awaiting independent re-review; not merged into `main`, not deployed.** Correction rounds 1–4 (`10fe4061`, `186fc501` → `3aaf3081`, `2ff3d6e3`, `6de25b8c`) are immutable historical review evidence: round 1 failed on eight findings, round 2 passed all but `R1-MAJOR-007` / `NEW-C2-001` (complete purchase/entitlement commitment ownership before capacity and Term truth), round 3 passed all but `NEW-C3-001`/`NEW-C3-002`/`NEW-C3-003` (acceptance-fact chain, existing-claim integrity, replay after at-rest corruption), and round 4 passed all but `C5-MAJOR-001`/`C5-MAJOR-002`/`C5-MAJOR-003` (release-replay lifecycle, settlement/fact timeline, command-result validation). Candidate commit/tree SHAs are recorded in the task closeout because a commit cannot embed its own hash. `main` remains Schema 24 / Phase Q. |
+| Active Platform candidate | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority. Branch `phase-2a2r1-commercial-purchase-funding-authority`, authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Correction round 6 is the current candidate on the R1 branch, awaiting independent re-review; not merged into `main`, not deployed.** Correction rounds 1–5 (`10fe4061`, `186fc501` → `3aaf3081`, `2ff3d6e3`, `6de25b8c`, `2af2626`) are immutable historical review evidence: round 1 failed on eight findings, round 2 passed all but `R1-MAJOR-007` / `NEW-C2-001` (complete purchase/entitlement commitment ownership before capacity and Term truth), round 3 passed all but `NEW-C3-001`/`NEW-C3-002`/`NEW-C3-003` (acceptance-fact chain, existing-claim integrity, replay after at-rest corruption), round 4 passed all but `C5-MAJOR-001`/`C5-MAJOR-002`/`C5-MAJOR-003` (release-replay lifecycle, settlement/fact timeline, command-result validation), and round 5 passed all but `C6-MAJOR-001` (complete operation-specific command selector shape). Candidate commit/tree SHAs are recorded in the task closeout because a commit cannot embed its own hash. `main` remains Schema 24 / Phase Q. |
 | Schema | 24 |
 | Migrations | 001–024; latest `024_post_intro_continuation_slot_reservation_authority` |
 | Build identity | `phase2a2q-post-intro-continuation-slot-reservation-20260920.1` |
@@ -449,7 +449,7 @@ reviewed commits remain immutable and no force push was used. State: `CORRECTION
 `C5-MAJOR-001` (release replay lifecycle/result integrity), `C5-MAJOR-002` (settlement
 occurrence/currency and payment-fact currency) and `C5-MAJOR-003` (full Term command-result
 validation).
-**Correction round 5 (current candidate):** additive descendants of the reviewed correction-round-4
+**Correction round 5 (historical; independent re-review FAILED on one finding):** additive descendants of the reviewed correction-round-4
 commit `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` (tree `24cf30abbb689d8668fc90aee2793114a736685b`).
 A recorded release now replays only against the exact released lifecycle (a coherent active aggregate
 can no longer satisfy it, no protected interval may remain, the controlled release reason and
@@ -461,9 +461,20 @@ requires the recorded command result to agree exactly with the revalidated commi
 funding plan (`result_state`, `result_id`, `term_id`, `entitlement_id`, `purchase_id`, `offer_id`,
 `claim_id`, `student_id`). Corruption of any of those at rest fails closed with no duplicate result and
 no silent repair, and every probe converges again after exact restoration. The reviewed commits remain
-immutable and no force push was used. State: `CORRECTION ROUND 5 CANDIDATE — AWAITING INDEPENDENT
-RE-REVIEW` (not passed, not merged, not deployed). Schema 25 / migration
-`025_commercial_purchase_funding_authority` / build
+immutable and no force push was used. State: `CORRECTION ROUND 5 CANDIDATE`; that candidate's own independent re-review then failed
+`C6-MAJOR-001` (complete operation-specific `commercial_commands` selector shape).
+**Correction round 6 (current candidate):** additive descendants of the reviewed correction-round-5
+commit `2af26260d1ba711a18f9fc73c15923531cab69cd` (tree `46c712744ad545d7a7cb49ec03defddc97080f1a`).
+`CommercialCommandShape` is the one canonical complete-shape check for a replayed commercial command:
+it enumerates every nullable selector the command schema carries, declares the exact selector set each
+operation owns, requires every owned selector to equal the revalidated aggregate, requires every other
+selector (including `term_id`/`obligation_id` on capacity commands and `teacher_id`/`obligation_id` on
+Term binding) to be exactly NULL, and requires the domain, operation, `result_state`, `result_id` and
+audit fields to be exactly the revalidated recorded result. A foreign-but-valid identifier in an
+inapplicable selector now fails closed with no duplicate command or downstream truth and no silent
+repair. The reviewed commits remain immutable and no force push was used. State: `CORRECTION ROUND 6
+CANDIDATE — AWAITING INDEPENDENT RE-REVIEW` (not passed, not merged, not deployed). Schema 25 /
+migration `025_commercial_purchase_funding_authority` / build
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged.
 Deferred to Phase R2: recurring enrolment, renewal cycles and next-Term boundary movement, automatic
 and manual collection modes, the four-week manual guarantee, recovery/lapse, refund review trajectory

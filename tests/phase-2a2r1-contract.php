@@ -8,6 +8,7 @@ $money=file_get_contents($root.'/src/Core/Application/CommercialMoney.php');
 $validator=file_get_contents($root.'/src/Core/Application/CommercialValidator.php');
 $lineage=file_get_contents($root.'/src/Core/Application/CommercialLineageValidator.php');
 $commitment=file_get_contents($root.'/src/Core/Application/CommercialCommitmentValidator.php');
+$commandShape=file_get_contents($root.'/src/Core/Application/CommercialCommandShape.php');
 $offer=file_get_contents($root.'/src/Core/Application/CommercialOfferService.php');
 $payment=file_get_contents($root.'/src/Core/Application/CommercialPaymentService.php');
 $funding=file_get_contents($root.'/src/Core/Application/CommercialTermFundingService.php');
@@ -30,8 +31,8 @@ $continuationRule=file_get_contents($root.'/src/Core/Application/CanonicalContin
 $authorityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialAuthorityRepository.php');
 $paymentRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialPaymentRepository.php');
 $capacityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialCapacityRepository.php');
-$phaseR1=$rule.$money.$validator.$lineage.$commitment.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
-$phaseR1Application=$rule.$money.$validator.$lineage.$commitment.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
+$phaseR1=$rule.$money.$validator.$lineage.$commitment.$commandShape.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
+$phaseR1Application=$rule.$money.$validator.$lineage.$commitment.$commandShape.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<25)throw new RuntimeException('Missing Phase R1 schema identity');
 if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r1-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
@@ -342,18 +343,16 @@ if(!str_contains($commitment,'(string)$settlement->settled_at!==(string)$evidenc
 // Release replay: exactly the released lifecycle, and the recorded release metadata.
 $capacityReplayV=substr($capacity,strpos($capacity,'private function replay(object $command'));
 if(!str_contains($capacityReplayV,'$releasing?array(\'released\'):array(\'active\')'))throw new RuntimeException('A recorded release must replay only against the exact released claim state');
-foreach(array('CLAIM_RELEASE_REASONS','release_reason_code','released_at','protected','command->claim_id','command->offer_id') as $proved) if(!str_contains($capacityReplayV,$proved))throw new RuntimeException('The capacity replay must prove the release lifecycle/result field: '.$proved);
-if(!str_contains($capacityReplayV,'(int)$command->result_id!==(int)$claim->id')||!str_contains($capacityReplayV,'(int)$command->student_id!==(int)$claim->student_id'))throw new RuntimeException('The capacity replay must prove the recorded command result identity');
+foreach(array('CLAIM_RELEASE_REASONS','release_reason_code','released_at','protected','command->claim_id','CommercialCommandShape::assertShape') as $proved) if(!str_contains($capacityReplayV,$proved))throw new RuntimeException('The capacity replay must prove the release lifecycle/result field: '.$proved);
+if(!str_contains($capacityReplayV,"CommercialCommandShape::RELEASE:CommercialCommandShape::ESTABLISH"))throw new RuntimeException('The capacity replay must use the operation-specific command shape');
 if(strpos($capacityReplayV,'CommercialCommitmentValidator::assertCommitment')>strpos($capacityReplayV,'return $this->claimResult'))throw new RuntimeException('The capacity replay must re-prove the aggregate before reporting success');
 // A release command records no offer identity of its own.
 if(!str_contains($capacity,"'release_protected_capacity',(int)\$claim->student_id,(int)\$claim->teacher_id,\$claim->purchase_id===null?null:(int)\$claim->purchase_id,null,"))throw new RuntimeException('A release command must not record a borrowed offer identity');
 // Term binding: the command records its claim, and replay proves every recorded result field.
 if(!str_contains($funding,"'claim_id'=>(int)\$claim->id,'term_id'=>\$termId,'result_state'=>'term_bound','result_id'=>\$termId"))throw new RuntimeException('The binding command must record its claim and exact result identity');
 foreach(array(
-    "(string)\$command->result_state!=='term_bound'","(int)\$command->result_id!==(int)\$plan->term_id","(int)\$command->term_id!==(int)\$plan->term_id",
-    "(int)\$command->entitlement_id!==(int)\$entitlement->id","(int)\$command->purchase_id!==(int)\$purchase->id",
-    "(int)\$command->offer_id!==(int)\$offer->id","(int)\$command->claim_id!==(int)\$claim->id",
-) as $proved) if(!str_contains($fundingReplay,$proved))throw new RuntimeException('The binding replay must prove: '.$proved);
+    'CommercialCommandShape::assertShape',"CommercialCommandShape::BIND,'term_bound'","'term_id'=>(int)\$plan->term_id","'claim_id'=>(int)\$claim->id",
+) as $proved) if(!str_contains($fundingReplay,$proved))throw new RuntimeException('The binding replay must prove the complete operation shape: '.$proved);
 // Correction Round 5 — behavioural coverage.
 foreach(array(
     'release replay over an otherwise valid active aggregate','otherwise valid active claim aggregate','release replay over a corrupt claim aggregate',
@@ -364,5 +363,31 @@ foreach(array(
 ) as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The correction-round-5 corruption matrix is missing: '.$probe);
 if(!str_contains($phaseDoc,'Correction round 5'))throw new RuntimeException('The Phase R1 document must record correction round 5');
 if(!str_contains($continuity,'Correction round 5'))throw new RuntimeException('The continuity record must record correction round 5');
+
+// Correction Round 6 — the complete operation-specific command shape.
+if(!str_contains($commandShape,'final class CommercialCommandShape'))throw new RuntimeException('The canonical commercial command-shape validator is missing');
+if(!str_contains($commandShape,"SELECTORS=array('student_id','teacher_id','offer_id','obligation_id','purchase_id','entitlement_id','claim_id','term_id')"))throw new RuntimeException('The command-shape validator must enumerate every nullable command selector');
+if(!str_contains($commandShape,'public static function selectorsFor')||!str_contains($commandShape,'public static function assertShape'))throw new RuntimeException('The command-shape validator must expose its per-operation shape and its check');
+foreach(array('self::ESTABLISH=>','self::RELEASE=>','self::BIND=>') as $operation) if(!str_contains($commandShape,$operation))throw new RuntimeException('The command-shape validator must declare each operation shape: '.$operation);
+foreach(array(
+    "(string)\$command->command_domain!==CommercialRule::DOMAIN","(string)\$command->operation!==\$operation",
+    "(string)\$command->result_state!==\$resultState","(int)\$command->result_id!==\$resultId",
+    "if(!array_key_exists(\$selector,\$selectors))throw","if(\$recorded!==null)throw",
+    "CommercialValidator::utc((string)\$command->created_at)",
+) as $proved) if(!str_contains($commandShape,$proved))throw new RuntimeException('The command-shape validator must prove: '.$proved);
+if(substr_count($commandShape,'$reason')<8)throw new RuntimeException('Every command-shape violation must fail closed with the caller controlled reason');
+foreach(array('INSERT INTO','UPDATE ','DELETE FROM') as $sql) if(str_contains($commandShape,$sql))throw new RuntimeException('The command-shape validator must never write storage: '.$sql);
+if(!str_contains($commandShape,'must remain exactly NULL')&&!str_contains($commandShape,'must remain exactly NULL:'))throw new RuntimeException('The inapplicable-selector rule must be documented');
+// Both replays use the one shape validator for their own operation.
+if(!str_contains($capacity,'CommercialCommandShape::assertShape')||!str_contains($funding,'CommercialCommandShape::assertShape'))throw new RuntimeException('Every replay must prove the complete operation-specific command shape');
+if(substr_count($capacity,"CommercialCommandShape::assertShape(")!==1||substr_count($funding,"CommercialCommandShape::assertShape(")!==1)throw new RuntimeException('Each replay must use exactly one canonical shape check');
+if(str_contains($capacity,'$command->offer_id!==null')||str_contains($funding,'$command->teacher_id!==null'))throw new RuntimeException('No ad-hoc selector NULL check may remain outside the canonical shape validator');
+// Correction Round 6 — behavioural coverage for the null-selector selectors.
+foreach(array(
+    "'handoff.obligation_id'","'handoff.term_id'","'release.obligation_id'","'release.term_id'","'binding.teacher_id'","'binding.obligation_id'",
+    'must not carry a','must never silently repair the command','must not duplicate the command row',
+) as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The correction-round-6 selector matrix is missing: '.$probe);
+if(!str_contains($phaseDoc,'Correction round 6'))throw new RuntimeException('The Phase R1 document must record correction round 6');
+if(!str_contains($continuity,'Correction round 6'))throw new RuntimeException('The continuity record must record correction round 6');
 
 echo "Phase 2A.2-R1 contract passed\n";

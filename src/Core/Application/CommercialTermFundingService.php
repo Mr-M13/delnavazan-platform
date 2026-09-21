@@ -243,17 +243,10 @@ final class CommercialTermFundingService {
         // claim's ownership and complete aggregate, and the exact Term/funding-plan relationship.
         $plan=$this->repository->fundingPlanForTerm((int)$command->result_id,true);
         if(!$plan)throw new \RuntimeException('Contaminated commercial Term binding result');
-        // The recorded command result must be this operation's exact outcome.
-        if((string)$command->result_state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding command');
-        if($command->result_id===null||(int)$command->result_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding result');
-        if($command->term_id===null||(int)$command->term_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding command');
+        if($command->result_id===null)throw new \RuntimeException('Contaminated commercial Term binding result');
         $commitment=CommercialCommitmentValidator::assertCommitment((int)$plan->entitlement_id,array('term_bound'),true,$this->repository);
         $entitlement=$commitment['entitlement'];$purchase=$commitment['purchase'];$offer=$commitment['offer'];
         if((string)$entitlement->state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding result');
-        if($command->entitlement_id===null||(int)$command->entitlement_id!==(int)$entitlement->id)throw new \RuntimeException('Contaminated commercial Term binding command');
-        if($command->purchase_id===null||(int)$command->purchase_id!==(int)$purchase->id)throw new \RuntimeException('Contaminated commercial Term binding command');
-        if($command->offer_id===null||(int)$command->offer_id!==(int)$offer->id)throw new \RuntimeException('Contaminated commercial Term binding command');
-        if((int)$command->student_id!==(int)$purchase->beneficiary_student_id)throw new \RuntimeException('Contaminated commercial Term binding command');
         if((int)$plan->purchase_id!==(int)$purchase->id||(int)$plan->offer_id!==(int)$offer->id)throw new \RuntimeException('Contaminated commercial Term binding result');
         if((int)$plan->term_id!==(int)$entitlement->term_id||(int)$plan->enrolment_id!==(int)$entitlement->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
         if((int)$plan->committed_sessions!==(int)$offer->committed_sessions||(string)$plan->plan_kind!==(string)$offer->plan_kind)throw new \RuntimeException('Contaminated commercial Term binding result');
@@ -261,10 +254,17 @@ final class CommercialTermFundingService {
         $claim=$capacityRepository->claimForEntitlement((int)$plan->entitlement_id,true);
         if(!$claim)throw new \RuntimeException('Contaminated commercial Term binding result');
         CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$capacityRepository->intervals((int)$claim->id,true),$entitlement,$purchase,$offer,array('active'));
-        if($command->claim_id===null||(int)$command->claim_id!==(int)$claim->id)throw new \RuntimeException('Contaminated commercial Term binding command');
         if((int)$claim->term_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding result');
         $term=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CanonicalTermAuthorityRepository())->term((int)$plan->term_id,true);
         if(!$term||(int)$term->enrolment_id!==(int)$plan->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
+        // The complete operation-specific command shape: this operation owns the Student, offer,
+        // purchase, entitlement, claim and Term selectors, and owns neither teacher_id nor
+        // obligation_id (the Teacher authority travels with the claim and Enrolment).
+        if($command->claim_id===null)throw new \RuntimeException('Contaminated commercial Term binding result');
+        CommercialCommandShape::assertShape($command,CommercialCommandShape::BIND,'term_bound',(int)$plan->term_id,array(
+            'student_id'=>(int)$purchase->beneficiary_student_id,'offer_id'=>(int)$offer->id,'purchase_id'=>(int)$purchase->id,
+            'entitlement_id'=>(int)$entitlement->id,'claim_id'=>(int)$claim->id,'term_id'=>(int)$plan->term_id,
+        ),'Contaminated commercial Term binding command');
         return array(
             'term_id'=>(int)$plan->term_id,'enrolment_id'=>(int)$plan->enrolment_id,'entitlement_id'=>(int)$plan->entitlement_id,
             'purchase_id'=>(int)$plan->purchase_id,'committed_sessions'=>(int)$plan->committed_sessions,

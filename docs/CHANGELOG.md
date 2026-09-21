@@ -5,6 +5,34 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — candidate, unmerged — 2026-09-20
 
+### Correction round 6 (independent re-review of `2af26260d1ba711a18f9fc73c15923531cab69cd` failed on one finding)
+
+The independent re-review of correction round 5 **FAILED** on `C6-MAJOR-001`; everything else passed.
+Additive descendants of `2af2626` close exactly that finding, with no amend, rebase, squash, reset or
+force push.
+
+- `C6-MAJOR-001` — replay validated populated result/ownership fields but ignored selectors that must
+  be NULL for the operation. The new canonical `CommercialCommandShape` enumerates every nullable
+  command selector (`student_id`, `teacher_id`, `offer_id`, `obligation_id`, `purchase_id`,
+  `entitlement_id`, `claim_id`, `term_id`), declares the exact selector set each operation owns,
+  requires every owned selector to equal the revalidated aggregate, requires every other selector to
+  be **exactly NULL**, and requires the domain, operation, `result_state`, `result_id` and audit
+  fields to be the revalidated recorded result. Operation shapes: handoff owns
+  student/teacher/offer/purchase/entitlement/claim (`obligation_id`, `term_id` NULL); release owns
+  student/teacher/purchase/entitlement/claim (`offer_id`, `obligation_id`, `term_id` NULL); Term
+  binding owns student/offer/purchase/entitlement/claim/term (`teacher_id`, `obligation_id` NULL,
+  because the Teacher authority travels with the claim and the Enrolment).
+- Corruption evidence: same-key probes installing a foreign-but-valid identifier into every
+  inapplicable selector (`obligation_id`/`term_id` on handoff, `obligation_id`/`term_id`/`offer_id` on
+  release, `teacher_id`/`obligation_id` on binding), plus positive assertions that those selectors are
+  genuinely NULL in the written commands. Each probe proves rejection, preserved corruption, no
+  duplicate command or downstream truth, exact restoration and a successful idempotent replay.
+- Validation (owner-executed, disposable WordPress 6.8.3 + MariaDB 11.4.13, fresh database per suite)
+  is recorded in `docs/PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md` §5. Schema 25 /
+  migration `025_commercial_purchase_funding_authority` / build
+  `phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged. State:
+  `CORRECTION ROUND 6 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`; not passed, not merged, not deployed.
+
 ### Correction round 5 (independent re-review of `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` failed on three findings)
 
 The independent re-review of correction round 4 **FAILED** on `C5-MAJOR-001`, `C5-MAJOR-002` and

@@ -675,4 +675,21 @@ $commandProbe('release.result_state','release',$releaseCommandId,'result_state',
 $commandProbe('release.offer_id','release',$releaseCommandId,'offer_id','%d',(int)$offerI['offer_id'],'Contaminated commercial capacity command');
 $commandProbe('release.claim_id','release',$releaseCommandId,'claim_id','RAW','NULL','Contaminated commercial capacity result');
 
+// NEW-C6-001 — the COMPLETE operation-specific command shape. Every selector an operation does not
+// own must remain exactly NULL, so no foreign-but-valid identifier can be ignored by replay.
+$termIdI=(int)$wpdb->get_var($wpdb->prepare("SELECT term_id FROM {$p}commercial_term_funding_plans WHERE id=%d",$planIdI));
+dzn_r1_fix_assert($termIdI>0,'the binding fixture must expose its canonical Term');
+$assertNullSelectors=static function(int $commandId,array $columns,string $label) use($readValue):void{
+    foreach($columns as $column)dzn_r1_fix_assert($readValue('commercial_commands',$commandId,$column)===null,$label.' must not carry a '.$column.' selector');
+};
+$assertNullSelectors($handoffCommandId,array('obligation_id','term_id'),'a capacity handoff command');
+$assertNullSelectors($releaseCommandId,array('obligation_id','term_id','offer_id'),'a claim release command');
+$assertNullSelectors($bindCommandId,array('teacher_id','obligation_id'),'a Term binding command');
+$commandProbe('handoff.obligation_id','handoff',$handoffCommandId,'obligation_id','%d',$obligationI1,'Contaminated commercial capacity command');
+$commandProbe('handoff.term_id','handoff',$handoffCommandId,'term_id','%d',$termIdI,'Contaminated commercial capacity command');
+$commandProbe('release.obligation_id','release',$releaseCommandId,'obligation_id','%d',$obligationI1,'Contaminated commercial capacity command');
+$commandProbe('release.term_id','release',$releaseCommandId,'term_id','%d',$termIdI,'Contaminated commercial capacity command');
+$commandProbe('binding.teacher_id','binding',$bindCommandId,'teacher_id','%d',(int)$i['teacher_id'],'Contaminated commercial Term binding command');
+$commandProbe('binding.obligation_id','binding',$bindCommandId,'obligation_id','%d',$obligationI1,'Contaminated commercial Term binding command');
+
 echo "Phase 2A.2-R1 corruption runtime passed\n";
