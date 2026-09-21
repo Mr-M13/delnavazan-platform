@@ -700,3 +700,26 @@ No production or staging deployment was performed. R1 implementation/review/merg
 Automation note: CD Profile 6 is running bridge v0.1.2 and Hamed Profile 1 v0.5.5. The exact-task Hamed result watcher is running. A remaining hardening item is to make exact task navigation autonomous rather than depending on the exact task page already being open.
 
 **HAMED ACTION REQUIRED:** none.
+
+
+### Operational checkpoint — Theme Single Content Page V1 C5 independent PASS and merge — 2026-09-21
+
+Correction Round 5 candidate `e39f5b5c88b139163bd2a3906631e3d79325b1b5`, tree `34355ca2a76a56933f6c7312ba38b46244e4c538`, received independent OpenAI reviewer verdict **PASS — MERGE PLANNING MAY PROCEED**.
+
+The reviewer independently verified the exact C5 candidate/tree/parent, additive ancestry from C4 and authoritative Theme main, clean checkout, byte-accurate 2048/2049 fail-closed tag-boundary semantics, UTF-8 byte counting, malformed lexical recovery, pseudo-heading containment, quote cases, static/JS checks, and preservation of previously accepted feature areas. PHP/Docker/WordPress/browser/staging checks were unavailable in the reviewer environment and were explicitly classified UNAVAILABLE rather than assumed PASS.
+
+Merge preflight against Theme main `88398f2dd847c320dfd83f3db736d1525cfe3484` showed the approved candidate exactly **12 commits ahead / 0 behind**, with main as the exact merge base. CD fast-forwarded `Mr-M13/delnavazan-theme` `main` to the approved candidate with no force update.
+
+**Theme main is now `e39f5b5c88b139163bd2a3906631e3d79325b1b5`, tree `34355ca2a76a56933f6c7312ba38b46244e4c538`.**
+
+Theme Single Content Page V1 is implementation/review/merge closed. No staging or production deployment occurred.
+
+Current next critical path:
+1. Build the final merged Theme 0.7.0 package from exact Theme main.
+2. Verify package version, contents, checksum, clean source identity, and fresh extraction.
+3. Publish/save the package to an actually accessible user-facing artefact location; do not merely claim a downloadable artefact exists.
+4. Keep staging on its current Theme 0.4.6 state unless a separate staging-deployment task is explicitly authorized.
+
+Automation architecture note: DeepSeek implementation now runs through monitored local `codex exec`; independent review runs through a separate authenticated OpenAI Codex profile in an isolated read-only clone. Browser-composer wake is no longer relied upon for core execution transitions. Human-visible progress can be observed directly with `tail -f` on each run's `events.jsonl`.
+
+**HAMED ACTION REQUIRED:** none.
