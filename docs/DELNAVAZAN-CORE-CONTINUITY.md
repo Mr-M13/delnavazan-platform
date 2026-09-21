@@ -470,3 +470,179 @@ The two paragraphs below described Phase 2A.2-L and Phase 2A.2-M0 while they wer
 > **Historical Phase 2A.2-L record:** Phase L was an unmerged candidate adding explicit canonical Term creation and bounded lifecycle authority with durable idempotency. Canonical Enrolment remains Student + Course; Teacher Assignment remains the sole current-Teacher authority. Term closure/cancellation does not mutate Enrolment, and no Lesson, payment, scheduling or integration authority follows from a Term command.
 
 > **Historical Phase 2A.2-M0 record:** the formerly unmerged M0 candidate advanced its package identity to Schema 19 / `019_canonical_enrolment_lifecycle_authority` and build `phase2a2m0-enrolment-lifecycle-authority-20260917.1`, made the explicit Enrolment lifecycle graph operational and left canonical Lesson authority non-authoritative. The frozen pre-M0 Lesson candidate was subsequently resumed as Schema 20 / Phase M.
+
+
+## 10. Continuity handover — 21 September 2026
+
+This section supersedes any older “next action”, agent-role, review-state, Theme-candidate, or orchestration wording elsewhere in this document when they conflict. Historical implementation records remain valid provenance; this section is the current operational handover.
+
+### Current checkpoint
+
+- Authoritative Platform repository: `Mr-M13/delnavazan-platform`.
+- Authoritative Platform main remains `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843` at Schema 24 / Phase Q. Do not advance main merely to publish this continuity handover while Phase R1 is still under review.
+- Phase R1 is the current critical path. It is **NOT MERGE READY**.
+- Original R1 candidate `10fe40618af3de76f2af37a093e611af10cc6ccc`, tree `394b52d3286a9683e2e714bb7794729b7ebf5210`, failed final independent review.
+- Correction Round 1 candidate `186fc5012fe294ea3d91b85aeefdd738448471a0`, tree `40fc2643eacc6811882b552785f55e7db5c04e30`, is a published additive descendant of the failed candidate and also failed final independent re-review.
+- Next authorised Platform action: **Correction Round 2 from `186fc501...` only, additive descendant, same branch; no amend/rebase/squash/force-push.**
+- After owner implementation and publication, CD critically reviews the exact candidate identity, then Hamed Cloud independently re-reviews that immutable SHA/tree. Only an independent PASS may lead to merge planning.
+- Theme Single Content Page V1 remains parked until Platform R1 reaches a safe checkpoint.
+
+### Phase R1 — Commercial Purchase & Funding Authority
+
+R1 uses Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The branch is `phase-2a2r1-commercial-purchase-funding-authority`. The reviewed history is immutable.
+
+The commercial model that remains locked through correction work is:
+
+- financial settlement is distinct from academic effectiveness;
+- an obligation is financially settled only from verified exact amount/currency evidence;
+- academic effectiveness additionally requires all lower-sequence obligations to be settled;
+- V1 instalments cover 6+6 sessions, with the second instalment allowed to settle early but remaining prerequisite-pending until the first settles;
+- effective funded-session allowance is derived, never a mutable counter;
+- canonical Term count remains 12 and replacement allowance remains 2;
+- Q’s explicit first regular slot is the anchor; never infer “intro + 7 days”;
+- current-Term protected capacity claims preserve authority before N concrete occupancy;
+- existing capacity authority is never released until a durable successor exists under the same Teacher serialisation;
+- Flexible mode protects only the single explicit Q interval if that is the only authoritative slot;
+- no live Stripe/provider SDK, recurring renewal, recovery execution, Theme/UI, notification, tax/invoice/accounting, or deployment belongs to R1.
+
+#### Final independent re-review status after Correction Round 1
+
+The independently verified corrected candidate is `186fc5012fe294ea3d91b85aeefdd738448471a0`, tree `40fc2643eacc6811882b552785f55e7db5c04e30`, descendant of original `10fe406...`, with `origin/main` still `1b9d7aa...`.
+
+Confirmed fixed and must not regress:
+- R1-BLOCK-002 exact protected-interval succession;
+- R1-BLOCK-003 historical satisfied/released intervals no longer block;
+- R1-MAJOR-006 claim release uses the Teacher scheduling root.
+
+Still merge-blocking for Correction Round 2:
+
+1. **Account-adjustment acceptance integrity.** Purchase acceptance must load the exact immutable offer-adjustment snapshot and verify source identity/type/kind, percentage or fixed amount, currency, ordering, applied amount and snapshot digest; recompute from the post-promotion running amount; and require recomputed amount = recorded offer amount = immutable snapshot amount before consumption. Add at-rest corruption coverage proving acceptance causes no downstream commercial mutation when the source adjustment is corrupted after offer issuance.
+2. **Course/ownership lineage at mutation boundaries.** Build a reusable transaction-aware offer-lineage validator and invoke it at offer reads, payment acceptance before benefit/settlement, capacity handoff before capacity mutation, and Term binding before Term creation. It must lock and validate case/slot/reservation/product/offer plus Student/Teacher/Course continuity. Add corruption tests proving the same malformed offer is independently rejected by payment acceptance, handoff and Term binding with no downstream mutation.
+3. **Initially-unattributed provider-evidence race.** In the concurrent unique-insert recovery path, compare the winning row’s `evidence_fact_digest` with the incoming fact. Equal means idempotent; unequal must create/record conflict or ambiguity after rollback and fail explicitly while leaving the original unchanged. Add a deterministic two-worker same-reference/different-facts concurrency test.
+4. **Cross-authority enforcement/tests.** Centralise the validators above at all owning mutation paths, add the missing corruption/concurrency proofs, and synchronise R1 documentation/testing tables with the actual expanded coverage.
+
+Reviewer runtime limitation remains non-authoritative: Hamed Cloud lacked a full WP/WP-CLI/DB runtime and therefore performed source/static/contract inspection only where runtime was unavailable. Owner runtime claims are not independent approval.
+
+### Agent board
+
+| Agent | Role / environment | Last completed work | Current status | Next expected task |
+|---|---|---|---|---|
+| CD / ChatGPT | Architect, sequencer, reviewer, continuity owner | Consolidated current state and identified R1 C2 path | Active through handover, then new CD takes over | Maintain this file; prepare complete C2 handoff; review returned candidate |
+| Hamed | Human project owner / messenger | Routed reviews and implementation results | No product decision pending | Paste complete CD instructions to named agent and return complete result |
+| DeepSeek / Codex Desktop | Platform implementation owner | R1 original + Correction Round 1, published `186fc501...` | **Start a fresh conversation for C2**; old chat is too context-heavy | Implement/test/publish Correction Round 2 as additive descendant of `186fc501...` |
+| Hamed Cloud | Independent Platform reviewer | Final independent re-review of C1: FAIL | Idle | Review exact immutable C2 SHA/tree only after CD pre-review |
+| Ina / Ina Cloud | Theme implementation/correction owner | Student Portal V1 and Teacher Portal V1 complete; content-page candidate recovery attempt blocked | Parked | Reconstruct Single Content Page V1 later from authoritative Theme main if original object remains unavailable |
+
+Operational model is manual:
+`Hamed ↔ CD → CD prepares one complete copy/paste instruction → Hamed sends it to the specified agent → Hamed returns the complete result → CD critically reviews → CD prepares the next instruction`.
+Do not rely on autonomous background orchestration, live-log monitoring, or automatic handoffs.
+
+### Theme current state
+
+Authoritative Theme repository: `Mr-M13/delnavazan-theme`. Authoritative Theme main is `88398f2dd847c320dfd83f3db736d1525cfe3484`.
+
+Completed/closed:
+- Homepage and header direction are locked.
+- Student Portal V1 candidate `bc891ae401aed0a58c1dea2c5d7587b3046b6773`, tree `810c855...`, Theme 0.5.0, merged/closed.
+- Teacher Portal V1 candidate `6ce6718c3038faf892542d033b73d021800d28ee`, tree `8c27144abd3a84d9e8037f3cf92abb7f962742f0`, Theme 0.6.0, independently reviewed/merged/closed.
+
+Single Content Page V1 original implementation was created on branch `feature/single-content-page-v1` from `88398f...` with candidate `1190359e186111df6d50a5bd8266baf148e3e2a2`, tree `d2ebcfbb6a2ed4803aaa0810148749d8181ea4f6`, Theme 0.7.0, but the candidate was never published and the cloud filesystem disappeared before independent review. This was **not a code-review failure**; the immutable candidate became unavailable. A later exhaustive cloud recovery attempt found no usable object/worktree.
+
+Locked reconstruction target remains:
+- reusable Article / Policy / General content system;
+- existing Delnavazan header/footer and Persian-first RTL visual language;
+- readable ~43rem document column;
+- H2/H3 structure, lists/tables/quotes/images;
+- sticky desktop TOC and collapsible mobile TOC with deterministic stable anchors;
+- policy effective/updated metadata, stable anchors, print behaviour, no promotional treatment;
+- richer Article hero/category/reading time/related or previous-next treatment;
+- simpler General/Help variant;
+- standard WordPress authoring, no proprietary page-builder dependency;
+- portals excluded;
+- responsive/accessibility validation.
+
+Do not waste quota repeatedly searching the old cloud filesystem. Once Platform R1 is safe, reconstruct as a **new** candidate from authoritative Theme main, publish immediately, verify by fresh clone, independently review, correct additively if needed, then package the final merged Theme 0.7.0 as a genuinely downloadable artefact. Staging currently remains on Theme 0.4.6; no production deployment.
+
+### Environment and repository lessons
+
+- Always verify `git remote -v`, expected repository, branch, HEAD, status and `origin/main` before mutation.
+- Platform and Theme are separate repositories; never repoint or mix histories.
+- Important review candidates must be published before relying on ephemeral cloud filesystems.
+- Reviewed failed candidates are immutable evidence; corrections are additive descendants only.
+- Owner test reports do not equal independent approval.
+- Reviewer runtime unavailability is a limitation, not a pass or fail by itself.
+- Do not claim an artefact is downloadable unless an actually accessible file/link exists.
+- The local Platform checkout at `/Users/hamed/Desktop/delnavazan/delnavazan-platform` was found on the old Phase-M branch with substantial uncommitted Phase-M work; do not use or clean that checkout for continuity housekeeping.
+- This continuity consolidation was therefore prepared in isolated worktree `/Users/hamed/Desktop/delnavazan/continuity-handover-20260921` on branch `docs/continuity-handover-20260921` from `origin/main` `1b9d7aa...`, specifically to avoid contaminating reviewed or historical implementation work.
+
+### Exact next actions
+
+1. Incoming CD reads this entire continuity document, then verifies this Current Checkpoint, Agent Board, authoritative identities and exact next action.
+2. Incoming CD prepares one self-contained fenced-code instruction for a **fresh DeepSeek/Codex conversation**.
+3. DeepSeek verifies Platform repo and starts from published C1 candidate `186fc501...` on the existing R1 branch; no rewrite.
+4. DeepSeek fixes exactly the four remaining C2 areas, preserves the already-passed findings and locked commercial model, runs focused + regression + deterministic concurrency/corruption tests, normal-pushes the new descendant and verifies it from a fresh clone.
+5. Hamed returns the complete DeepSeek result to CD.
+6. CD critically checks identity, ancestry, scope, tests and claimed fixes before any independent review.
+7. CD sends the exact immutable C2 SHA/tree to Hamed Cloud for independent final re-review.
+8. Repeat additive correction rounds if required. Only independent PASS permits merge planning.
+9. After R1 is safely merged/closed, return to Theme Single Content Page V1 reconstruction with Ina.
+
+**HAMED ACTION REQUIRED:** none at handover time unless CD presents a concrete copy/paste instruction or a genuine product/business-policy choice.
+
+## 11. Continuity Maintenance Protocol
+
+This file is the sole authoritative Delnavazan continuity/handover record. Do not create a competing CD continuity document.
+
+### Immediate updates after durable state changes
+
+Update this document as soon as any of the following occurs:
+- independent review PASS or FAIL;
+- creation/publication of a new immutable candidate SHA/tree;
+- a correction round;
+- merge or closeout;
+- an architecture or product decision;
+- a new blocker, resolved blocker, or accepted deferral;
+- deployment or staging state change;
+- an agent-role/environment change;
+- discovery that invalidates existing continuity.
+
+Do not record every transient debugging step. Capture durable project state, decisions, evidence and reasoning needed to resume safely.
+
+### Checkpoint consolidation
+
+Perform a deliberate consolidation at each natural junction:
+- completion of a phase;
+- completion of a review/correction cycle;
+- before switching the critical path between Platform and Theme;
+- before handing CD responsibility to a new chat/session.
+
+At a consolidation checkpoint, reconcile stale wording, remove superseded “current” instructions, refresh the Current Checkpoint and Agent Board, verify authoritative SHAs/trees, blockers/deferrals and exact next action, and preserve useful historical provenance without letting it masquerade as current state.
+
+### Context-health consolidation
+
+Do not wait until the CD chat is nearly full. When the CD conversation becomes long or operationally complex, proactively verify and update this file while the accumulated context is still strong. The goal is for the next CD to inherit a recently consolidated project record rather than reconstructing history from chat fragments.
+
+### Mandatory outgoing-CD handover
+
+Before any CD handover, the outgoing CD must make a final consolidation that explicitly leaves current:
+- authoritative repositories and main SHAs;
+- active candidate SHA/tree and review status;
+- Agent Board;
+- blockers and accepted deferrals;
+- any Hamed decisions genuinely pending;
+- critical-path ordering;
+- exact next action.
+
+### Incoming-CD protocol
+
+The incoming CD must:
+1. read the entire authoritative continuity document before directing any agent;
+2. verify Current Checkpoint, Agent Board, repository identities, candidate identities and Exact Next Action;
+3. not reconstruct historical state from assumptions or stale chat snippets;
+4. continue maintaining this same document during its tenure;
+5. perform its own final consolidation before the next handover.
+
+The intended chain is self-maintaining: CD1 maintains → final consolidation → CD2 reads and verifies → CD2 maintains → next final consolidation.
+
+A sufficient future bootstrap is:
+> Read `docs/DELNAVAZAN-CORE-CONTINUITY.md` as the authoritative continuity handover. Resume from **Current checkpoint**, **Agent board** and **Exact next actions**. Do not reconstruct state from assumptions.
