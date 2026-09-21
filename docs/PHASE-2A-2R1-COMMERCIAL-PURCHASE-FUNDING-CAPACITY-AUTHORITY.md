@@ -115,8 +115,13 @@ provider ever becoming business authority:
 | `tests/phase-2a2r1-failure-runtime.php` | pass (10 injected write boundaries — including the initially-unattributed evidence boundary — each fully rolled back, each retry converging) |
 | `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed, plus the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding) |
 | `tests/phase-2a2r1-concurrency-runner.sh` (`duplicate_evidence`, `handoff_vs_schedule`, `settlement_vs_lesson_seven`, `unrelated_commitments`, `promotion_global_limit`, `conflicting_evidence_replay`, `release_vs_satisfaction`, `unattributed_conflict`, `unattributed_convergence`) | pass (nine executed modes; the last two are the correction-round-2 initially-unattributed evidence races with conflicting and with identical immutable facts) |
-| `tests/phase-2a2m-runtime.php` (regression) | pass |
-| `tests/phase-2a2q-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`assignment_changed` in its own assignment-replacement scenario). Pre-existing environment/fixture-order dependency, not an R1 regression |
+| `tests/phase-2a2l-runtime.php`, `tests/phase-2a2m0-runtime.php`, `tests/phase-2a2m-runtime.php`, `tests/phase-2a2n-runtime.php`, `tests/phase-2a2o-runtime.php` (adjacent regressions for the authorities R1 integrates with) | pass |
+| `tests/phase-2a2p-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`no_available_source` at its own fixture step). Pre-existing environment/fixture dependency, not an R1 regression |
+| `tests/phase-2a2q-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`no_available_source`, and `assignment_changed` in its own assignment-replacement scenario, depending on fixture order). Pre-existing environment/fixture-order dependency, not an R1 regression |
+
+PHP lint (311 files under `src/` and `tests/` plus the plugin file) and shell syntax for the
+concurrency runner are clean, `git diff --check` reports nothing, and the whole matrix above was
+re-executed from a genuinely fresh clone of `origin` at the pushed candidate commit.
 
 ## 6. Exclusions
 
