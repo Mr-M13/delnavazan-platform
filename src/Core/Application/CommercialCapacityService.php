@@ -191,7 +191,9 @@ final class CommercialCapacityService {
                 foreach($intervals as $interval)if((string)$interval->state==='protected')$this->capacity->releaseInterval((int)$interval->id,(int)$interval->interval_version,$now,$actor);
                 $this->capacity->updateClaimState($claimId,(int)$claim->claim_version,'released',$reason,$now,$actor);
             }
-            $this->writeCommand($digest,$payload,'release_protected_capacity',(int)$claim->student_id,(int)$claim->teacher_id,$claim->purchase_id===null?null:(int)$claim->purchase_id,$claim->entitlement_id===null?null:(int)$claim->entitlement_id,$claim->entitlement_id===null?null:(int)$claim->entitlement_id,$claimId,0,'released',$now,$actor);
+            // A release is anchored on the claim, not on an offer identity: the offer is proved through
+            // the commitment chain, so the command records no offer of its own.
+            $this->writeCommand($digest,$payload,'release_protected_capacity',(int)$claim->student_id,(int)$claim->teacher_id,$claim->purchase_id===null?null:(int)$claim->purchase_id,null,$claim->entitlement_id===null?null:(int)$claim->entitlement_id,$claimId,0,'released',$now,$actor);
             $this->authority->commit();
             return array('claim_id'=>$claimId,'state'=>'released','released_intervals'=>count($intervals),'created'=>true);
         }catch(\Throwable$e){
@@ -301,11 +303,30 @@ final class CommercialCapacityService {
         $releasing=(string)$command->operation==='release_protected_capacity';
         $claim=$this->capacity->claim((int)$command->result_id,true);
         if(!$claim)throw new \RuntimeException('Contaminated commercial capacity result');
+        // The recorded command result must identify exactly this claim and this operation's outcome.
+        if($command->result_id===null||(int)$command->result_id!==(int)$claim->id)throw new \RuntimeException('Contaminated commercial capacity result');
+        if($command->claim_id===null||(int)$command->claim_id!==(int)$claim->id)throw new \RuntimeException('Contaminated commercial capacity result');
+        if((string)$command->result_state!==($releasing?'released':'active'))throw new \RuntimeException('Contaminated commercial capacity command');
         $entitlementId=$claim->entitlement_id===null?($command->entitlement_id===null?0:(int)$command->entitlement_id):(int)$claim->entitlement_id;
         if($entitlementId<1)throw new \RuntimeException('Contaminated commercial capacity result');
         $commitment=CommercialCommitmentValidator::assertCommitment($entitlementId,CommercialCommitmentValidator::STATES_PRE_CAPACITY,true,$this->authority,$this->continuations);
-        CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$this->capacity->intervals((int)$claim->id,true),$commitment['entitlement'],$commitment['purchase'],$commitment['offer'],$releasing?array('released','active'):array('active'));
-        if((string)$command->result_state!==($releasing?'released':'active'))throw new \RuntimeException('Contaminated commercial capacity command');
+        $intervals=$this->capacity->intervals((int)$claim->id,true);
+        // A recorded release replays only against the exact released lifecycle; a coherent active
+        // aggregate is a different outcome and may never satisfy it.
+        CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$intervals,$commitment['entitlement'],$commitment['purchase'],$commitment['offer'],$releasing?array('released'):array('active'));
+        // The command result fields must agree exactly with the revalidated aggregate.
+        if((int)$command->student_id!==(int)$claim->student_id||(int)$command->teacher_id!==(int)$claim->teacher_id)throw new \RuntimeException('Contaminated commercial capacity command');
+        if($command->purchase_id===null||(int)$command->purchase_id!==(int)$commitment['purchase']->id)throw new \RuntimeException('Contaminated commercial capacity command');
+        if($command->entitlement_id===null||(int)$command->entitlement_id!==(int)$commitment['entitlement']->id)throw new \RuntimeException('Contaminated commercial capacity command');
+        if($releasing){
+            // A release concerns no offer identity, and its released lifecycle must be complete.
+            if($command->offer_id!==null)throw new \RuntimeException('Contaminated commercial capacity command');
+            if(!in_array((string)$claim->release_reason_code,CommercialRule::CLAIM_RELEASE_REASONS,true))throw new \RuntimeException('Contaminated commercial capacity result');
+            if($claim->released_at===null||!CommercialValidator::utc((string)$claim->released_at))throw new \RuntimeException('Contaminated commercial capacity result');
+            foreach($intervals as $interval)if((string)$interval->state==='protected')throw new \RuntimeException('Contaminated commercial capacity result');
+        }else{
+            if($command->offer_id===null||(int)$command->offer_id!==(int)$commitment['offer']->id)throw new \RuntimeException('Contaminated commercial capacity command');
+        }
         if($releasing)return array('claim_id'=>(int)$claim->id,'state'=>(string)$claim->state,'created'=>false,'idempotent'=>true);
         return $this->claimResult($claim,false,true);
     }

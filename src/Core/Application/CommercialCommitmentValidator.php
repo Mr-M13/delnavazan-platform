@@ -176,20 +176,27 @@ final class CommercialCommitmentValidator {
         if((int)$evidence->amount_minor!==(int)$obligation->amount_minor)throw new \InvalidArgumentException($conflict);
         if((string)$evidence->currency!==(string)$obligation->currency)throw new \InvalidArgumentException($conflict);
         if((string)$evidence->currency!==(string)$purchase->currency||(string)$evidence->currency!==(string)$offer->currency)throw new \InvalidArgumentException($conflict);
+        if(!CommercialValidator::utc((string)$evidence->ingested_at))throw new \InvalidArgumentException($conflict);
         // Acceptance semantics: the purchase was accepted at the provider-confirmed occurrence instant.
         if(!CommercialValidator::utc((string)$evidence->provider_occurred_at))throw new \InvalidArgumentException($conflict);
         if((string)$evidence->provider_occurred_at!==(string)$purchase->accepted_at)throw new \InvalidArgumentException($conflict);
-        // The exact obligation settlement for this evidence.
+        // The exact obligation settlement for this evidence, in the one commitment currency, recorded
+        // at the same acceptance instant the evidence was ingested (the existing R1 timeline fact).
         $settlement=$payments->settlementForObligation((int)$obligation->id,$lock);
         if(!$settlement||!CommercialValidator::settlementValid($settlement,$obligation))throw new \InvalidArgumentException($conflict);
         if((int)$settlement->evidence_id!==(int)$evidence->id)throw new \InvalidArgumentException($conflict);
+        if((string)$settlement->currency!==(string)$evidence->currency)throw new \InvalidArgumentException($conflict);
+        if((string)$settlement->currency!==(string)$purchase->currency||(string)$settlement->currency!==(string)$offer->currency)throw new \InvalidArgumentException($conflict);
+        if((string)$settlement->settled_at!==(string)$evidence->ingested_at)throw new \InvalidArgumentException($conflict);
         // The exact payment fact binding this purchase, evidence and obligation together.
         $fact=$payments->factForEvidence((int)$evidence->id,$lock);
         if(!$fact)throw new \InvalidArgumentException($conflict);
         if((int)$fact->purchase_id!==(int)$purchase->id)throw new \InvalidArgumentException($conflict);
         if((int)$fact->evidence_id!==(int)$evidence->id||(int)$fact->obligation_id!==(int)$obligation->id)throw new \InvalidArgumentException($conflict);
         if((int)$fact->amount_minor!==(int)$evidence->amount_minor||(string)$fact->currency!==(string)$evidence->currency)throw new \InvalidArgumentException($conflict);
+        if((string)$fact->currency!==(string)$purchase->currency||(string)$fact->currency!==(string)$offer->currency||(string)$fact->currency!==(string)$obligation->currency)throw new \InvalidArgumentException($conflict);
         if(!CommercialValidator::utc((string)$fact->occurred_at))throw new \InvalidArgumentException($conflict);
         if((string)$fact->occurred_at!==(string)$evidence->provider_occurred_at)throw new \InvalidArgumentException($conflict);
+        if(!CommercialValidator::utc((string)$fact->recorded_at))throw new \InvalidArgumentException($conflict);
     }
 }

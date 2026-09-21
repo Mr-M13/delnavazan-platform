@@ -5,6 +5,40 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — candidate, unmerged — 2026-09-20
 
+### Correction round 5 (independent re-review of `6de25b8c32a21d060c27e0f98a8a05a4d1a7bfaa` failed on three findings)
+
+The independent re-review of correction round 4 **FAILED** on `C5-MAJOR-001`, `C5-MAJOR-002` and
+`C5-MAJOR-003`; everything else passed. Additive descendants of `6de25b8c` close exactly those three,
+with no amend, rebase, squash, reset or force push.
+
+- `C5-MAJOR-001` — a recorded release replays only against the exact released lifecycle: the claim
+  must currently be `released` (a coherent *active* aggregate can no longer satisfy the replay), carry
+  a controlled release reason and a valid `released_at`, hold no interval that is still `protected`,
+  and the recorded command must identify that exact claim with `result_state = released`. A release
+  command also no longer writes a borrowed offer identity.
+- `C5-MAJOR-002` — the settlement occurrence is bound to the authoritative acceptance timeline
+  (`settlement.settled_at` must equal the accepted evidence's `ingested_at`, written by the same
+  acceptance transaction) and the settlement and payment-fact currency are positively validated
+  against the obligation, evidence, purchase and offer currency, in addition to the existing amount,
+  ownership and occurrence correspondences. Financial settlement remains distinct from academic
+  effectiveness.
+- `C5-MAJOR-003` — the Term-binding command records its claim, and its replay requires
+  `result_state = term_bound`, `result_id`/`term_id` equal to the revalidated Term, and
+  `entitlement_id`, `purchase_id`, `offer_id`, `claim_id` and `student_id` equal to the revalidated
+  commitment/claim. Contaminated command rows fail closed before any idempotent success, with no
+  duplicate result and no silent repair.
+- Corruption evidence: the released lifecycle mutated back into an otherwise valid active aggregate
+  (asserted valid via the canonical claim validator) before replaying the same release key;
+  settlement occurrence/currency and payment-fact currency probes; and same-key command-row
+  contamination probes across capacity handoff, claim release and Term binding. Every probe asserts
+  fail-closed behaviour, preserved corruption, no duplicate result and idempotent replay after exact
+  restoration.
+- Validation (owner-executed, disposable WordPress 6.8.3 + MariaDB 11.4.13, fresh database per suite)
+  is recorded in `docs/PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md` §5. Schema 25 /
+  migration `025_commercial_purchase_funding_authority` / build
+  `phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged. State:
+  `CORRECTION ROUND 5 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`; not passed, not merged, not deployed.
+
 ### Correction round 4 (independent re-review of `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531` failed on three commitment-layer findings)
 
 The independent re-review of correction round 3 **FAILED** on `NEW-C3-001`, `NEW-C3-002` and

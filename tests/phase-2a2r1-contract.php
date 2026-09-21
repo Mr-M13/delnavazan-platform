@@ -319,7 +319,7 @@ if(!str_contains($capacity,'private function replayAfterRollback')||!str_contain
 $capacityReplay=substr($capacity,strpos($capacity,'private function replay(object $command'));
 if(!str_contains($capacityReplay,'CommercialCommitmentValidator::assertCommitment')||!str_contains($capacityReplay,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment'))throw new RuntimeException('The capacity replay must re-prove the commitment and the claim aggregate');
 if(strpos($capacityReplay,'CommercialCommitmentValidator::assertCommitment')>strpos($capacityReplay,'return $this->claimResult'))throw new RuntimeException('The capacity replay must re-prove the aggregate before reporting success');
-if(!str_contains($capacityReplay,"array('released','active')")||!str_contains($capacityReplay,"array('active')"))throw new RuntimeException('The capacity replay must bind the result state to the recorded operation');
+if(!str_contains($capacityReplay,"array('released')")||!str_contains($capacityReplay,"array('active')"))throw new RuntimeException('The capacity replay must bind the claim state to the exact recorded operation outcome');
 $fundingReplay=substr($funding,strpos($funding,'private function replayBinding(object'));
 foreach(array('CommercialCommitmentValidator::assertCommitment','assertClaimAggregateBelongsToCommitment','fundingPlanForTerm','CanonicalTermAuthorityRepository','term_id','enrolment_id') as $proved) if(!str_contains($fundingReplay,$proved))throw new RuntimeException('The binding replay must re-prove: '.$proved);
 if(strpos($fundingReplay,'CommercialCommitmentValidator::assertCommitment')>strpos($fundingReplay,'return array('))throw new RuntimeException('The binding replay must re-prove the aggregate before reporting success');
@@ -333,5 +333,36 @@ foreach(array(
 if(!str_contains($corruptionRuntime,'an unchanged successful handoff must replay idempotently')||!str_contains($corruptionRuntime,'an unchanged successful binding must replay idempotently'))throw new RuntimeException('The correction-round-4 matrix must prove positive idempotent replay');
 if(!str_contains($phaseDoc,'Correction round 4'))throw new RuntimeException('The Phase R1 document must record correction round 4');
 if(!str_contains($continuity,'Correction round 4'))throw new RuntimeException('The continuity record must record correction round 4');
+
+// Correction Round 5 — settlement/fact timeline, release-replay lifecycle and full command results.
+foreach(array(
+    'ingested_at','settlement->settled_at','settlement->currency','fact->currency','fact->recorded_at','obligation->currency',
+) as $proved) if(!str_contains($commitment,$proved))throw new RuntimeException('The commitment validator must prove the settlement/payment-fact chain: '.$proved);
+if(!str_contains($commitment,'(string)$settlement->settled_at!==(string)$evidence->ingested_at'))throw new RuntimeException('The settlement occurrence must be bound to the authoritative acceptance timeline');
+// Release replay: exactly the released lifecycle, and the recorded release metadata.
+$capacityReplayV=substr($capacity,strpos($capacity,'private function replay(object $command'));
+if(!str_contains($capacityReplayV,'$releasing?array(\'released\'):array(\'active\')'))throw new RuntimeException('A recorded release must replay only against the exact released claim state');
+foreach(array('CLAIM_RELEASE_REASONS','release_reason_code','released_at','protected','command->claim_id','command->offer_id') as $proved) if(!str_contains($capacityReplayV,$proved))throw new RuntimeException('The capacity replay must prove the release lifecycle/result field: '.$proved);
+if(!str_contains($capacityReplayV,'(int)$command->result_id!==(int)$claim->id')||!str_contains($capacityReplayV,'(int)$command->student_id!==(int)$claim->student_id'))throw new RuntimeException('The capacity replay must prove the recorded command result identity');
+if(strpos($capacityReplayV,'CommercialCommitmentValidator::assertCommitment')>strpos($capacityReplayV,'return $this->claimResult'))throw new RuntimeException('The capacity replay must re-prove the aggregate before reporting success');
+// A release command records no offer identity of its own.
+if(!str_contains($capacity,"'release_protected_capacity',(int)\$claim->student_id,(int)\$claim->teacher_id,\$claim->purchase_id===null?null:(int)\$claim->purchase_id,null,"))throw new RuntimeException('A release command must not record a borrowed offer identity');
+// Term binding: the command records its claim, and replay proves every recorded result field.
+if(!str_contains($funding,"'claim_id'=>(int)\$claim->id,'term_id'=>\$termId,'result_state'=>'term_bound','result_id'=>\$termId"))throw new RuntimeException('The binding command must record its claim and exact result identity');
+foreach(array(
+    "(string)\$command->result_state!=='term_bound'","(int)\$command->result_id!==(int)\$plan->term_id","(int)\$command->term_id!==(int)\$plan->term_id",
+    "(int)\$command->entitlement_id!==(int)\$entitlement->id","(int)\$command->purchase_id!==(int)\$purchase->id",
+    "(int)\$command->offer_id!==(int)\$offer->id","(int)\$command->claim_id!==(int)\$claim->id",
+) as $proved) if(!str_contains($fundingReplay,$proved))throw new RuntimeException('The binding replay must prove: '.$proved);
+// Correction Round 5 — behavioural coverage.
+foreach(array(
+    'release replay over an otherwise valid active aggregate','otherwise valid active claim aggregate','release replay over a corrupt claim aggregate',
+    'settlement.settled_at','settlement.currency','fact.currency',
+    "'binding.result_state'","'binding.result_id'","'binding.term_id'","'binding.entitlement_id'","'binding.purchase_id'","'binding.offer_id'","'binding.claim_id'",
+    "'handoff.result_state'","'handoff.claim_id'","'handoff.offer_id'","'release.result_state'","'release.offer_id'","'release.claim_id'",
+    'must never silently repair the command','must not duplicate the command row',
+) as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The correction-round-5 corruption matrix is missing: '.$probe);
+if(!str_contains($phaseDoc,'Correction round 5'))throw new RuntimeException('The Phase R1 document must record correction round 5');
+if(!str_contains($continuity,'Correction round 5'))throw new RuntimeException('The continuity record must record correction round 5');
 
 echo "Phase 2A.2-R1 contract passed\n";

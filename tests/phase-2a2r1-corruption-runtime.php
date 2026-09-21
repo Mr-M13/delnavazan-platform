@@ -272,7 +272,11 @@ dzn_r1_fix_assert($purchaseG>0&&$purchaseH>0&&$purchaseG!==$purchaseH,'both acce
 \Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::assertCommitment($entitlementH,\Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::STATES_PRE_CAPACITY);
 
 $mutate=static function(string $table,int $id,string $column,string $placeholder,mixed $value) use($wpdb,$p):void{
-    dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}{$table} SET {$column}={$placeholder} WHERE id=%d",$value,$id))===1,'the commitment corruption probe must move exactly one row: '.$table.'.'.$column);
+    // 'RAW' injects a literal SQL value (for NULL, which a %d placeholder would coalesce to zero).
+    $sql=$placeholder==='RAW'
+        ?$wpdb->prepare("UPDATE {$p}{$table} SET {$column}={$value} WHERE id=%d",$id)
+        :$wpdb->prepare("UPDATE {$p}{$table} SET {$column}={$placeholder} WHERE id=%d",$value,$id);
+    dzn_r1_fix_assert($wpdb->query($sql)===1,'the commitment corruption probe must move exactly one row: '.$table.'.'.$column);
 };
 $readValue=static function(string $table,int $id,string $column) use($wpdb,$p){
     return $wpdb->get_var($wpdb->prepare("SELECT {$column} FROM {$p}{$table} WHERE id=%d",$id));
@@ -535,18 +539,140 @@ $bindingReplayAfterRestore=(new \Delnavazan\Platform\Core\Application\Commercial
 dzn_r1_fix_assert(($bindingReplayAfterRestore['idempotent']??false)===true,'the restored funding plan must replay idempotently again');
 
 // NEW-C3-003 (release replay) — a released claim may replay only while its aggregate stays valid.
+// The release uses a DIFFERENT commitment (claim G) so that the C5 command-result probes can still
+// replay claim I's active handoff and binding commands.
+$releaseClaimId=$claimIdG;
 $releaseKeyI='dzn-2a2r1-c4-release-'.wp_generate_uuid4();
 $releaseEvidence=dzn_r1_fix_evidence('c4-release')+array('release_reason_code'=>'commercial_resolution');
 $capacityServiceI=new \Delnavazan\Platform\Core\Application\CommercialCapacityService();
-$releaseFirst=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+$releaseFirst=$capacityServiceI->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI);
 dzn_r1_fix_assert((string)$releaseFirst['state']==='released','the authorised release must release the claim');
-$releaseReplay=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+$releaseReplay=$capacityServiceI->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI);
 dzn_r1_fix_assert((string)$releaseReplay['state']==='released'&&($releaseReplay['idempotent']??false)===true,'an unchanged released claim must replay idempotently');
-$mutate('commercial_capacity_claims',$claimIdI,'committed_sessions','%d',6);
-$rejected(fn()=>$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI),'commercial_capacity_integrity_conflict','release replay over a corrupt claim aggregate');
-dzn_r1_fix_assert((int)$readValue('commercial_capacity_claims',$claimIdI,'committed_sessions')===6,'a refused release replay must never silently repair the claim');
-$mutate('commercial_capacity_claims',$claimIdI,'committed_sessions','%d',12);
-$releaseReplayAfterRestore=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+$mutate('commercial_capacity_claims',$releaseClaimId,'committed_sessions','%d',6);
+$rejected(fn()=>$capacityServiceI->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI),'commercial_capacity_integrity_conflict','release replay over a corrupt claim aggregate');
+dzn_r1_fix_assert((int)$readValue('commercial_capacity_claims',$releaseClaimId,'committed_sessions')===6,'a refused release replay must never silently repair the claim');
+$mutate('commercial_capacity_claims',$releaseClaimId,'committed_sessions','%d',12);
+$releaseReplayAfterRestore=$capacityServiceI->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI);
 dzn_r1_fix_assert(($releaseReplayAfterRestore['idempotent']??false)===true,'the restored released claim must replay idempotently again');
+
+// ---------------------------------------------------------------------------
+// Correction round 5. NEW-C5-001 release-replay lifecycle/result integrity, NEW-C5-002 the
+// settlement occurrence/currency and payment-fact currency chain, NEW-C5-003 complete Term
+// command-result validation. Same-key replay after at-rest corruption must fail closed, preserve the
+// corruption, create no duplicate result, and converge again after exact restoration.
+// ---------------------------------------------------------------------------
+$commandIdOf=static function(string $key) use($wpdb,$p):int{
+    return(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_commands WHERE command_key_digest=%s",\Delnavazan\Platform\Core\Application\CommercialIdempotency::key($key)));
+};
+$capacityServiceV=new \Delnavazan\Platform\Core\Application\CommercialCapacityService();
+$fundingServiceV=new \Delnavazan\Platform\Core\Application\CommercialTermFundingService();
+
+// NEW-C5-001 — a recorded release may replay only against the exact released lifecycle.
+$releaseCommandId=$commandIdOf($releaseKeyI);
+dzn_r1_fix_assert($releaseCommandId>0,'the release command row must exist');
+$releasedClaim=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claims WHERE id=%d",$releaseClaimId));
+$releasedIntervals=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d ORDER BY interval_sequence",$releaseClaimId));
+dzn_r1_fix_assert($releasedClaim!==null&&count($releasedIntervals)===12,'the released claim fixture must own twelve intervals');
+dzn_r1_fix_assert((string)$releasedClaim->state==='released'&&(string)$releasedClaim->release_reason_code!=='','the release fixture must carry its controlled reason');
+// Mutate the released claim and every interval back into an otherwise VALID active aggregate: the
+// rejection must come from the recorded release result, not from general malformation.
+$mutate('commercial_capacity_claims',$releaseClaimId,'state','%s','active');
+$mutate('commercial_capacity_claims',$releaseClaimId,'released_at','RAW','NULL');
+$mutate('commercial_capacity_claims',$releaseClaimId,'release_reason_code','RAW','NULL');
+foreach($releasedIntervals as $releasedInterval){
+    $mutate('commercial_capacity_claim_intervals',(int)$releasedInterval->id,'state','%s','protected');
+    $mutate('commercial_capacity_claim_intervals',(int)$releasedInterval->id,'released_at','RAW','NULL');
+}
+$activeAggregateClaim=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claims WHERE id=%d",$releaseClaimId));
+$activeAggregateIntervals=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d ORDER BY interval_sequence",$releaseClaimId));
+dzn_r1_fix_assert(\Delnavazan\Platform\Core\Application\CommercialValidator::claimValid($activeAggregateClaim,$activeAggregateIntervals)===true,'the mutated aggregate must still be an otherwise valid active claim aggregate');
+$rejected(fn()=>$capacityServiceV->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI),'commercial_capacity_integrity_conflict','release replay over an otherwise valid active aggregate');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_capacity_claims WHERE id=%d",$releaseClaimId))==='active','a refused release replay must never silently repair the claim state');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",$releaseClaimId))===12,'a refused release replay must never silently re-protect the intervals');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_commands WHERE command_key_digest=%s",\Delnavazan\Platform\Core\Application\CommercialIdempotency::key($releaseKeyI)))===1,'a refused release replay must not record a second command result');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d",$releaseClaimId))===12,'a refused release replay must not duplicate intervals');
+// Restore the exact released lifecycle and prove valid replay converges again.
+$mutate('commercial_capacity_claims',$releaseClaimId,'state','%s',(string)$releasedClaim->state);
+$mutate('commercial_capacity_claims',$releaseClaimId,'released_at','%s',(string)$releasedClaim->released_at);
+$mutate('commercial_capacity_claims',$releaseClaimId,'release_reason_code','%s',(string)$releasedClaim->release_reason_code);
+foreach($releasedIntervals as $releasedInterval){
+    $mutate('commercial_capacity_claim_intervals',(int)$releasedInterval->id,'state','%s',(string)$releasedInterval->state);
+    $mutate('commercial_capacity_claim_intervals',(int)$releasedInterval->id,'released_at','%s',(string)$releasedInterval->released_at);
+}
+$releaseReplayRestored=$capacityServiceV->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI);
+dzn_r1_fix_assert((string)$releaseReplayRestored['state']==='released'&&($releaseReplayRestored['idempotent']??false)===true,'the restored released lifecycle must replay idempotently');
+
+// NEW-C5-002 — the settlement occurrence/currency and payment-fact currency chain.
+$j=dzn_r1_fix_scenario($sources[2],'settlement-chain',10);
+// This Course has no sellable product yet, and deliberately no recurring pattern: the commitment is a
+// Flexible Q-succession one, so the handoff claims exactly the explicitly authorised hold interval.
+$productJ=dzn_r1_fix_product((int)$j['course_id'],'AU',26000,'settlement-chain');
+$offerJ=dzn_r1_fix_offer($j,$productJ,'two_instalments','settlement-chain');
+dzn_r1_fix_settle($offerJ,1,'prov-settlement-chain');
+dzn_r1_fix_activate_enrolment((int)$j['enrolment_id'],'settlement-chain');
+$entitlementJ=dzn_r1_fix_entitlement((int)$offerJ['offer_id']);
+$evidenceJ=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE offer_id=%d ORDER BY id LIMIT 1",(int)$offerJ['offer_id']));
+$obligationJ=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_offer_obligations WHERE offer_id=%d ORDER BY obligation_sequence LIMIT 1",(int)$offerJ['offer_id']));
+$settlementJ=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",$obligationJ));
+$factJ=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_facts WHERE evidence_id=%d",$evidenceJ));
+dzn_r1_fix_assert($evidenceJ>0&&$obligationJ>0&&$settlementJ>0&&$factJ>0,'the settlement-chain fixture must be complete');
+$claimCountJ=static function() use($wpdb,$p,$entitlementJ):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementJ));};
+$intervalCountJ=static function() use($wpdb,$p,$entitlementJ):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals i INNER JOIN {$p}commercial_capacity_claims c ON c.id=i.claim_id WHERE c.entitlement_id=%d",$entitlementJ));};
+$planCountJ=static function() use($wpdb,$p,$entitlementJ):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementJ));};
+$termCountJ=static function() use($wpdb,$p,$j):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$j['enrolment_id']));};
+$rejectHandoffJ=static function(string $label) use($rejected,$entitlementJ,$claimCountJ,$intervalCountJ,$planCountJ,$termCountJ):void{
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementJ,'c5-'.$label),'commercial_commitment_integrity_conflict','capacity handoff over '.$label);
+    dzn_r1_fix_assert($claimCountJ()===0&&$intervalCountJ()===0,$label.' must create no capacity truth');
+    dzn_r1_fix_assert($planCountJ()===0&&$termCountJ()===0,$label.' must create no Term or funding truth');
+};
+$c4Probe('settlement.settled_at','commercial_obligation_settlements',$settlementJ,'settled_at','%s',gmdate('Y-m-d H:i:s',strtotime((string)$readValue('commercial_obligation_settlements',$settlementJ,'settled_at').' UTC +1 day')),null,fn()=>$rejectHandoffJ('settlement.settled_at'));
+$c4Probe('settlement.currency','commercial_obligation_settlements',$settlementJ,'currency','%s','NZD',null,fn()=>$rejectHandoffJ('settlement.currency'));
+$c4Probe('fact.currency','commercial_payment_facts',$factJ,'currency','%s','NZD',null,fn()=>$rejectHandoffJ('fact.currency'));
+$handoffJ=dzn_r1_fix_handoff($entitlementJ,'settlement-chain');
+dzn_r1_fix_assert((int)$handoffJ['interval_count']===1&&$claimCountJ()===1,'the restored settlement chain must hand over exactly one claim of its authorised interval');
+
+// NEW-C5-003 — a recorded command result must agree exactly with the revalidated aggregate.
+$commandProbe=static function(string $label,string $replayKind,int $commandId,string $column,string $placeholder,mixed $corruptValue,string $expected) use($wpdb,$p,$mutate,$readValue,$rejected,$capacityServiceV,$fundingServiceV,$claimCountI,$intervalCountI,$planCountI,$termCountI,$claimIdI,$releaseClaimId,$handoffKeyI,$bindKeyI,$releaseKeyI,$releaseEvidence,$entitlementI):void{
+    $original=$readValue('commercial_commands',$commandId,$column);
+    $isNull=$corruptValue===null||($placeholder==='RAW'&&strtoupper((string)$corruptValue)==='NULL');
+    $mutate('commercial_commands',$commandId,$column,$placeholder,$corruptValue);
+    $readBack=$readValue('commercial_commands',$commandId,$column);
+    dzn_r1_fix_assert($isNull?$readBack===null:$readBack==$corruptValue,$label.': the command corruption probe did not persist');
+    $terminal=null;
+    try{
+        if($replayKind==='release')$capacityServiceV->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI);
+        elseif($replayKind==='handoff')$capacityServiceV->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+        else $fundingServiceV->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI);
+    }catch(Throwable$e){$terminal=$e;}
+    dzn_r1_fix_assert($terminal!==null,$label.': a contaminated command must not replay successfully');
+    dzn_r1_fix_assert($terminal->getMessage()===$expected,$label.': the replay failed with an unexpected error: '.$terminal->getMessage());
+    dzn_r1_fix_assert($claimCountI()===1&&$intervalCountI()===12&&$planCountI()===1&&$termCountI()===1,$label.': a refused replay must not create or destroy downstream truth');
+    dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_commands WHERE id=%d",$commandId))===1,$label.': a refused replay must not duplicate the command row');
+    $afterAttempt=$readValue('commercial_commands',$commandId,$column);
+    dzn_r1_fix_assert($isNull?$afterAttempt===null:$afterAttempt==$corruptValue,$label.': a refused replay must never silently repair the command');
+    // Restoring a NULL original needs the literal form, because %d would coalesce it to zero.
+    if($original===null)$mutate('commercial_commands',$commandId,$column,'RAW','NULL');
+    else $mutate('commercial_commands',$commandId,$column,$placeholder,$original);
+    $restoredReplay=$replayKind==='release'?$capacityServiceV->releaseClaim($releaseClaimId,$releaseEvidence,$releaseKeyI):($replayKind==='handoff'?$capacityServiceV->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI):$fundingServiceV->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI));
+    dzn_r1_fix_assert(($restoredReplay['idempotent']??false)===true,$label.': the restored command must replay idempotently again');
+};
+$bindCommandId=$commandIdOf($bindKeyI);
+$handoffCommandId=$commandIdOf($handoffKeyI);
+dzn_r1_fix_assert($bindCommandId>0&&$handoffCommandId>0,'the binding and handoff command rows must exist');
+$commandProbe('binding.result_state','binding',$bindCommandId,'result_state','%s','active','Contaminated commercial Term binding command');
+$commandProbe('binding.result_id','binding',$bindCommandId,'result_id','%d',$planIdI+1000,'Contaminated commercial Term binding result');
+$commandProbe('binding.term_id','binding',$bindCommandId,'term_id','%d',$planIdI+1000,'Contaminated commercial Term binding command');
+$commandProbe('binding.entitlement_id','binding',$bindCommandId,'entitlement_id','%d',$entitlementH,'Contaminated commercial Term binding command');
+$commandProbe('binding.purchase_id','binding',$bindCommandId,'purchase_id','%d',$purchaseH,'Contaminated commercial Term binding command');
+$commandProbe('binding.offer_id','binding',$bindCommandId,'offer_id','%d',(int)$offerH['offer_id'],'Contaminated commercial Term binding command');
+$commandProbe('binding.claim_id','binding',$bindCommandId,'claim_id','%d',$claimIdG,'Contaminated commercial Term binding command');
+$commandProbe('binding.student_id','binding',$bindCommandId,'student_id','%d',(int)$h['student_id'],'Contaminated commercial Term binding command');
+$commandProbe('handoff.result_state','handoff',$handoffCommandId,'result_state','%s','released','Contaminated commercial capacity command');
+$commandProbe('handoff.claim_id','handoff',$handoffCommandId,'claim_id','RAW','NULL','Contaminated commercial capacity result');
+$commandProbe('handoff.offer_id','handoff',$handoffCommandId,'offer_id','RAW','NULL','Contaminated commercial capacity command');
+$commandProbe('release.result_state','release',$releaseCommandId,'result_state','%s','active','Contaminated commercial capacity command');
+$commandProbe('release.offer_id','release',$releaseCommandId,'offer_id','%d',(int)$offerI['offer_id'],'Contaminated commercial capacity command');
+$commandProbe('release.claim_id','release',$releaseCommandId,'claim_id','RAW','NULL','Contaminated commercial capacity result');
 
 echo "Phase 2A.2-R1 corruption runtime passed\n";

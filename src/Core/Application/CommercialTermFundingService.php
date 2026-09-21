@@ -185,7 +185,7 @@ final class CommercialTermFundingService {
                 'uid'=>Identifier::uid(),'command_domain'=>CommercialRule::DOMAIN,'operation'=>'bind_entitlement_to_term',
                 'command_key_digest'=>$digest,'command_payload_digest'=>$payload,'student_id'=>$studentId,
                 'offer_id'=>(int)$offer->id,'purchase_id'=>(int)$purchase->id,'entitlement_id'=>$entitlementId,
-                'term_id'=>$termId,'result_state'=>'term_bound','result_id'=>$termId,'created_at'=>$now,'created_by'=>$actor,
+                'claim_id'=>(int)$claim->id,'term_id'=>$termId,'result_state'=>'term_bound','result_id'=>$termId,'created_at'=>$now,'created_by'=>$actor,
             ));
             $this->repository->commit();
             return array(
@@ -243,9 +243,17 @@ final class CommercialTermFundingService {
         // claim's ownership and complete aggregate, and the exact Term/funding-plan relationship.
         $plan=$this->repository->fundingPlanForTerm((int)$command->result_id,true);
         if(!$plan)throw new \RuntimeException('Contaminated commercial Term binding result');
+        // The recorded command result must be this operation's exact outcome.
+        if((string)$command->result_state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding command');
+        if($command->result_id===null||(int)$command->result_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding result');
+        if($command->term_id===null||(int)$command->term_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding command');
         $commitment=CommercialCommitmentValidator::assertCommitment((int)$plan->entitlement_id,array('term_bound'),true,$this->repository);
         $entitlement=$commitment['entitlement'];$purchase=$commitment['purchase'];$offer=$commitment['offer'];
         if((string)$entitlement->state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding result');
+        if($command->entitlement_id===null||(int)$command->entitlement_id!==(int)$entitlement->id)throw new \RuntimeException('Contaminated commercial Term binding command');
+        if($command->purchase_id===null||(int)$command->purchase_id!==(int)$purchase->id)throw new \RuntimeException('Contaminated commercial Term binding command');
+        if($command->offer_id===null||(int)$command->offer_id!==(int)$offer->id)throw new \RuntimeException('Contaminated commercial Term binding command');
+        if((int)$command->student_id!==(int)$purchase->beneficiary_student_id)throw new \RuntimeException('Contaminated commercial Term binding command');
         if((int)$plan->purchase_id!==(int)$purchase->id||(int)$plan->offer_id!==(int)$offer->id)throw new \RuntimeException('Contaminated commercial Term binding result');
         if((int)$plan->term_id!==(int)$entitlement->term_id||(int)$plan->enrolment_id!==(int)$entitlement->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
         if((int)$plan->committed_sessions!==(int)$offer->committed_sessions||(string)$plan->plan_kind!==(string)$offer->plan_kind)throw new \RuntimeException('Contaminated commercial Term binding result');
@@ -253,6 +261,7 @@ final class CommercialTermFundingService {
         $claim=$capacityRepository->claimForEntitlement((int)$plan->entitlement_id,true);
         if(!$claim)throw new \RuntimeException('Contaminated commercial Term binding result');
         CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$capacityRepository->intervals((int)$claim->id,true),$entitlement,$purchase,$offer,array('active'));
+        if($command->claim_id===null||(int)$command->claim_id!==(int)$claim->id)throw new \RuntimeException('Contaminated commercial Term binding command');
         if((int)$claim->term_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding result');
         $term=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CanonicalTermAuthorityRepository())->term((int)$plan->term_id,true);
         if(!$term||(int)$term->enrolment_id!==(int)$plan->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
