@@ -484,8 +484,9 @@ This section supersedes any older “next action”, agent-role, review-state, T
 - Original R1 candidate `10fe40618af3de76f2af37a093e611af10cc6ccc`, tree `394b52d3286a9683e2e714bb7794729b7ebf5210`, failed final independent review.
 - Correction Round 1 candidate `186fc5012fe294ea3d91b85aeefdd738448471a0`, tree `40fc2643eacc6811882b552785f55e7db5c04e30`, is a published additive descendant of the failed candidate and failed final independent re-review.
 - Correction Round 2 candidate `3aaf3081a0d5d12501715589a2a518c68af5ad98`, tree `dfba34c3a986f4a4cb9aa2f9a8b77a953efbf119`, failed independent final re-review on one newly discovered MAJOR integrity gap: purchase/entitlement/offer ownership was not completely revalidated before capacity handoff and Term creation (`NEW-C2-001` / `R1-MAJOR-007`).
-- Correction Round 3 candidate `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531`, tree `ab0a568a3ed73bf0471ce76c2a572b2b04812d01`, is a published additive descendant of C2. It introduces canonical commitment validation for `entitlement → purchase → offer → upstream lineage`, including existing-claim ownership, and is **AWAITING INDEPENDENT RE-REVIEW**.
-- Next authorised Platform action: **Hamed Cloud independently re-reviews exact C3 candidate `2ff3d6e...` / tree `ab0a568...`.** No merge/deploy before independent PASS.
+- Correction Round 3 candidate `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531`, tree `ab0a568a3ed73bf0471ce76c2a572b2b04812d01`, is a published additive descendant of C2. It introduced canonical commitment validation for `entitlement → purchase → offer → upstream lineage`, but **FAILED independent final re-review**.
+- C3 independent review found three remaining MAJOR integrity gaps: `NEW-C3-001` acceptance-evidence/settlement/payment-fact ownership is incomplete; `NEW-C3-002` existing-claim convergence does not require exact predecessor reservation, active lifecycle and full claim/interval validity; `NEW-C3-003` command replay can report idempotent success after at-rest commitment corruption without re-proving the full commitment/result aggregate.
+- Next authorised Platform action: **Correction Round 4 from `2ff3d6e...` only, additive descendant on the existing R1 branch; no amend/rebase/squash/force-push.** No merge/deploy before independent PASS.
 - Theme Single Content Page V1 remains parked until Platform R1 reaches a safe checkpoint.
 
 ### Phase R1 — Commercial Purchase & Funding Authority
@@ -530,8 +531,8 @@ Reviewer runtime limitation remains non-authoritative: Hamed Cloud lacked a full
 |---|---|---|---|---|
 | CD / ChatGPT | Architect, sequencer, reviewer, continuity owner | Consolidated current state and identified R1 C2 path | Active through handover, then new CD takes over | Maintain this file; prepare complete C2 handoff; review returned candidate |
 | Hamed | Human project owner / messenger | Routed reviews and implementation results | No product decision pending | Paste complete CD instructions to named agent and return complete result |
-| DeepSeek / Codex Desktop | Platform implementation owner | R1 Correction Round 3 implemented/published as `2ff3d6e...` | Idle pending independent review | Correct additively only if Hamed Cloud finds a defect |
-| Hamed Cloud | Independent Platform reviewer | Final independent re-review of C2: FAIL on `NEW-C2-001` / `R1-MAJOR-007` | **Next up** | Independently review exact immutable C3 SHA `2ff3d6e...`, tree `ab0a568...` |
+| DeepSeek / Codex Desktop | Platform implementation owner | R1 Correction Round 3 published as `2ff3d6e...` | **Next up for C4** | Fix only NEW-C3-001/002/003 additively from `2ff3d6e...`, preserve all prior passes, test/publish/fresh-clone verify |
+| Hamed Cloud | Independent Platform reviewer | Final independent re-review of C3: FAIL on NEW-C3-001/002/003 | Idle | Review exact immutable C4 SHA/tree only after CD pre-review |
 | Ina / Ina Cloud | Theme implementation/correction owner | Student Portal V1 and Teacher Portal V1 complete; content-page candidate recovery attempt blocked | Parked | Reconstruct Single Content Page V1 later from authoritative Theme main if original object remains unavailable |
 
 Operational model is manual:
@@ -578,12 +579,13 @@ Do not waste quota repeatedly searching the old cloud filesystem. Once Platform 
 
 ### Exact next actions
 
-1. CD verifies C3 candidate identity, ancestry, scope and implementation report against published branch.
-2. Hamed sends one self-contained independent re-review instruction to Hamed Cloud for exact candidate `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531`, tree `ab0a568a3ed73bf0471ce76c2a572b2b04812d01`.
-3. Hamed Cloud reviews read-only from a fresh isolated checkout and returns PASS / FAIL / UNAVAILABLE evidence without implementation.
-4. If FAIL, corrections return to DeepSeek as additive descendants only.
-5. If PASS, CD verifies the exact approved SHA/tree and prepares merge planning / exact fast-forward / closeout; still no deployment unless separately authorised.
-6. After R1 is safely merged/closed, return to parked Theme Single Content Page V1 reconstruction with Ina.
+1. CD records the C3 independent FAIL and prepares one self-contained Correction Round 4 instruction for DeepSeek.
+2. DeepSeek starts from exact published candidate `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531` and fixes only NEW-C3-001/002/003 as additive descendants.
+3. C4 must prove the complete acceptance-evidence → settlement → payment-fact → purchase chain, exact mandatory predecessor reservation plus active/full claim aggregate validity, and full commitment/result revalidation before replay success.
+4. DeepSeek runs focused corruption/replay tests plus the existing R1 regression/concurrency matrix, normal-pushes the candidate and fresh-clone verifies it.
+5. CD verifies candidate identity/scope/tests, then Hamed Cloud independently re-reviews the immutable C4 SHA/tree.
+6. Repeat additive correction rounds if required; only independent PASS permits merge planning.
+7. After R1 is safely merged/closed, return to parked Theme Single Content Page V1 reconstruction with Ina.
 
 **HAMED ACTION REQUIRED:** none at handover time unless CD presents a concrete copy/paste instruction or a genuine product/business-policy choice.
 
