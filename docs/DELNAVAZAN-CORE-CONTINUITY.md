@@ -685,3 +685,18 @@ Ina Cloud parallel static precheck was also launched as non-authoritative extra 
 DeepSeek completion watcher has been retargeted to `R1-C6-DEEPSEEK` so completion should wake the CD Chrome conversation automatically.
 
 **HAMED ACTION REQUIRED:** none.
+
+
+### Operational checkpoint — R1 C6 independent PASS and merge — 2026-09-21
+
+Formal Hamed Cloud independent re-review of exact C6 candidate `993532f1365644589b8a6134990cc0a1306456e9`, tree `a5e234c8d4ba4903f64d393f393d429a6b739e34`, returned **PASS — MERGE PLANNING MAY PROCEED**. The reviewer independently confirmed complete operation-specific `commercial_commands` selector shape, no blocking findings, all 32 available contract/static checks, and no new regression. Runtime Docker/WordPress/MySQL execution was unavailable in the independent cloud environment and was correctly classified UNAVAILABLE rather than independent PASS; owner runtime/concurrency validation had passed.
+
+Merge preflight showed candidate exactly 8 commits ahead / 0 behind authoritative main `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, with main as exact merge base. CD performed a fast-forward-only push of the exact approved candidate to `main`.
+
+**Platform main is now `993532f1365644589b8a6134990cc0a1306456e9`, tree `a5e234c8d4ba4903f64d393f393d429a6b739e34`.**
+
+No production or staging deployment was performed. R1 implementation/review/merge is closed. The next critical path returns to Theme Single Content Page V1 reconstruction from authoritative Theme main, with immediate immutable publication/fresh-clone verification before independent review.
+
+Automation note: CD Profile 6 is running bridge v0.1.2 and Hamed Profile 1 v0.5.5. The exact-task Hamed result watcher is running. A remaining hardening item is to make exact task navigation autonomous rather than depending on the exact task page already being open.
+
+**HAMED ACTION REQUIRED:** none.
