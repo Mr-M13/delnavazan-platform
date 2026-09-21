@@ -6,13 +6,14 @@ production cutover.** Schema 25 / migration `025_commercial_purchase_funding_aut
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
 tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
 
-Correction round 3 is the current candidate: additive descendants of the reviewed correction-round-2
-commit `3aaf3081a0d5d12501715589a2a518c68af5ad98`, closing the single remaining integrity defect
-(`R1-MAJOR-007` / `NEW-C2-001`: complete purchase/entitlement commitment ownership before capacity and
-Term truth — §0c). Correction round 2's own independent re-review FAILED on exactly that defect while
-passing every other area, and is recorded as historical review evidence. Independent re-review of
-correction round 3 has **not** occurred, so this state is `CORRECTION ROUND 3 CANDIDATE — AWAITING
-INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
+Correction round 4 is the current candidate: additive descendants of the reviewed correction-round-3
+commit `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531`, closing the three commitment-layer findings the
+correction-round-3 independent re-review returned (`NEW-C3-001` acceptance-evidence/settlement/
+payment-fact ownership, `NEW-C3-002` idempotent existing-claim integrity, `NEW-C3-003` replay after
+at-rest corruption — §0d). The independent re-reviews of correction rounds 1, 2 and 3 each FAILED on
+their then-open findings while passing everything else, and remain historical review evidence.
+Independent re-review of correction round 4 has **not** occurred, so this state is `CORRECTION ROUND 4
+CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
 
 ## 0. Independent review correction round 1
 
@@ -79,6 +80,33 @@ R1-BLOCK-001, R1-BLOCK-002, R1-BLOCK-003, R1-BLOCK-004, R1-MAJOR-005, R1-MAJOR-0
 R1-C1-NEW-001 and R1-C1-NEW-002 passed the independent re-review and are deliberately unchanged; the
 round-3 evidence re-runs all of them.
 
+## 0d. Independent review correction round 4
+
+Correction round 1, Correction round 2 and Correction round 3 remain historical review evidence; this
+section records the fourth round.
+
+The independent re-review of correction round 3 candidate
+`2ff3d6e3a81ede8ebbf44f3144f1afc801b93531` (tree `ab0a568a3ed73bf0471ce76c2a572b2b04812d01`)
+**FAILED** on three MAJOR findings in the commitment layer that round 3 introduced; everything else
+passed and is deliberately unchanged.
+
+| Finding | Correction |
+| --- | --- |
+| `NEW-C3-001` acceptance-evidence / settlement / payment-fact ownership | `purchase.first_evidence_id` is no longer merely "an intrinsically valid accepted row": the canonical commitment validation now proves it is the exact successful evidence that settled the obligation the purchase was accepted against — `evidence_kind = success`, `processing_state = accepted`, the exact offer and the exact obligation of that offer, evidence amount and currency equal to the authoritative obligation (and to the purchase and offer currency), a valid provider occurrence instant that exactly equals the purchase's recorded acceptance instant, the exact obligation settlement for that evidence (valid against the obligation, same evidence), and the exact payment fact binding purchase + evidence + obligation with matching amount, currency and occurrence. |
+| `NEW-C3-002` idempotent existing-claim handoff | The existing-claim fast path now requires the claim to be an R1 Q→R1 successor claim with a **non-null** `predecessor_reservation_id` equal to the offer's Phase-Q hold, an active successor state, coherent immutable source/pattern identity, and a complete claim aggregate validated through the canonical `CommercialValidator::claimValid()` over its **locked** intervals (declared count, required intervals present, none extra, none corrupt). A released, expired, malformed, foreign or interval-corrupt claim can no longer be returned as idempotent handoff success — on the handoff or the Term-binding path. |
+| `NEW-C3-003` command replay after at-rest corruption | Replay is no longer decided from the command row alone. A duplicate-command winner may be reported as an idempotent success only after the authoritative current stored aggregate is re-proved with locks: for capacity handoff the full commitment chain, the result claim's ownership/predecessor/complete interval aggregate and the recorded result state; for Term binding the full commitment chain, the bound claim's complete aggregate, the exact Term and the exact funding-plan relationship. The rolled-back duplicate path now re-runs that revalidation inside its own transaction instead of as loose autocommit reads. Valid unchanged state still replays idempotently. |
+
+Corruption evidence for round 4 covers every listed class: eleven acceptance-fact probes (purchase
+acceptance instant, evidence kind/amount/currency/occurrence, settlement amount and evidence link,
+payment-fact purchase/obligation/amount/occurrence, and a purchase repointed at a synthetic accepted
+non-success evidence row for the same offer and obligation); eight claim probes (null predecessor,
+foreign predecessor, released state, expired state, invalid claim version, incoherent pattern identity,
+declared interval count, missing required interval, corrupt interval aggregate); and replay probes that
+corrupt the purchase, the evidence and the claim and then replay the **same command key** on both
+operations, plus a funding-plan corruption that fails the binding replay while the unaffected capacity
+replay still converges. Every probe asserts zero downstream truth, no silent repair, exact restoration
+and normal convergence afterwards, and the release replay is covered positively and negatively too.
+
 ## 1. What this phase owns
 
 R1 establishes the canonical commercial authority that lets a paid Term exist without a payment
@@ -144,7 +172,7 @@ provider ever becoming business authority:
 | `tests/phase-2a2r1-migration-runtime.php` | pass (Schema 25 identity, repeat safety, verifier refuses provider columns and mutable append-only columns) |
 | `tests/phase-2a2r1-runtime.php` | pass (full-payment, two-instalment, early tranche 2, duplicate/mismatched/unattributed/refund evidence, succession, flexible, policy registry, exceptions, deferment allowance, Term-close guard) |
 | `tests/phase-2a2r1-failure-runtime.php` | pass (10 injected write boundaries — including the initially-unattributed evidence boundary — each fully rolled back, each retry converging) |
-| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed; the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding; and the correction-round-3 commitment matrix: purchase ownership/economic corruption — including a purchase repointed at another otherwise-valid offer — entitlement ownership corruption, and a capacity claim belonging to another commitment, each rejected at both capacity handoff and Term binding, never silently repaired, and converging after restoration) |
+| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed; the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding; the correction-round-3 commitment matrix: purchase ownership/economic corruption — including a purchase repointed at another otherwise-valid offer — entitlement ownership corruption, and a capacity claim belonging to another commitment; and the correction-round-4 matrix: the exact acceptance evidence/settlement/payment-fact chain, the idempotent existing-claim aggregate and replay integrity after at-rest corruption, each rejected at both owning boundaries with no silent repair and converging after restoration) |
 | `tests/phase-2a2r1-concurrency-runner.sh` (`duplicate_evidence`, `handoff_vs_schedule`, `settlement_vs_lesson_seven`, `unrelated_commitments`, `promotion_global_limit`, `conflicting_evidence_replay`, `release_vs_satisfaction`, `unattributed_conflict`, `unattributed_convergence`) | pass (nine executed modes; the last two are the correction-round-2 initially-unattributed evidence races with conflicting and with identical immutable facts) |
 | `tests/phase-2a2l-runtime.php`, `tests/phase-2a2m0-runtime.php`, `tests/phase-2a2m-runtime.php`, `tests/phase-2a2n-runtime.php`, `tests/phase-2a2o-runtime.php` (adjacent regressions for the authorities R1 integrates with) | pass |
 | `tests/phase-2a2p-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`no_available_source` at its own fixture step). Pre-existing environment/fixture dependency, not an R1 regression |

@@ -369,4 +369,184 @@ $bindingG=dzn_r1_fix_bind($entitlementG,'commitment-g');
 dzn_r1_fix_assert((int)$bindingG['term_id']>0&&$planCountG()===1&&$termCountG()===1,'the restored commitment must bind exactly one Term and one funding plan');
 dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementG))===1,'convergence must not duplicate the successor claim');
 
+// ---------------------------------------------------------------------------
+// Correction round 4. One accepted commitment exercises three further integrity classes:
+// NEW-C3-001 the exact acceptance evidence → settlement → payment-fact chain, NEW-C3-002 the
+// idempotent existing-claim handoff, and NEW-C3-003 command replay after at-rest corruption.
+// Every probe corrupts one persisted fact, proves the owning authority fails closed with zero
+// downstream truth and no silent repair, restores the authoritative value, and converges again.
+// ---------------------------------------------------------------------------
+$i=dzn_r1_fix_scenario($sources[11],'evidence-chain',9);
+$productI=dzn_r1_fix_product((int)$i['course_id'],'AU',25000,'evidence-chain');
+dzn_r1_fix_pattern($i,'evidence-chain');
+$offerI=dzn_r1_fix_offer($i,$productI,'two_instalments','evidence-chain');
+dzn_r1_fix_settle($offerI,1,'prov-evidence-chain');
+dzn_r1_fix_activate_enrolment((int)$i['enrolment_id'],'evidence-chain');
+$entitlementI=dzn_r1_fix_entitlement((int)$offerI['offer_id']);
+$purchaseI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$offerI['offer_id']));
+$evidenceI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE offer_id=%d ORDER BY id LIMIT 1",(int)$offerI['offer_id']));
+$obligationI1=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_offer_obligations WHERE offer_id=%d ORDER BY obligation_sequence LIMIT 1",(int)$offerI['offer_id']));
+$obligationI2=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_offer_obligations WHERE offer_id=%d ORDER BY obligation_sequence DESC LIMIT 1",(int)$offerI['offer_id']));
+$settlementI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",$obligationI1));
+$factI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_facts WHERE evidence_id=%d",$evidenceI));
+dzn_r1_fix_assert($purchaseI>0&&$evidenceI>0&&$obligationI1>0&&$obligationI2>0&&$obligationI1!==$obligationI2&&$settlementI>0&&$factI>0,'the acceptance-fact chain fixture must be complete');
+$claimCountI=static function() use($wpdb,$p,$entitlementI):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementI));};
+$intervalCountI=static function() use($wpdb,$p,$entitlementI):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals i INNER JOIN {$p}commercial_capacity_claims c ON c.id=i.claim_id WHERE c.entitlement_id=%d",$entitlementI));};
+$planCountI=static function() use($wpdb,$p,$entitlementI):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementI));};
+$termCountI=static function() use($wpdb,$p,$i):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$i['enrolment_id']));};
+$noDownstreamTruth=static function(string $context) use($claimCountI,$intervalCountI,$planCountI,$termCountI):void{
+    dzn_r1_fix_assert($claimCountI()===0&&$intervalCountI()===0,$context.' must create no capacity truth');
+    dzn_r1_fix_assert($planCountI()===0&&$termCountI()===0,$context.' must create no Term or funding truth');
+};
+$c4Probe=static function(string $label,string $table,int $id,string $column,string $placeholder,mixed $corruptValue,?callable $whileCorrupt,callable $attempts) use($mutate,$readValue):void{
+    $original=$readValue($table,$id,$column);
+    $mutate($table,$id,$column,$placeholder,$corruptValue);
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$corruptValue,$label.': the C4 corruption probe did not persist');
+    if($whileCorrupt!==null)$whileCorrupt();
+    $attempts();
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$corruptValue,$label.': a refused mutation must never silently repair '.$table.'.'.$column);
+    $mutate($table,$id,$column,$placeholder,$original);
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$original,$label.': the authoritative value must be restorable');
+};
+$rejectHandoff=static function(string $label) use($rejected,$entitlementI,$noDownstreamTruth,$i,$wpdb,$p):void{
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementI,'c4-'.$label),'commercial_commitment_integrity_conflict','capacity handoff over '.$label);
+    $noDownstreamTruth('a refused handoff over '.$label);
+    dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}canonical_continuation_reservations WHERE id=%d",(int)$i['reservation_id']))==='active','a refused handoff over '.$label.' must not release the Phase-Q hold');
+};
+
+// NEW-C3-001 — the exact successful evidence → settlement → payment-fact chain behind the purchase.
+$c4Probe('purchase.accepted_at-mismatch','commercial_purchases',$purchaseI,'accepted_at','%s',gmdate('Y-m-d H:i:s',strtotime((string)$readValue('commercial_purchases',$purchaseI,'accepted_at').' UTC +1 day')),null,fn()=>$rejectHandoff('purchase.accepted_at-mismatch'));
+$c4Probe('evidence.kind-non-success','commercial_payment_evidence',$evidenceI,'evidence_kind','%s','refund',null,fn()=>$rejectHandoff('evidence.kind-non-success'));
+$c4Probe('evidence.amount','commercial_payment_evidence',$evidenceI,'amount_minor','%d',(int)$readValue('commercial_payment_evidence',$evidenceI,'amount_minor')+1,null,fn()=>$rejectHandoff('evidence.amount'));
+$c4Probe('evidence.currency','commercial_payment_evidence',$evidenceI,'currency','%s','NZD',null,fn()=>$rejectHandoff('evidence.currency'));
+$c4Probe('evidence.occurrence','commercial_payment_evidence',$evidenceI,'provider_occurred_at','%s',gmdate('Y-m-d H:i:s',strtotime((string)$readValue('commercial_payment_evidence',$evidenceI,'provider_occurred_at').' UTC +1 day')),null,fn()=>$rejectHandoff('evidence.occurrence'));
+$c4Probe('settlement.amount','commercial_obligation_settlements',$settlementI,'amount_minor','%d',(int)$readValue('commercial_obligation_settlements',$settlementI,'amount_minor')-1,null,fn()=>$rejectHandoff('settlement.amount'));
+$c4Probe('fact.purchase','commercial_payment_facts',$factI,'purchase_id','%d',$purchaseH,null,fn()=>$rejectHandoff('fact.purchase'));
+$c4Probe('fact.obligation','commercial_payment_facts',$factI,'obligation_id','%d',$obligationI2,null,fn()=>$rejectHandoff('fact.obligation'));
+$c4Probe('fact.amount','commercial_payment_facts',$factI,'amount_minor','%d',(int)$readValue('commercial_payment_facts',$factI,'amount_minor')+1,null,fn()=>$rejectHandoff('fact.amount'));
+$c4Probe('fact.occurrence','commercial_payment_facts',$factI,'occurred_at','%s',gmdate('Y-m-d H:i:s',strtotime((string)$readValue('commercial_payment_facts',$factI,'occurred_at').' UTC +1 day')),null,fn()=>$rejectHandoff('fact.occurrence'));
+// A settlement whose evidence link points at another accepted evidence row for the same obligation.
+$syntheticInserted=$wpdb->insert($p.'commercial_payment_evidence',array(
+    'uid'=>\Delnavazan\Platform\Core\Support\Identifier::uid(),'reference_code'=>null,'provider_key'=>'synthetic_provider',
+    'provider_account_digest'=>null,'evidence_reference_digest'=>hash('sha256','c4-synthetic-reference'),
+    'evidence_fact_digest'=>hash('sha256','c4-synthetic-fact'),'evidence_kind'=>'refund','amount_minor'=>(int)$readValue('commercial_payment_evidence',$evidenceI,'amount_minor'),
+    'currency'=>(string)$readValue('commercial_payment_evidence',$evidenceI,'currency'),'obligation_reference_digest'=>null,
+    'provider_occurred_at'=>(string)$readValue('commercial_payment_evidence',$evidenceI,'provider_occurred_at'),
+    'ingested_at'=>gmdate('Y-m-d H:i:s'),'processing_state'=>'accepted','reason_code'=>null,'offer_id'=>(int)$offerI['offer_id'],
+    'purchase_id'=>null,'obligation_id'=>$obligationI1,'created_at'=>gmdate('Y-m-d H:i:s'),'created_by'=>1,
+));
+dzn_r1_fix_assert($syntheticInserted===1,'the synthetic non-success evidence probe row must be insertable');
+$syntheticEvidence=(int)$wpdb->insert_id;
+dzn_r1_fix_assert($syntheticEvidence>0&&$syntheticEvidence!==$evidenceI,'the synthetic evidence probe must be a distinct evidence row');
+$c4Probe('settlement.evidence','commercial_obligation_settlements',$settlementI,'evidence_id','%d',$syntheticEvidence,null,fn()=>$rejectHandoff('settlement.evidence'));
+$c4Probe('purchase.first_evidence-non-success','commercial_purchases',$purchaseI,'first_evidence_id','%d',$syntheticEvidence,null,fn()=>$rejectHandoff('purchase.first_evidence-non-success'));
+dzn_r1_fix_assert($wpdb->query($wpdb->prepare("DELETE FROM {$p}commercial_payment_evidence WHERE id=%d",$syntheticEvidence))===1,'the synthetic evidence probe row must be removable');
+dzn_r1_fix_assert((int)$readValue('commercial_purchases',$purchaseI,'first_evidence_id')===$evidenceI,'the minting evidence link must be restored exactly');
+// The restored commitment converges: one successor claim of twelve intervals, Q hold released.
+$handoffKeyI='dzn-2a2r1-c4-handoff-'.wp_generate_uuid4();
+$handoffI=(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+dzn_r1_fix_assert((int)$handoffI['interval_count']===12&&$claimCountI()===1&&$intervalCountI()===12,'the restored acceptance-fact chain must hand over one claim of twelve intervals');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}canonical_continuation_reservations WHERE id=%d",(int)$i['reservation_id']))==='released','the converged handoff must release the Phase-Q hold');
+$claimIdI=(int)$handoffI['claim_id'];
+// Valid unchanged state must still replay idempotently.
+$handoffReplay=(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+dzn_r1_fix_assert((int)$handoffReplay['claim_id']===$claimIdI&&($handoffReplay['idempotent']??false)===true,'an unchanged successful handoff must replay idempotently');
+
+// NEW-C3-002 — the idempotent existing-claim path must reject an invalid successor claim.
+$claimProbe=static function(string $label,string $table,string $column,string $placeholder,mixed $corruptValue,string $bindExpected='commercial_capacity_integrity_conflict') use($wpdb,$p,$mutate,$readValue,$rejected,$entitlementI,$claimIdI,$claimCountI,$intervalCountI,$planCountI,$termCountI,$handoffKeyI):void{
+    $original=$readValue($table,$claimIdI,$column);
+    $isNull=$corruptValue===null;
+    // A literal NULL needs raw SQL: a %d placeholder would coalesce it to zero.
+    if($isNull)dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}{$table} SET {$column}=NULL WHERE id=%d",$claimIdI))===1,$label.': the corruption probe must move exactly one row');
+    else $mutate($table,$claimIdI,$column,$placeholder,$corruptValue);
+    $persisted=$readValue($table,$claimIdI,$column);
+    dzn_r1_fix_assert($isNull?$persisted===null:$persisted==$corruptValue,$label.': the corruption probe did not persist');
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementI,'claim-probe-'.$label),'commercial_capacity_integrity_conflict','idempotent handoff over '.$label);
+    $rejected(fn()=>dzn_r1_fix_bind($entitlementI,'claim-probe-'.$label),$bindExpected,'Term binding over '.$label);
+    dzn_r1_fix_assert($claimCountI()===1&&$intervalCountI()===12,$label.': a refused mutation must not create or duplicate claim capacity');
+    dzn_r1_fix_assert($planCountI()===0&&$termCountI()===0,$label.': a refused mutation must create no Term or funding truth');
+    $afterAttempt=$readValue($table,$claimIdI,$column);
+    dzn_r1_fix_assert($isNull?$afterAttempt===null:$afterAttempt==$corruptValue,$label.': a refused mutation must never silently repair the claim');
+    $mutate($table,$claimIdI,$column,$placeholder,$original);
+    dzn_r1_fix_assert($readValue($table,$claimIdI,$column)==$original,$label.': the claim authority must be restorable');
+    $replay=(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+    dzn_r1_fix_assert(($replay['idempotent']??false)===true,$label.': the restored claim must replay idempotently again');
+};
+// An R1 successor claim must always name its mandatory Phase-Q predecessor hold: NULL fails closed.
+$claimProbe('predecessor-null','commercial_capacity_claims','predecessor_reservation_id','%d',null);
+$claimProbe('predecessor-mismatch','commercial_capacity_claims','predecessor_reservation_id','%d',999999);
+$claimProbe('state-released','commercial_capacity_claims','state','%s','released','commercial_capacity_claim_not_active');
+$claimProbe('state-expired','commercial_capacity_claims','state','%s','expired','commercial_capacity_claim_not_active');
+$claimProbe('claim-version','commercial_capacity_claims','claim_version','%d',0);
+$claimProbe('pattern-identity','commercial_capacity_claims','pattern_id','%d',null);
+$claimProbe('interval-count','commercial_capacity_claims','interval_count','%d',11);
+$firstIntervalI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d ORDER BY interval_sequence DESC LIMIT 1",$claimIdI));
+$intervalRowI=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE id=%d",$firstIntervalI));
+dzn_r1_fix_assert($intervalRowI!==null,'the claim interval probe requires a protected interval row');
+$restoreIntervalI=static function() use($wpdb,$p,$intervalRowI):void{
+    dzn_r1_fix_assert($wpdb->insert($p.'commercial_capacity_claim_intervals',(array)$intervalRowI)!==false,'the claim interval must be re-insertable exactly');
+};
+// A missing required protected interval, then an interval whose aggregate is corrupt.
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}commercial_capacity_claim_intervals WHERE id=%d",$firstIntervalI));
+$rejected(fn()=>dzn_r1_fix_handoff($entitlementI,'claim-probe-missing-interval'),'commercial_capacity_integrity_conflict','idempotent handoff over a missing protected interval');
+$rejected(fn()=>dzn_r1_fix_bind($entitlementI,'claim-probe-missing-interval'),'commercial_capacity_integrity_conflict','Term binding over a missing protected interval');
+dzn_r1_fix_assert($intervalCountI()===11&&$planCountI()===0&&$termCountI()===0,'a missing protected interval must create no downstream truth');
+$restoreIntervalI();
+dzn_r1_fix_assert($intervalCountI()===12,'the missing protected interval must be restorable');
+$c4Probe('interval-state','commercial_capacity_claim_intervals',$firstIntervalI,'state','%s','bogus',null,function() use($rejected,$entitlementI,$intervalCountI,$planCountI,$termCountI):void{
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementI,'claim-probe-interval-state'),'commercial_capacity_integrity_conflict','idempotent handoff over a corrupt interval aggregate');
+    $rejected(fn()=>dzn_r1_fix_bind($entitlementI,'claim-probe-interval-state'),'commercial_capacity_integrity_conflict','Term binding over a corrupt interval aggregate');
+    dzn_r1_fix_assert($intervalCountI()===12&&$planCountI()===0&&$termCountI()===0,'a corrupt interval aggregate must create no downstream truth');
+});
+
+// NEW-C3-003 — a recorded command may only replay after the current stored aggregate is re-proved.
+$bindKeyI='dzn-2a2r1-c4-bind-'.wp_generate_uuid4();
+$bindingI=(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI);
+dzn_r1_fix_assert((int)$bindingI['term_id']>0&&$planCountI()===1&&$termCountI()===1,'the restored claim must bind exactly one Term and one funding plan');
+$bindingReplay=(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI);
+dzn_r1_fix_assert((int)$bindingReplay['term_id']===(int)$bindingI['term_id']&&($bindingReplay['idempotent']??false)===true,'an unchanged successful binding must replay idempotently');
+$planIdI=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementI));
+$replayProbe=static function(string $label,string $table,int $id,string $column,string $placeholder,mixed $corruptValue,string $expected) use($mutate,$readValue,$rejected,$entitlementI,$handoffKeyI,$bindKeyI,$claimCountI,$intervalCountI,$planCountI,$termCountI):void{
+    $original=$readValue($table,$id,$column);
+    $mutate($table,$id,$column,$placeholder,$corruptValue);
+    $rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI),$expected,'handoff replay after corrupting '.$label);
+    $rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI),$expected,'binding replay after corrupting '.$label);
+    dzn_r1_fix_assert($claimCountI()===1&&$intervalCountI()===12&&$planCountI()===1&&$termCountI()===1,$label.': a refused replay must not create, duplicate or destroy downstream truth');
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$corruptValue,$label.': a refused replay must never silently repair corruption');
+    $mutate($table,$id,$column,$placeholder,$original);
+    $handoffReplay=(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+    $bindingReplay=(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI);
+    dzn_r1_fix_assert(($handoffReplay['idempotent']??false)===true&&($bindingReplay['idempotent']??false)===true,$label.': the restored aggregate must replay idempotently again');
+};
+$replayProbe('purchase.amount','commercial_purchases',$purchaseI,'amount_minor','%d',(int)$readValue('commercial_purchases',$purchaseI,'amount_minor')+3,'commercial_commitment_integrity_conflict');
+$replayProbe('evidence.amount','commercial_payment_evidence',$evidenceI,'amount_minor','%d',(int)$readValue('commercial_payment_evidence',$evidenceI,'amount_minor')+5,'commercial_commitment_integrity_conflict');
+$replayProbe('claim.state','commercial_capacity_claims',$claimIdI,'state','%s','expired','commercial_capacity_integrity_conflict');
+// The binding result aggregate is its own owner: a corrupted funding plan fails the binding replay
+// while the capacity replay (whose aggregate is unaffected) still replays idempotently.
+$planOfferOriginal=(int)$readValue('commercial_term_funding_plans',$planIdI,'offer_id');
+$mutate('commercial_term_funding_plans',$planIdI,'offer_id','%d',(int)$offerH['offer_id']);
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI),'Contaminated commercial Term binding result','binding replay over a funding plan repointed at another offer');
+$handoffStillReplays=(new \Delnavazan\Platform\Core\Application\CommercialCapacityService())->handoffFromEntitlement($entitlementI,dzn_r1_fix_evidence('c4-handoff'),$handoffKeyI);
+dzn_r1_fix_assert(($handoffStillReplays['idempotent']??false)===true,'a corrupt funding plan must not affect the unaffected capacity replay');
+dzn_r1_fix_assert($planCountI()===1&&$termCountI()===1,'a refused binding replay must not create or destroy downstream truth');
+dzn_r1_fix_assert((int)$readValue('commercial_term_funding_plans',$planIdI,'offer_id')===(int)$offerH['offer_id'],'a refused binding replay must never silently repair the funding plan');
+$mutate('commercial_term_funding_plans',$planIdI,'offer_id','%d',$planOfferOriginal);
+$bindingReplayAfterRestore=(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->bindEntitlementToTerm($entitlementI,dzn_r1_fix_evidence('c4-bind'),$bindKeyI);
+dzn_r1_fix_assert(($bindingReplayAfterRestore['idempotent']??false)===true,'the restored funding plan must replay idempotently again');
+
+// NEW-C3-003 (release replay) — a released claim may replay only while its aggregate stays valid.
+$releaseKeyI='dzn-2a2r1-c4-release-'.wp_generate_uuid4();
+$releaseEvidence=dzn_r1_fix_evidence('c4-release')+array('release_reason_code'=>'commercial_resolution');
+$capacityServiceI=new \Delnavazan\Platform\Core\Application\CommercialCapacityService();
+$releaseFirst=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+dzn_r1_fix_assert((string)$releaseFirst['state']==='released','the authorised release must release the claim');
+$releaseReplay=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+dzn_r1_fix_assert((string)$releaseReplay['state']==='released'&&($releaseReplay['idempotent']??false)===true,'an unchanged released claim must replay idempotently');
+$mutate('commercial_capacity_claims',$claimIdI,'committed_sessions','%d',6);
+$rejected(fn()=>$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI),'commercial_capacity_integrity_conflict','release replay over a corrupt claim aggregate');
+dzn_r1_fix_assert((int)$readValue('commercial_capacity_claims',$claimIdI,'committed_sessions')===6,'a refused release replay must never silently repair the claim');
+$mutate('commercial_capacity_claims',$claimIdI,'committed_sessions','%d',12);
+$releaseReplayAfterRestore=$capacityServiceI->releaseClaim($claimIdI,$releaseEvidence,$releaseKeyI);
+dzn_r1_fix_assert(($releaseReplayAfterRestore['idempotent']??false)===true,'the restored released claim must replay idempotently again');
+
 echo "Phase 2A.2-R1 corruption runtime passed\n";

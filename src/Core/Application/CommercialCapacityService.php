@@ -74,9 +74,11 @@ final class CommercialCapacityService {
             if((int)$entitlement->beneficiary_student_id!==$studentId)throw new \RuntimeException('Commercial capacity context changed');
             $existing=$this->capacity->claimForEntitlement($entitlementId,true);
             $now=CommercialSupport::now();
-            // Including the idempotent existing-claim path: a claim that belongs to a different
-            // purchase may never be accepted as this commitment's successor capacity.
-            if($existing)CommercialCommitmentValidator::assertClaimBelongsToCommitment($existing,$commitment['entitlement'],$commitment['purchase'],$commitment['offer']);
+            // Including the idempotent existing-claim path: the claim must belong to this exact
+            // commitment, carry its mandatory Phase-Q predecessor hold, be in its active successor
+            // state and be a complete valid claim aggregate — a foreign, released, expired, malformed
+            // or interval-corrupt claim may never be reported as idempotent handoff success.
+            if($existing)CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($existing,$this->capacity->intervals((int)$existing->id,true),$commitment['entitlement'],$commitment['purchase'],$commitment['offer'],array('active'));
             if($existing){
                 $result=$this->claimResult($existing,false,true);
                 $this->writeCommand($digest,$payload,'establish_protected_capacity',$studentId,$teacherId,(int)$purchaseHint->id,(int)$offerHint->id,$entitlementId,(int)$existing->id,0,'active',$now,$actor);
@@ -150,7 +152,7 @@ final class CommercialCapacityService {
         }catch(\Throwable$e){
             $this->authority->rollback();
             $duplicate=$this->authority->duplicate($e)??$this->capacity->duplicate($e);
-            if($duplicate==='command_key_digest'&&($winner=$this->authority->command($digest)))return $this->replay($winner,$payload);
+            if($duplicate==='command_key_digest'&&($winner=$this->authority->command($digest)))return $this->replayAfterRollback($winner,$payload);
             if(in_array($e->getMessage(),array('teacher_slot_conflict','continuation_reservation_expired'),true)){
                 $this->recordHandoffFailure((int)$purchaseHint->id,(int)$offerHint->id,$studentId,$teacherId,$entitlementId);
             }
@@ -195,9 +197,21 @@ final class CommercialCapacityService {
         }catch(\Throwable$e){
             $this->authority->rollback();
             $duplicate=$this->authority->duplicate($e)??$this->capacity->duplicate($e);
-            if($duplicate==='command_key_digest'&&($winner=$this->authority->command($digest)))return $this->replay($winner,$payload);
+            if($duplicate==='command_key_digest'&&($winner=$this->authority->command($digest)))return $this->replayAfterRollback($winner,$payload);
             throw $e;
         }
+    }
+
+    /**
+     * Replay a duplicate-command winner inside its own transaction.
+     *
+     * The caller's transaction has already rolled back on the uniqueness race, and replay re-proves
+     * the stored aggregate with locks, so it must not run as loose autocommit reads.
+     */
+    private function replayAfterRollback(object $winner,string $payload):array{
+        $this->authority->begin();
+        try{$result=$this->replay($winner,$payload);$this->authority->commit();return $result;}
+        catch(\Throwable$e){$this->authority->rollback();throw $e;}
     }
 
     public function claimForEntitlement(int $entitlementId):?array{
@@ -280,9 +294,19 @@ final class CommercialCapacityService {
     private function replay(object $command,string $payload):array{
         if(!hash_equals((string)$command->command_payload_digest,$payload))throw new \RuntimeException('Idempotency conflict');
         if((string)$command->command_domain!==CommercialRule::DOMAIN||!in_array((string)$command->operation,array('establish_protected_capacity','release_protected_capacity'),true))throw new \RuntimeException('Contaminated commercial capacity command');
-        $claim=$this->capacity->claim((int)$command->result_id);
-        if(!$claim||!CommercialValidator::claimValid($claim,$this->capacity->intervals((int)$claim->id)))throw new \RuntimeException('Contaminated commercial capacity result');
-        if((string)$command->operation==='release_protected_capacity')return array('claim_id'=>(int)$claim->id,'state'=>(string)$claim->state,'created'=>false,'idempotent'=>true);
+        // A recorded command may be reported as an idempotent success ONLY after the authoritative
+        // current stored aggregate behind it is re-proved: the complete immutable commitment chain,
+        // the result claim's ownership and mandatory predecessor hold, and its complete interval
+        // aggregate in the state this operation recorded.
+        $releasing=(string)$command->operation==='release_protected_capacity';
+        $claim=$this->capacity->claim((int)$command->result_id,true);
+        if(!$claim)throw new \RuntimeException('Contaminated commercial capacity result');
+        $entitlementId=$claim->entitlement_id===null?($command->entitlement_id===null?0:(int)$command->entitlement_id):(int)$claim->entitlement_id;
+        if($entitlementId<1)throw new \RuntimeException('Contaminated commercial capacity result');
+        $commitment=CommercialCommitmentValidator::assertCommitment($entitlementId,CommercialCommitmentValidator::STATES_PRE_CAPACITY,true,$this->authority,$this->continuations);
+        CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$this->capacity->intervals((int)$claim->id,true),$commitment['entitlement'],$commitment['purchase'],$commitment['offer'],$releasing?array('released','active'):array('active'));
+        if((string)$command->result_state!==($releasing?'released':'active'))throw new \RuntimeException('Contaminated commercial capacity command');
+        if($releasing)return array('claim_id'=>(int)$claim->id,'state'=>(string)$claim->state,'created'=>false,'idempotent'=>true);
         return $this->claimResult($claim,false,true);
     }
 }

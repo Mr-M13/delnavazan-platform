@@ -107,7 +107,8 @@ final class CommercialCommitmentValidator {
      *
      * A claim for another entitlement, purchase, Student, Teacher, Course or commitment size may never
      * satisfy this chain, so a corrupt claim selection fails closed instead of silently handing over
-     * capacity that belongs to a different purchase.
+     * capacity that belongs to a different purchase. An R1 successor claim must also carry its exact
+     * mandatory Phase-Q predecessor hold, and its immutable source/pattern identity must be coherent.
      */
     public static function assertClaimBelongsToCommitment(object $claim,object $entitlement,object $purchase,object $offer):void{
         $conflict='commercial_capacity_integrity_conflict';
@@ -118,24 +119,77 @@ final class CommercialCommitmentValidator {
         if((int)$claim->teacher_id!==(int)$offer->teacher_id)throw new \InvalidArgumentException($conflict);
         if((int)$claim->course_id!==(int)$offer->course_id)throw new \InvalidArgumentException($conflict);
         if((int)$claim->committed_sessions!==(int)$offer->committed_sessions)throw new \InvalidArgumentException($conflict);
-        if($claim->predecessor_reservation_id!==null&&(int)$claim->predecessor_reservation_id!==(int)($offer->reservation_id??0))throw new \InvalidArgumentException($conflict);
+        // An R1 successor claim is established by the Q → R1 succession: it must name the exact
+        // Phase-Q hold the offer's window is bound to, never a null or foreign predecessor.
+        if($claim->predecessor_reservation_id===null)throw new \InvalidArgumentException($conflict);
+        if((int)$claim->predecessor_reservation_id!==(int)($offer->reservation_id??0))throw new \InvalidArgumentException($conflict);
+        // The immutable source identity must be internally coherent (claimValid proves the rest).
+        $sourceKind=(string)$claim->source_kind;
+        if($sourceKind==='regular_pattern'&&($claim->pattern_id===null||(int)$claim->pattern_id<1))throw new \InvalidArgumentException($conflict);
+        if($sourceKind==='q_succession'&&$claim->pattern_id!==null)throw new \InvalidArgumentException($conflict);
     }
 
     /**
-     * The evidence that minted the purchase must still be an accepted evidence row for this exact offer
-     * and obligation. (The first acceptance writes its evidence row before the purchase exists, so a
-     * null purchase link is legitimate; any other purchase link is corruption.)
+     * Prove an existing protected-capacity claim is both owned by this commitment and a complete,
+     * valid claim aggregate in the state the consuming operation requires.
+     *
+     * @param array<int,object> $intervals the claim's locked interval rows
+     * @param array<int,string> $requiredStates the claim states this operation may consume
+     */
+    public static function assertClaimAggregateBelongsToCommitment(object $claim,array $intervals,object $entitlement,object $purchase,object $offer,array $requiredStates):void{
+        $conflict='commercial_capacity_integrity_conflict';
+        self::assertClaimBelongsToCommitment($claim,$entitlement,$purchase,$offer);
+        if($requiredStates&&!in_array((string)$claim->state,$requiredStates,true))throw new \InvalidArgumentException($conflict);
+        if(!CommercialValidator::claimValid($claim,$intervals))throw new \InvalidArgumentException($conflict);
+        // The complete aggregate: every required protected interval present, none extra, exactly the
+        // declared count, and never more than the commitment it belongs to.
+        if((int)$claim->interval_count<1||(int)$claim->interval_count!==count($intervals))throw new \InvalidArgumentException($conflict);
+        if((int)$claim->interval_count>(int)$claim->committed_sessions)throw new \InvalidArgumentException($conflict);
+    }
+
+    /**
+     * The complete acceptance-fact chain that minted the purchase.
+     *
+     * `purchase.first_evidence_id` must be the exact successful provider evidence that settled the
+     * obligation the purchase was accepted against — not merely an intrinsically valid accepted row —
+     * and that evidence must still be backed by its exact obligation settlement and its exact payment
+     * fact, with amount, currency and occurrence agreeing across the three stored representations and
+     * with the purchase's recorded acceptance instant.
+     *
+     * (The first acceptance writes its evidence row before the purchase exists, so a null purchase link
+     * on that row is legitimate; any other purchase link is corruption.)
      */
     private static function assertAcceptanceEvidence(object $purchase,object $offer,CommercialAuthorityRepository $authority,CommercialPaymentRepository $payments,bool $lock,string $conflict):void{
         $evidenceId=(int)$purchase->first_evidence_id;
         if($evidenceId<1)throw new \InvalidArgumentException($conflict);
         $evidence=$payments->evidence($evidenceId,$lock);
         if(!$evidence||!CommercialValidator::evidenceValid($evidence))throw new \InvalidArgumentException($conflict);
+        // Only a successful, accepted evidence fact can mint an accepted purchase.
+        if((string)$evidence->evidence_kind!=='success')throw new \InvalidArgumentException($conflict);
         if((string)$evidence->processing_state!=='accepted')throw new \InvalidArgumentException($conflict);
         if($evidence->offer_id===null||(int)$evidence->offer_id!==(int)$offer->id)throw new \InvalidArgumentException($conflict);
         if($evidence->purchase_id!==null&&(int)$evidence->purchase_id!==(int)$purchase->id)throw new \InvalidArgumentException($conflict);
         if($evidence->obligation_id===null)throw new \InvalidArgumentException($conflict);
         $obligation=$authority->obligation((int)$evidence->obligation_id,$lock);
         if(!$obligation||(int)$obligation->offer_id!==(int)$offer->id)throw new \InvalidArgumentException($conflict);
+        // The evidence must be the exact settlement fact of that obligation, in one currency.
+        if((int)$evidence->amount_minor!==(int)$obligation->amount_minor)throw new \InvalidArgumentException($conflict);
+        if((string)$evidence->currency!==(string)$obligation->currency)throw new \InvalidArgumentException($conflict);
+        if((string)$evidence->currency!==(string)$purchase->currency||(string)$evidence->currency!==(string)$offer->currency)throw new \InvalidArgumentException($conflict);
+        // Acceptance semantics: the purchase was accepted at the provider-confirmed occurrence instant.
+        if(!CommercialValidator::utc((string)$evidence->provider_occurred_at))throw new \InvalidArgumentException($conflict);
+        if((string)$evidence->provider_occurred_at!==(string)$purchase->accepted_at)throw new \InvalidArgumentException($conflict);
+        // The exact obligation settlement for this evidence.
+        $settlement=$payments->settlementForObligation((int)$obligation->id,$lock);
+        if(!$settlement||!CommercialValidator::settlementValid($settlement,$obligation))throw new \InvalidArgumentException($conflict);
+        if((int)$settlement->evidence_id!==(int)$evidence->id)throw new \InvalidArgumentException($conflict);
+        // The exact payment fact binding this purchase, evidence and obligation together.
+        $fact=$payments->factForEvidence((int)$evidence->id,$lock);
+        if(!$fact)throw new \InvalidArgumentException($conflict);
+        if((int)$fact->purchase_id!==(int)$purchase->id)throw new \InvalidArgumentException($conflict);
+        if((int)$fact->evidence_id!==(int)$evidence->id||(int)$fact->obligation_id!==(int)$obligation->id)throw new \InvalidArgumentException($conflict);
+        if((int)$fact->amount_minor!==(int)$evidence->amount_minor||(string)$fact->currency!==(string)$evidence->currency)throw new \InvalidArgumentException($conflict);
+        if(!CommercialValidator::utc((string)$fact->occurred_at))throw new \InvalidArgumentException($conflict);
+        if((string)$fact->occurred_at!==(string)$evidence->provider_occurred_at)throw new \InvalidArgumentException($conflict);
     }
 }

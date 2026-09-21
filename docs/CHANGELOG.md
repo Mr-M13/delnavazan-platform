@@ -5,6 +5,44 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — candidate, unmerged — 2026-09-20
 
+### Correction round 4 (independent re-review of `2ff3d6e3a81ede8ebbf44f3144f1afc801b93531` failed on three commitment-layer findings)
+
+The independent re-review of correction round 3 **FAILED** on `NEW-C3-001`, `NEW-C3-002` and
+`NEW-C3-003`; everything else passed. Additive descendants of `2ff3d6e3` close exactly those three,
+with no amend, rebase, squash, reset or force push.
+
+- `NEW-C3-001` — `purchase.first_evidence_id` must be the exact successful evidence that minted the
+  accepted purchase, so the commitment validation now proves the whole acceptance-fact chain before
+  capacity or Term truth: `evidence_kind = success`, `processing_state = accepted`, the exact offer and
+  the exact obligation of that offer, evidence amount/currency matching the authoritative obligation
+  (and the purchase/offer currency), a valid provider occurrence instant exactly equal to the recorded
+  acceptance instant, the exact obligation settlement for that evidence, and the exact payment fact
+  binding purchase + evidence + obligation with matching amount, currency and occurrence.
+- `NEW-C3-002` — the idempotent existing-claim path requires an R1 Q→R1 successor claim with a
+  non-null `predecessor_reservation_id` equal to the offer's Phase-Q hold, an active successor state,
+  coherent immutable source/pattern identity, and a complete claim aggregate validated through
+  `CommercialValidator::claimValid()` over locked intervals. Released, expired, malformed, foreign or
+  interval-corrupt claims can no longer be reported as idempotent handoff success, on either boundary.
+- `NEW-C3-003` — a duplicate-command winner may only be reported as idempotent success after the
+  authoritative current stored aggregate is re-proved with locks: for capacity handoff the complete
+  commitment chain, claim ownership/predecessor/complete interval aggregate and the recorded result
+  state; for Term binding the complete commitment chain, the bound claim aggregate, the exact Term and
+  the exact funding-plan relationship. The rolled-back duplicate path re-runs that revalidation inside
+  its own transaction instead of as loose autocommit reads. Valid unchanged state still replays
+  idempotently.
+- Corruption evidence: eleven acceptance-fact probes (including a purchase repointed at a synthetic
+  accepted non-success evidence row for the same offer and obligation), eight claim-aggregate probes
+  (null/foreign predecessor, released/expired state, invalid version, incoherent pattern identity,
+  declared count, missing required interval, corrupt interval aggregate) and replay probes that
+  corrupt the purchase, the evidence, the claim and the funding plan and then replay the **same
+  command key** on both operations — plus a positive replay for handoff, binding and release. Every
+  probe asserts zero downstream truth, no silent repair, exact restoration and normal convergence.
+- Validation (owner-executed, disposable WordPress 6.8.3 + MariaDB 11.4.13, fresh database per suite)
+  is recorded in `docs/PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md` §5. Schema 25 /
+  migration `025_commercial_purchase_funding_authority` / build
+  `phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged. State:
+  `CORRECTION ROUND 4 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`; not passed, not merged, not deployed.
+
 ### Correction round 3 (independent re-review of `3aaf3081a0d5d12501715589a2a518c68af5ad98` failed on one remaining defect)
 
 The independent re-review of correction round 2 passed every area — account-adjustment source ↔

@@ -151,7 +151,10 @@ final class CommercialTermFundingService {
             // is ever created from a corrupt commitment even though an earlier authority may have
             // committed before the corruption appeared.
             $commitment=CommercialCommitmentValidator::assertForEntitlement($entitlement,CommercialCommitmentValidator::STATES_PRE_TERM,true,$this->repository);
-            CommercialCommitmentValidator::assertClaimBelongsToCommitment($claim,$commitment['entitlement'],$commitment['purchase'],$commitment['offer']);
+            // The claim that authorises this Term must belong to this exact commitment, carry its
+            // mandatory Phase-Q predecessor hold and be a complete valid claim aggregate.
+            $capacityRepository=new \Delnavazan\Platform\Core\Infrastructure\Repository\CommercialCapacityRepository();
+            CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$capacityRepository->intervals((int)$claim->id,true),$commitment['entitlement'],$commitment['purchase'],$commitment['offer'],array('active'));
             $offer=$commitment['offer'];
             // Course identity continuity across the accepted offer, its claim and the Term's Enrolment.
             if(!CommercialValidator::courseConsistent(array((int)$offer->course_id,(int)$claim->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
@@ -192,9 +195,21 @@ final class CommercialTermFundingService {
             );
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayBinding($winner,$payload);
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replayBindingAfterRollback($winner,$payload);
             throw $e;
         }
+    }
+
+    /**
+     * Replay a duplicate binding winner inside its own transaction.
+     *
+     * The caller's transaction has already rolled back on the uniqueness race, and replay re-proves
+     * the stored commitment/claim/Term aggregate with locks, so it must not run as loose reads.
+     */
+    private function replayBindingAfterRollback(object $winner,string $payload):array{
+        $this->repository->begin();
+        try{$result=$this->replayBinding($winner,$payload);$this->repository->commit();return $result;}
+        catch(\Throwable$e){$this->repository->rollback();throw $e;}
     }
 
     public function fundingPlanForTerm(int $termId):?array{
@@ -223,10 +238,24 @@ final class CommercialTermFundingService {
     private function replayBinding(object $command,string $payload):array{
         if(!hash_equals((string)$command->command_payload_digest,$payload))throw new \RuntimeException('Idempotency conflict');
         if((string)$command->command_domain!==CommercialRule::DOMAIN||(string)$command->operation!=='bind_entitlement_to_term')throw new \RuntimeException('Contaminated commercial Term binding command');
-        $plan=$this->repository->fundingPlanForTerm((int)$command->result_id);
+        // A recorded binding command may be reported as an idempotent success ONLY after the current
+        // stored aggregate behind it is re-proved: the complete immutable commitment chain, the bound
+        // claim's ownership and complete aggregate, and the exact Term/funding-plan relationship.
+        $plan=$this->repository->fundingPlanForTerm((int)$command->result_id,true);
         if(!$plan)throw new \RuntimeException('Contaminated commercial Term binding result');
-        $entitlement=$this->repository->entitlement((int)$plan->entitlement_id);
-        if(!$entitlement||(string)$entitlement->state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding result');
+        $commitment=CommercialCommitmentValidator::assertCommitment((int)$plan->entitlement_id,array('term_bound'),true,$this->repository);
+        $entitlement=$commitment['entitlement'];$purchase=$commitment['purchase'];$offer=$commitment['offer'];
+        if((string)$entitlement->state!=='term_bound')throw new \RuntimeException('Contaminated commercial Term binding result');
+        if((int)$plan->purchase_id!==(int)$purchase->id||(int)$plan->offer_id!==(int)$offer->id)throw new \RuntimeException('Contaminated commercial Term binding result');
+        if((int)$plan->term_id!==(int)$entitlement->term_id||(int)$plan->enrolment_id!==(int)$entitlement->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
+        if((int)$plan->committed_sessions!==(int)$offer->committed_sessions||(string)$plan->plan_kind!==(string)$offer->plan_kind)throw new \RuntimeException('Contaminated commercial Term binding result');
+        $capacityRepository=new \Delnavazan\Platform\Core\Infrastructure\Repository\CommercialCapacityRepository();
+        $claim=$capacityRepository->claimForEntitlement((int)$plan->entitlement_id,true);
+        if(!$claim)throw new \RuntimeException('Contaminated commercial Term binding result');
+        CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment($claim,$capacityRepository->intervals((int)$claim->id,true),$entitlement,$purchase,$offer,array('active'));
+        if((int)$claim->term_id!==(int)$plan->term_id)throw new \RuntimeException('Contaminated commercial Term binding result');
+        $term=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CanonicalTermAuthorityRepository())->term((int)$plan->term_id,true);
+        if(!$term||(int)$term->enrolment_id!==(int)$plan->enrolment_id)throw new \RuntimeException('Contaminated commercial Term binding result');
         return array(
             'term_id'=>(int)$plan->term_id,'enrolment_id'=>(int)$plan->enrolment_id,'entitlement_id'=>(int)$plan->entitlement_id,
             'purchase_id'=>(int)$plan->purchase_id,'committed_sessions'=>(int)$plan->committed_sessions,

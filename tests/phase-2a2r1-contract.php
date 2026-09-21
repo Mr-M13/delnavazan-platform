@@ -267,12 +267,13 @@ if(!str_contains($commitment,'CommercialLineageValidator::assertForOffer'))throw
 foreach(array('INSERT INTO','UPDATE ','DELETE FROM') as $sql) if(str_contains($commitment,$sql))throw new RuntimeException('The commitment validator must never write storage: '.$sql);
 // Both downstream mutation owners consume the one implementation, not their own comparisons.
 if(substr_count($capacity,'CommercialCommitmentValidator::assertForEntitlement')!==1||substr_count($funding,'CommercialCommitmentValidator::assertForEntitlement')!==1)throw new RuntimeException('Each downstream mutation owner must prove the commitment exactly once');
-if(substr_count($capacity,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')!==1||substr_count($funding,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')!==1)throw new RuntimeException('Each downstream mutation owner must prove its existing claim belongs to the commitment');
+// Once at the mutation boundary and once in the replay revalidation: exactly two canonical claim proofs.
+if(substr_count($capacity,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment')!==2||substr_count($funding,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment')!==2)throw new RuntimeException('Each downstream mutation owner must prove its existing claim aggregate at its boundary and on replay');
 if(substr_count($commitment,'commercial_commitment_integrity_conflict')<1||substr_count($commitment,'$conflict')<8)throw new RuntimeException('The commitment ownership comparisons must fail closed with one controlled reason');
 if(str_contains($capacity.' '.$funding,'amount_due_minor'))throw new RuntimeException('Accepted-amount ownership must not be re-implemented outside the canonical commitment validator');
 if(str_contains($capacity.' '.$funding,'purchaseByOffer'))throw new RuntimeException('Purchase/offer ownership must not be re-implemented outside the canonical commitment validator');
 // Ordering: commitment proof precedes every downstream mutation, including the Phase-Q release.
-if(strpos($handoff,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')===false)throw new RuntimeException('The idempotent existing-claim path must prove claim ownership');
+if(strpos($handoff,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment')===false)throw new RuntimeException('The idempotent existing-claim path must prove the complete claim aggregate');
 if(strpos($handoff,'CommercialCommitmentValidator::assertForEntitlement')>strpos($handoff,'$existing=$this->capacity->claimForEntitlement'))throw new RuntimeException('The commitment proof must precede the existing-claim decision');
 if(strpos($handoff,'ensureAndLockTeacherRoot')>strpos($handoff,'insertClaim'))throw new RuntimeException('The Teacher root must still precede the successor claim');
 if(strpos($handoff,'insertClaim')>strpos($handoff,'setReservationState'))throw new RuntimeException('The predecessor hold must still be released only after the successor claim is durable');
@@ -280,7 +281,7 @@ $binding=substr($funding,strpos($funding,'public function bindEntitlementToTerm'
 $binding=substr($binding,0,strpos($binding,'public function fundingPlanForTerm'));
 if(strpos($binding,'CommercialCommitmentValidator::assertForEntitlement')>strpos($binding,'insertFundingPlan'))throw new RuntimeException('The commitment proof must precede the funding plan');
 if(strpos($binding,'CommercialCommitmentValidator::assertForEntitlement')>strpos($binding,'CanonicalTermAuthorityService())->create('))throw new RuntimeException('The commitment proof must precede Phase-L Term creation');
-if(strpos($binding,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')>strpos($binding,'insertFundingPlan'))throw new RuntimeException('Claim ownership must be proved before the funding plan');
+if(strpos($binding,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment')>strpos($binding,'insertFundingPlan'))throw new RuntimeException('Claim ownership must be proved before the funding plan');
 // C2 preservation: the upstream validator stays untouched and still owns the read/payment seams.
 if(!str_contains($offer,'CommercialLineageValidator::assertOfferAggregate'))throw new RuntimeException('The offer read seam must still reuse the upstream lineage validator');
 if(!str_contains($payment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Payment acceptance must still prove the upstream aggregate');
@@ -297,5 +298,40 @@ if(!str_contains($corruptionRuntime,'commercial_commitment_integrity_conflict')|
 if(!str_contains($corruptionRuntime,'must never silently repair')||!str_contains($corruptionRuntime,'must be restorable'))throw new RuntimeException('The commitment corruption matrix must prove no silent repair and exact restoration');
 if(!str_contains($phaseDoc,'Correction round 3'))throw new RuntimeException('The Phase R1 document must record correction round 3');
 if(!str_contains($continuity,'Correction round 3'))throw new RuntimeException('The continuity record must record correction round 3');
+
+// Correction Round 4 — the exact acceptance-fact chain, the existing-claim aggregate and replay integrity.
+foreach(array(
+    'factForEvidence','settlementForObligation','CommercialValidator::settlementValid','evidence->evidence_kind',
+    'provider_occurred_at','purchase->accepted_at','first_evidence_id','settlement->evidence_id','fact->purchase_id','fact->occurred_at',
+) as $proved) if(!str_contains($commitment,$proved))throw new RuntimeException('The commitment validator must prove the acceptance-fact chain: '.$proved);
+if(!str_contains($commitment,"!=='success'"))throw new RuntimeException('Only a successful evidence fact may mint an accepted purchase');
+if(str_contains($commitment,"!=='refund'")&&!str_contains($commitment,'evidence_kind'))throw new RuntimeException('The acceptance-fact chain must stay provider-neutral and kind-explicit');
+if(!str_contains($commitment,'public static function assertClaimAggregateBelongsToCommitment'))throw new RuntimeException('The complete claim-aggregate proof is missing');
+if(!str_contains($commitment,'$requiredStates')||!str_contains($commitment,'CommercialValidator::claimValid($claim,$intervals)'))throw new RuntimeException('The claim aggregate must be state-aware and validated through the canonical claim validator');
+if(!str_contains($commitment,'if($claim->predecessor_reservation_id===null)'))throw new RuntimeException('An R1 successor claim must always name its mandatory predecessor hold');
+if(!str_contains($commitment,'if($sourceKind===\'regular_pattern\'')||!str_contains($commitment,'if($sourceKind===\'q_succession\''))throw new RuntimeException('The claim source/pattern identity must be coherent');
+foreach(array('assertClaimAggregateBelongsToCommitment','claimValid($claim,$intervals)','interval_count') as $proved) if(!str_contains($commitment,$proved))throw new RuntimeException('The claim aggregate must prove: '.$proved);
+// Replay may only report success after the current stored aggregate is re-proved, inside a transaction.
+foreach(array($capacity,$funding) as $service){
+    if(str_contains($service,'return $this->replay($winner,$payload);')||str_contains($service,'return $this->replayBinding($winner,$payload);'))throw new RuntimeException('A duplicate-command replay must not run as loose autocommit reads');
+}
+if(!str_contains($capacity,'private function replayAfterRollback')||!str_contains($funding,'private function replayBindingAfterRollback'))throw new RuntimeException('The rolled-back duplicate-command replay must be re-run inside its own transaction');
+$capacityReplay=substr($capacity,strpos($capacity,'private function replay(object $command'));
+if(!str_contains($capacityReplay,'CommercialCommitmentValidator::assertCommitment')||!str_contains($capacityReplay,'CommercialCommitmentValidator::assertClaimAggregateBelongsToCommitment'))throw new RuntimeException('The capacity replay must re-prove the commitment and the claim aggregate');
+if(strpos($capacityReplay,'CommercialCommitmentValidator::assertCommitment')>strpos($capacityReplay,'return $this->claimResult'))throw new RuntimeException('The capacity replay must re-prove the aggregate before reporting success');
+if(!str_contains($capacityReplay,"array('released','active')")||!str_contains($capacityReplay,"array('active')"))throw new RuntimeException('The capacity replay must bind the result state to the recorded operation');
+$fundingReplay=substr($funding,strpos($funding,'private function replayBinding(object'));
+foreach(array('CommercialCommitmentValidator::assertCommitment','assertClaimAggregateBelongsToCommitment','fundingPlanForTerm','CanonicalTermAuthorityRepository','term_id','enrolment_id') as $proved) if(!str_contains($fundingReplay,$proved))throw new RuntimeException('The binding replay must re-prove: '.$proved);
+if(strpos($fundingReplay,'CommercialCommitmentValidator::assertCommitment')>strpos($fundingReplay,'return array('))throw new RuntimeException('The binding replay must re-prove the aggregate before reporting success');
+// Correction Round 4 — behavioural coverage for all three findings.
+foreach(array(
+    'evidence.kind-non-success','evidence.amount','evidence.currency','evidence.occurrence','settlement.amount','settlement.evidence',
+    'fact.purchase','fact.obligation','fact.amount','fact.occurrence','purchase.accepted_at-mismatch',
+    'predecessor-null','predecessor-mismatch','state-released','state-expired','claim-version','pattern-identity','interval-count','interval-state',
+    'replayProbe','release replay over a corrupt claim aggregate',
+) as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The correction-round-4 corruption matrix is missing: '.$probe);
+if(!str_contains($corruptionRuntime,'an unchanged successful handoff must replay idempotently')||!str_contains($corruptionRuntime,'an unchanged successful binding must replay idempotently'))throw new RuntimeException('The correction-round-4 matrix must prove positive idempotent replay');
+if(!str_contains($phaseDoc,'Correction round 4'))throw new RuntimeException('The Phase R1 document must record correction round 4');
+if(!str_contains($continuity,'Correction round 4'))throw new RuntimeException('The continuity record must record correction round 4');
 
 echo "Phase 2A.2-R1 contract passed\n";

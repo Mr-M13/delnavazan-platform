@@ -26,7 +26,7 @@ final class CommercialPaymentRepository {
     }
     public function insertEvidence(array $data):int{return $this->insert('commercial_payment_evidence',$data,'Payment evidence persistence failed');}
 
-    public function factForEvidence(int $evidenceId):?object{return $this->one("SELECT * FROM {$this->p}commercial_payment_facts WHERE evidence_id=%d",$evidenceId);}
+    public function factForEvidence(int $evidenceId,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}commercial_payment_facts WHERE evidence_id=%d".($lock?' FOR UPDATE':''),$evidenceId);}
     public function factsForPurchase(int $purchaseId):array{
         global $wpdb;
         return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}commercial_payment_facts WHERE purchase_id=%d ORDER BY id",$purchaseId))?:array();
