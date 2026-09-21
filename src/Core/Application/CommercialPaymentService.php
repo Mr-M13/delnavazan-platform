@@ -63,25 +63,10 @@ final class CommercialPaymentService {
         ));
         $existing=$this->payments->evidenceByProviderReference($providerKey,$providerDigest);
         if($existing){
-            if(!hash_equals((string)$existing->evidence_fact_digest,$factDigest)){
-                $conflicting=!CommercialValidator::evidenceAttributionMatches($existing,$offer,$obligation);
-                $this->exceptions->recordAfterFailure(array(
-                    'reason_code'=>$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence',
-                    'severity'=>'error',
-                    'summary'=>'A different provider-evidence fact arrived for an existing provider reference',
-                    'student_id'=>$offer!==null?(int)$offer->beneficiary_student_id:null,
-                    'teacher_id'=>$offer!==null?(int)$offer->teacher_id:null,
-                    'offer_id'=>$offer!==null?(int)$offer->id:null,
-                    'obligation_id'=>$obligation!==null?(int)$obligation->id:null,
-                    'evidence_id'=>(int)$existing->id,
-                    'fingerprint_value'=>$providerKey.':'.$providerDigest,
-                ));
-                $outcome=$this->evidenceOutcome($existing);
-                $outcome['conflicting']=true;
-                $outcome['conflict_reason']=$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence';
-                return $outcome;
-            }
-            return $this->evidenceOutcome($existing);
+            // Every duplicate-evidence path compares the recorded immutable fact identity through
+            // the one canonical recovery boundary: identical facts converge, a material difference
+            // is preserved and routed.
+            return $this->convergeExistingEvidence($existing,$factDigest,$offer,$obligation,$providerKey,$providerDigest,false);
         }
         if($obligation===null||$offer===null){
             // Unattributable evidence is never guessed: it is preserved and routed for reconciliation.
@@ -101,8 +86,11 @@ final class CommercialPaymentService {
             $offer=$this->repository->offer((int)$offer->id,true);
             $obligation=$this->repository->obligation((int)$obligation->id,true);
             if(!$offer||!$obligation)throw new \InvalidArgumentException('commercial_obligation_required');
-            $obligations=$this->repository->obligationsForOffer((int)$offer->id,true);
-            if(!CommercialValidator::offerValid($offer,$obligations,$this->repository->offerAdjustments((int)$offer->id)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+            // The owning mutation boundary proves the authoritative cross-authority aggregate — and
+            // that each immutable pricing snapshot still exactly corresponds to its locked source —
+            // before any redemption, adjustment consumption, evidence acceptance, settlement,
+            // purchase, entitlement or funding truth is created.
+            CommercialLineageValidator::assertForOffer($offer,true,$this->repository);
             if($kind!=='success')return $this->recordNonSettlement($offer,$obligation,$kind,$providerKey,$providerDigest,$factDigest,$amount,$currency,$occurredAt,$accountDigest,$evidence,$digest,$payload,$actor,$now);
 
             // Exact, provider-neutral acceptance checks. Nothing here can be influenced by a client.
@@ -187,27 +175,44 @@ final class CommercialPaymentService {
             // identical facts are idempotent, a material difference is preserved and routed.
             if(in_array($constraint,array('provider_reference','evidence_id'),true)){
                 $recorded=$this->payments->evidenceByProviderReference($providerKey,$providerDigest);
-                if($recorded)return $this->convergeConcurrentDuplicate($recorded,$factDigest,$offer,$obligation,$providerKey,$providerDigest);
+                if($recorded)return $this->convergeExistingEvidence($recorded,$factDigest,$offer,$obligation,$providerKey,$providerDigest,false);
             }
             throw $e;
         }
     }
 
-    /** Reconcile a duplicate that lost the insert race, using only the recorded immutable facts. */
-    private function convergeConcurrentDuplicate(object $recorded,string $factDigest,?object $offer,?object $obligation,string $providerKey,string $providerDigest):array{
+    /**
+     * The one canonical duplicate-provider-evidence recovery boundary.
+     *
+     * The winner is reloaded from the authoritative evidence store and revalidated; the incoming
+     * immutable facts are canonicalised with the SAME digest algorithm the stored row carries, so
+     * only an exact match converges idempotently. A materially different fact set never overwrites,
+     * mutates or duplicates the winner: it is preserved and durably routed as a controlled conflict,
+     * and no settlement truth is manufactured from it.
+     *
+     * @param bool $withinTransaction true when the caller owns the transaction (sequential pre-check
+     *                               inside a commitment path); false after a rolled-back uniqueness
+     *                               race, where the durable conflict needs its own transaction.
+     */
+    private function convergeExistingEvidence(object $recorded,string $factDigest,?object $offer,?object $obligation,string $providerKey,string $providerDigest,bool $withinTransaction):array{
+        if(!CommercialValidator::evidenceValid($recorded))throw new \InvalidArgumentException('commercial_evidence_required');
         if(hash_equals((string)$recorded->evidence_fact_digest,$factDigest))return $this->evidenceOutcome($recorded);
         $conflicting=!CommercialValidator::evidenceAttributionMatches($recorded,$offer,$obligation);
-        $this->exceptions->recordAfterFailure(array(
-            'reason_code'=>$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence',
-            'severity'=>'error',
-            'summary'=>'A concurrently ingested provider-evidence fact differs from the recorded fact',
-            'offer_id'=>$recorded->offer_id===null?null:(int)$recorded->offer_id,
-            'obligation_id'=>$recorded->obligation_id===null?null:(int)$recorded->obligation_id,
+        $reason=$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence';
+        $payload=array(
+            'reason_code'=>$reason,'severity'=>'error',
+            'summary'=>'A provider-evidence fact that differs from the recorded fact arrived for the same provider reference',
+            'student_id'=>$offer!==null?(int)$offer->beneficiary_student_id:null,
+            'teacher_id'=>$offer!==null?(int)$offer->teacher_id:null,
+            'offer_id'=>$recorded->offer_id===null?($offer!==null?(int)$offer->id:null):(int)$recorded->offer_id,
+            'obligation_id'=>$recorded->obligation_id===null?($obligation!==null?(int)$obligation->id:null):(int)$recorded->obligation_id,
             'evidence_id'=>(int)$recorded->id,'fingerprint_value'=>$providerKey.':'.$providerDigest,
-        ));
+        );
+        if($withinTransaction)$this->exceptions->recordWithinTransaction($payload);
+        else $this->exceptions->recordAfterFailure($payload);
         $outcome=$this->evidenceOutcome($recorded);
         $outcome['conflicting']=true;
-        $outcome['conflict_reason']=$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence';
+        $outcome['conflict_reason']=$reason;
         return $outcome;
     }
 
@@ -231,20 +236,9 @@ final class CommercialPaymentService {
         try{
             $existing=$this->payments->evidenceByProviderReference($providerKey,$providerDigest,true);
             if($existing){
-                if(!hash_equals((string)$existing->evidence_fact_digest,$factDigest)){
-                    $this->exceptions->recordWithinTransaction(array(
-                        'reason_code'=>'conflicting_payment_evidence','severity'=>'error',
-                        'summary'=>'A different unattributed provider-evidence fact arrived for an existing provider reference',
-                        'evidence_id'=>(int)$existing->id,'fingerprint_value'=>$providerKey.':'.$providerDigest,
-                    ));
-                    $this->payments->commit();
-                    $outcome=$this->evidenceOutcome($existing);
-                    $outcome['conflicting']=true;
-                    $outcome['conflict_reason']='conflicting_payment_evidence';
-                    return $outcome;
-                }
+                $outcome=$this->convergeExistingEvidence($existing,$factDigest,null,null,$providerKey,$providerDigest,true);
                 $this->payments->commit();
-                return $this->evidenceOutcome($existing);
+                return $outcome;
             }
             $evidenceId=$this->payments->insertEvidence(array(
                 'uid'=>Identifier::uid(),'reference_code'=>null,'provider_key'=>$providerKey,'provider_account_digest'=>$accountDigest,
@@ -254,6 +248,7 @@ final class CommercialPaymentService {
                 'reason_code'=>$requiresAttribution?'unmatched_payment_evidence':null,
                 'offer_id'=>null,'purchase_id'=>null,'obligation_id'=>null,'created_at'=>$now,'created_by'=>$actor,
             ));
+            do_action('dzn_phase_2a2r1_after_unattributed_evidence_insert',$evidenceId);
             if($requiresAttribution){
                 $this->exceptions->recordWithinTransaction(array(
                     'reason_code'=>'unmatched_payment_evidence','severity'=>'warning',
@@ -266,8 +261,12 @@ final class CommercialPaymentService {
             return $this->evidenceOutcome($row);
         }catch(\Throwable$e){
             $this->payments->rollback();
+            // A concurrent initially-unattributed fact may have won the unique provider-reference race.
+            // The winner is reloaded and compared by immutable fact identity: identical facts converge
+            // idempotently, a materially different fact set is preserved and durably routed as a
+            // conflict, and conflicting evidence never silently converges onto the first row.
             $existing=$this->payments->evidenceByProviderReference($providerKey,$providerDigest);
-            if($existing)return $this->evidenceOutcome($existing);
+            if($existing)return $this->convergeExistingEvidence($existing,$factDigest,null,null,$providerKey,$providerDigest,false);
             throw $e;
         }
     }
@@ -382,6 +381,10 @@ final class CommercialPaymentService {
             }
         }
         if($offer->account_adjustment_id!==null){
+            // The locked source already proved exact correspondence to the immutable
+            // commercial_offer_adjustments snapshot (identity, economics, pipeline order, recomputed
+            // value against the post-promotion running amount and the re-derived snapshot digest)
+            // through the canonical lineage validator; only the state transition remains here.
             $adjustment=$this->repository->adjustment((int)$offer->account_adjustment_id,true);
             if(!$adjustment)throw new \InvalidArgumentException('commercial_adjustment_integrity_conflict');
             if((int)$adjustment->beneficiary_student_id!==$studentId)throw new \InvalidArgumentException('commercial_adjustment_beneficiary_mismatch');

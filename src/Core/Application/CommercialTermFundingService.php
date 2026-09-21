@@ -144,6 +144,13 @@ final class CommercialTermFundingService {
             $claim=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CommercialCapacityRepository())->claimForEntitlement($entitlementId,true);
             if(!$claim)throw new \InvalidArgumentException('commercial_capacity_handoff_required');
             if((string)$claim->state!=='active')throw new \InvalidArgumentException('commercial_capacity_claim_not_active');
+            // The Term authority's own boundary proves the stored commercial aggregate again before
+            // Phase L creates anything: reaching Term binding with corrupted ownership/course lineage
+            // fails here, so a Term can never be created from a corrupt aggregate even though an
+            // earlier authority may have committed before the corruption appeared.
+            $offer=$this->repository->offer((int)$purchase->offer_id,true);
+            if(!$offer)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+            CommercialLineageValidator::assertForOffer($offer,true,$this->repository);
             // Course identity continuity across the accepted offer, its claim and the Term's Enrolment.
             if(!CommercialValidator::courseConsistent(array((int)$offer->course_id,(int)$claim->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $enrolmentHint=$this->repository->canonicalEnrolmentFor($studentId,$courseId,false);

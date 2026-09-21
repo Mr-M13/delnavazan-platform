@@ -5,6 +5,45 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — candidate, unmerged — 2026-09-20
 
+### Correction round 2 (independent re-review of `186fc5012fe294ea3d91b85aeefdd738448471a0` failed)
+
+The independent re-review passed the exact protected-interval → Phase-N identity, the historical
+commercial-capacity lifecycle and the Teacher-root serialisation for `releaseClaim()`, and failed four
+remaining integrity areas plus behavioural coverage and one documentation item. Additive descendants of
+`186fc5012fe294ea3d91b85aeefdd738448471a0` (tree `40fc2643eacc6811882b552785f55e7db5c04e30`) correct
+them; no reviewed commit was amended, rebased, squashed or force-pushed.
+
+- **R1-BLOCK-001** — purchase acceptance now proves the locked authoritative account-adjustment source
+  still corresponds exactly to the immutable `commercial_offer_adjustments` snapshot: source id/type,
+  kind, percentage basis points or fixed minor units, currency, application order, the discount
+  recomputed against the **post-promotion running amount**, the offer's recorded contribution and the
+  re-derived canonical snapshot digest (one implementation, shared with issuance). A mutated source or a
+  rewritten snapshot fails closed before redemption, adjustment consumption, evidence acceptance,
+  settlement, purchase, entitlement, funding, capacity or Term truth, and no historical snapshot is ever
+  repaired or overwritten.
+- **R1-BLOCK-004 / R1-MAJOR-007** — one canonical, transaction-aware `CommercialLineageValidator` proves
+  the stored chain `continuation case → authorised first regular slot → pre-payment hold → product →
+  price → offer → Student → Teacher → Course (canonical Enrolment)` and is invoked by the offer read
+  seam, payment acceptance, capacity handoff and Term binding immediately before each mutation. Capacity
+  handoff now proves the aggregate row set *before* the Teacher scheduling root, keeping the repository
+  lock order (`case → reservation → Teacher root`) instead of inverting it. No foreign key or CHECK
+  constraint was added; the established application/verifier integrity architecture is preserved.
+- **R1-MAJOR-005 / R1-C1-NEW-001** — `recordUnattributed()` recovers concurrently through the single
+  canonical duplicate-evidence boundary: the winner is reloaded and revalidated, the incoming immutable
+  facts are canonicalised with the same `evidence_fact_digest` algorithm, identical facts converge
+  idempotently, and materially different facts preserve the winner unchanged and durably route
+  `conflicting_payment_evidence` instead of silently converging onto the first row.
+- **R1-MAJOR-008 / R1-C1-NEW-002** — behavioural and concurrency evidence added: an at-rest
+  account-adjustment mutation and a rewritten snapshot; one stored Course/ownership corruption rejected
+  independently by payment acceptance, capacity handoff and Term binding (each exercised directly with
+  zero downstream mutation asserted); a deterministic initially-unattributed conflicting-facts race plus
+  its identical-facts convergence counterpart; and a failure-injection boundary at the unattributed
+  evidence write. The Phase R1 testing matrix, continuity record and this changelog now list the modes
+  actually executed.
+- Validation (owner-executed, disposable WordPress 6.8.3 + MariaDB 11.4.13, fresh database per suite)
+  is recorded in `docs/PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md` §5. State:
+  `CORRECTION ROUND 2 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`; not passed, not merged, not deployed.
+
 ### Correction round 1 (independent review of `10fe40618af3de76f2af37a093e611af10cc6ccc` failed)
 
 - All eight review findings corrected on descendants of the reviewed commit (never amended, rebased, squashed or force-pushed): accepted-purchase benefit consumption (promotion redemption + account adjustment, both limits enforced under the locked promotion row); exact protected-interval ↔ Phase-N occupancy identity (Teacher, Term, canonical session, exact UTC bounds, buffered occupied end, timezone and wall clock, with only the exact interval excluded); historical `satisfied`/`released` capacity becoming non-blocking while genuinely impossible aggregates still fail closed; Course identity continuity across case, slot, hold, product, offer, pattern, claim and Term Enrolment; a canonical immutable provider-evidence fact digest with exact convergence and durable routing of material differences (sequential and concurrent); Teacher-root serialisation for `releaseClaim()`; durable structural-integrity enforcement (class-B policy allowlisting with fail-closed reads, funding/offer ownership-chain validation) in place of foreign keys, which this repository's migration policy deliberately avoids; and behavioural proof for every corrected invariant.

@@ -6,6 +6,7 @@ $migration=file_get_contents($root.'/src/Core/Infrastructure/Migration/Migrator.
 $rule=file_get_contents($root.'/src/Core/Application/CommercialRule.php');
 $money=file_get_contents($root.'/src/Core/Application/CommercialMoney.php');
 $validator=file_get_contents($root.'/src/Core/Application/CommercialValidator.php');
+$lineage=file_get_contents($root.'/src/Core/Application/CommercialLineageValidator.php');
 $offer=file_get_contents($root.'/src/Core/Application/CommercialOfferService.php');
 $payment=file_get_contents($root.'/src/Core/Application/CommercialPaymentService.php');
 $funding=file_get_contents($root.'/src/Core/Application/CommercialTermFundingService.php');
@@ -28,8 +29,8 @@ $continuationRule=file_get_contents($root.'/src/Core/Application/CanonicalContin
 $authorityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialAuthorityRepository.php');
 $paymentRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialPaymentRepository.php');
 $capacityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialCapacityRepository.php');
-$phaseR1=$rule.$money.$validator.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
-$phaseR1Application=$rule.$money.$validator.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
+$phaseR1=$rule.$money.$validator.$lineage.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
+$phaseR1Application=$rule.$money.$validator.$lineage.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<25)throw new RuntimeException('Missing Phase R1 schema identity');
 if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r1-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
@@ -100,7 +101,7 @@ foreach(array('cron','wp_schedule_event','wp_schedule_single_event') as $forbidd
 // The success invariant chain: offer → evidence → settlement → effectiveness → binding → guard.
 if(!str_contains($payment,"array('issued','accepted')")||!str_contains($payment,'late_payment_after_offer_window'))throw new RuntimeException('Payment acceptance must honour the offer window and its explicit late-payment reason');
 if(!str_contains($payment,'conflicting_payment_evidence'))throw new RuntimeException('A second settlement attempt must fail closed');
-if(!str_contains($payment,'CommercialValidator::offerValid'))throw new RuntimeException('Payment acceptance must validate the offer aggregate');
+if(!str_contains($payment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Payment acceptance must prove the authoritative commercial aggregate');
 if(!str_contains($payment,'purchaseByOffer'))throw new RuntimeException('One purchase per offer must be enforced through the canonical lookup');
 if(!str_contains($funding,'$isEffective=$settled&&!$blocked;'))throw new RuntimeException('Academic effectiveness must require every lower-sequence obligation to be settled');
 if(!str_contains($funding,"min((int)\$plan['committed_sessions'],\$this->effectiveSessions((int)\$plan['offer_id']))"))throw new RuntimeException('The Term allowance must be derived and bounded by the commitment');
@@ -144,7 +145,7 @@ if(substr_count($payment,'evidence_fact_digest')<3)throw new RuntimeException('E
 if(!str_contains($validator,'public static function policyValid'))throw new RuntimeException('Runtime policy validation is missing');
 if(!str_contains($policy,"if(!CommercialValidator::policyValid(\$row))throw new \InvalidArgumentException('commercial_policy_integrity_conflict');"))throw new RuntimeException('A stored non-class-B policy must fail the read closed');
 if(!str_contains($funding,'commercial_funding_integrity_conflict'))throw new RuntimeException('The funding ownership chain must fail closed');
-if(!str_contains($offer,"if((int)\$case->student_id!==(int)\$offer->beneficiary_student_id"))throw new RuntimeException('Offer ownership must be validated against its continuation case');
+if(!str_contains($lineage,"if((int)\$case->student_id!==\$studentId||(int)\$case->teacher_id!==\$teacherId)"))throw new RuntimeException('Offer ownership must be validated against its continuation case');
 if(!str_contains($funding,'CommercialValidator::entitlementValid'))throw new RuntimeException('Term binding must validate the entitlement aggregate');
 if(!str_contains($funding,'commercial_capacity_handoff_required'))throw new RuntimeException('A Term must not be bound before its successor capacity is durable');
 if(!str_contains($funding,'create(')||!str_contains($funding,'self::CAPABILITY'))throw new RuntimeException('Term binding must use the existing canonical Term authority');
@@ -175,5 +176,65 @@ if(!str_contains($capacityRepo,'protected')||!str_contains($capacityRepo,"state=
 // Commercial failures never silently drop verified financial evidence.
 if(!str_contains($exceptions,'recordAfterFailure')||!str_contains($exceptions,'openException')||!str_contains($migration,'fingerprint_state'))throw new RuntimeException('Commercial exceptions must be durable and deduplicated');
 if(!str_contains($capacity,'recordHandoffFailure'))throw new RuntimeException('A paid commitment whose capacity cannot converge must be preserved and routed');
+
+// Correction Round 2 — one canonical, transaction-aware offer-lineage validator at every owning boundary.
+if(!str_contains($lineage,'final class CommercialLineageValidator'))throw new RuntimeException('The canonical commercial lineage validator is missing');
+if(!str_contains($lineage,'public static function assertOfferAggregate')||!str_contains($lineage,'public static function assertForOffer'))throw new RuntimeException('The canonical lineage validator must expose both the id and hydrated-row entry points');
+foreach(array('caseById','slotAuthorityForIntro','slotAuthorityById','reservationForCase','product(','price(','canonicalEnrolmentFor','StudentRepository','TeacherRepository') as $proved) if(!str_contains($lineage,$proved))throw new RuntimeException('The canonical lineage chain must prove: '.$proved);
+if(substr_count($lineage,'commercial_course_continuity_conflict')<1||substr_count($lineage,'$courseConflict')<5)throw new RuntimeException('Course continuity must be proved at every aggregate layer');
+if(str_contains($lineage,'CommercialValidator::courseConsistent'))throw new RuntimeException('The lineage validator must not fall back to the previous partial Course check');
+if(str_contains($lineage,'INSERT INTO')||str_contains($lineage,'UPDATE ')||str_contains($lineage,'DELETE FROM'))throw new RuntimeException('The lineage validator must never mutate storage');
+// Every owning mutation authority invokes the one validator, and the read seam reuses it.
+if(!str_contains($payment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Payment acceptance must prove the aggregate at its owning boundary');
+if(!str_contains($capacity,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Capacity handoff must prove the aggregate before any capacity mutation');
+if(!str_contains($funding,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Term binding must prove the aggregate before Term creation');
+if(!str_contains($offer,'CommercialLineageValidator::assertOfferAggregate'))throw new RuntimeException('The authoritative offer read must reuse the one canonical validator');
+if(str_contains($capacityAuthority,'CommercialLineageValidator'))throw new RuntimeException('Protected-interval arbitration must not acquire a second lineage variant');
+// The aggregate proof must run before the capacity mutation and keep the repository lock order.
+$handoff=substr($capacity,strpos($capacity,'public function handoffFromEntitlement'));
+$handoff=substr($handoff,0,strpos($handoff,'public function releaseClaim'));
+if(strpos($handoff,'CommercialLineageValidator::assertForOffer')>strpos($handoff,'ensureAndLockTeacherRoot'))throw new RuntimeException('The aggregate proof must precede the Teacher scheduling root');
+if(strpos($handoff,'CommercialLineageValidator::assertForOffer')>strpos($handoff,'insertClaim'))throw new RuntimeException('The aggregate proof must precede the successor claim');
+if(strpos($handoff,'insertClaim')>strpos($handoff,'setReservationState'))throw new RuntimeException('The predecessor hold must still be released only after the successor claim is durable');
+if(!str_contains($authorityRepo,'no code path may acquire it after an Enrolment-chain or Teacher-root lock'))throw new RuntimeException('The commercial account-root lock contract must stay documented');
+
+// Correction Round 2 — account-adjustment source ↔ immutable snapshot correspondence.
+if(!str_contains($validator,'public static function adjustmentSnapshotDigest'))throw new RuntimeException('The immutable snapshot digest must be single-sourced');
+if(!str_contains($offer,'CommercialValidator::adjustmentSnapshotDigest')||str_contains($offer,'CommercialIdempotency::payload(array(\'source_type\''))throw new RuntimeException('Offer issuance must derive its snapshot digest through the canonical validator');
+if(!str_contains($validator,'public static function adjustmentSnapshotFor')||!str_contains($validator,'public static function accountAdjustmentSnapshotMatches')||!str_contains($validator,'public static function promotionSnapshotMatches'))throw new RuntimeException('The pricing-snapshot correspondence checks are missing');
+if(!str_contains($validator,'public static function recomputedAdjustmentAmount'))throw new RuntimeException('The adjustment must be recomputed against the running amount');
+foreach(array('source_id','percentage_bp','amount_minor','applied_amount_minor','application_order','currency','snapshot_digest') as $field) if(!str_contains($validator,$field))throw new RuntimeException('The snapshot correspondence must compare '.$field);
+if(!str_contains($lineage,'$running=(int)$offer->base_amount_minor-(int)($offer->promotion_amount_minor??0)'))throw new RuntimeException('The adjustment must be recomputed against the POST-promotion running amount');
+if(!str_contains($lineage,'commercial_adjustment_snapshot_conflict'))throw new RuntimeException('A source/snapshot mismatch must fail closed with its own controlled reason');
+if(!str_contains($lineage,'assertAdjustmentSources($offer,$lock,$authority)'))throw new RuntimeException('The aggregate validator must prove the immutable pricing pipeline');
+if(!str_contains($payment,'commercial_offer_adjustments snapshot'))throw new RuntimeException('Payment acceptance must document the proven snapshot correspondence');
+
+// Correction Round 2 — one canonical duplicate-evidence recovery boundary.
+if(!str_contains($payment,'private function convergeExistingEvidence'))throw new RuntimeException('The canonical duplicate-evidence recovery boundary is missing');
+if(substr_count($payment,'convergeExistingEvidence(')<4)throw new RuntimeException('Every duplicate-evidence path must reuse the canonical recovery boundary');
+if(!str_contains($payment,'hash_equals((string)$recorded->evidence_fact_digest,$factDigest)'))throw new RuntimeException('The recovery boundary must compare the recorded immutable fact digest');
+if(!str_contains($payment,'CommercialValidator::evidenceAttributionMatches'))throw new RuntimeException('The recovery boundary must preserve attribution conflict detection');
+if(!str_contains($payment,'commercial_evidence_required'))throw new RuntimeException('A corrupted recorded evidence row must fail the recovery closed');
+if(!str_contains($payment,'dzn_phase_2a2r1_after_unattributed_evidence_insert'))throw new RuntimeException('The initially-unattributed intake must expose its durable write boundary');
+if(!str_contains($payment,"'conflicting_payment_evidence'"))throw new RuntimeException('A conflicting unattributed fact must be routed durably');
+
+// Correction Round 2 — behavioural and concurrency evidence for the corrected invariants.
+$corruptionRuntime=@file_get_contents($root.'/tests/phase-2a2r1-corruption-runtime.php');
+foreach(array('commercial_adjustment_snapshot_conflict','acceptance against an adjustment source mutated after its snapshot','acceptance against a rewritten immutable adjustment snapshot','payment acceptance over a stored product/Course mismatch','capacity handoff over a stored product/Course mismatch','Term binding over a stored product/Course mismatch') as $proof) if(!is_string($corruptionRuntime)||!str_contains($corruptionRuntime,$proof))throw new RuntimeException('Correction Round 2 corruption proof missing: '.$proof);
+$setup=@file_get_contents($root.'/tests/phase-2a2r1-concurrency-setup.php');
+$worker=@file_get_contents($root.'/tests/phase-2a2r1-concurrency-worker.php');
+$verify=@file_get_contents($root.'/tests/phase-2a2r1-concurrency-verify.php');
+foreach(array($setup,$worker,$verify) as $source) if(!is_string($source)||!str_contains($source,'unattributed_conflict'))throw new RuntimeException('The initially-unattributed conflicting-facts concurrency mode is missing');
+if(!str_contains($worker,'dzn_phase_2a2r1_after_unattributed_evidence_insert'))throw new RuntimeException('The unattributed concurrency holder must be gated inside its own transaction');
+if(!str_contains($verify,'the winning evidence row must remain unchanged')||!str_contains($verify,'the conflict must be durably routed into controlled commercial review'))throw new RuntimeException('The unattributed concurrency verifier must assert the durable outcome');
+if(!is_string($setup)||!str_contains($setup,'unattributed_convergence'))throw new RuntimeException('The identical-facts idempotent convergence mode is missing');
+$failureRuntime=@file_get_contents($root.'/tests/phase-2a2r1-failure-runtime.php');
+if(!is_string($failureRuntime)||!str_contains($failureRuntime,'dzn_phase_2a2r1_after_unattributed_evidence_insert'))throw new RuntimeException('The unattributed intake rollback boundary is not proven');
+
+// Correction Round 2 — the documented testing/concurrency matrix must match what is executed.
+foreach(array('unattributed_conflict','duplicate_evidence','handoff_vs_schedule','settlement_vs_lesson_seven','unrelated_commitments','promotion_global_limit','conflicting_evidence_replay','release_vs_satisfaction') as $mode) if(!str_contains($phaseDoc,$mode))throw new RuntimeException('The Phase R1 document must record the executed concurrency mode: '.$mode);
+if(!str_contains($phaseDoc,'Correction round 2'))throw new RuntimeException('The Phase R1 document must record correction round 2');
+$continuity=@file_get_contents($root.'/docs/DELNAVAZAN-CORE-CONTINUITY.md');
+if(!is_string($continuity)||!str_contains($continuity,'Correction round 2'))throw new RuntimeException('The continuity record must record correction round 2');
 
 echo "Phase 2A.2-R1 contract passed\n";

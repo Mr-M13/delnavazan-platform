@@ -395,6 +395,24 @@ capacity rows non-blocking; Course identity continuity; canonical provider-evide
 Teacher-root serialisation for claim release; durable structural-integrity enforcement in place of
 foreign keys; behavioural proof for each). The reviewed commit was not rewritten and no force push was
 used.
+**Correction round 2 (current candidate):** the independent re-review of `186fc5012fe294ea3d91b85aeefdd738448471a0`
+(tree `40fc2643eacc6811882b552785f55e7db5c04e30`) passed the exact protected-interval identity, the
+historical commercial-capacity lifecycle and the Teacher-root claim-release serialisation, and failed
+four remaining integrity areas plus behavioural coverage and one documentation item. Additive
+descendants of that commit now (i) prove the locked account-adjustment source still corresponds
+exactly to its immutable `commercial_offer_adjustments` snapshot — identity, economics, application
+order, currency, the discount recomputed against the post-promotion running amount and the re-derived
+snapshot digest — before any benefit, settlement, purchase, entitlement or funding truth; (ii) provide
+one canonical transaction-aware offer-lineage validator for the stored chain case → authorised slot →
+pre-payment hold → product → price → offer → Student → Teacher → Course, invoked by the offer read
+seam, payment acceptance, capacity handoff and Term binding; (iii) make the initially-unattributed
+provider-evidence race recover through the one canonical duplicate-evidence boundary, so conflicting
+immutable facts are durably routed instead of silently converging onto the first row; (iv) exercise
+every owning mutation boundary directly in failure/corruption/concurrency evidence; and (v) synchronise
+this document, the Phase R1 testing matrix and the changelog with the modes actually executed. The
+reviewed commits remain immutable and no force push was used. State:
+`CORRECTION ROUND 2 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW` (not passed, not merged, not deployed).
+No database foreign key or CHECK constraint was added.
 Deferred to Phase R2: recurring enrolment, renewal cycles and next-Term boundary movement, automatic
 and manual collection modes, the four-week manual guarantee, recovery/lapse, refund review trajectory
 and the channel-neutral notification intents. Terms & Conditions alignment remains a separate

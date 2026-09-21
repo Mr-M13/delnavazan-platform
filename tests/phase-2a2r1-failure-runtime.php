@@ -88,4 +88,27 @@ $binding=dzn_r1_fix_bind($entitlementB,'failure-b-7');
 dzn_r1_fix_assert((int)$binding['term_id']>0&&$count('commercial_term_funding_plans')===1,'the retry must bind exactly one funding plan');
 dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$b['enrolment_id']))===1,'the retry must not create a duplicate Term');
 
+// 6. Initially-unattributed provider evidence: a failure after its evidence row must leave neither
+//    evidence nor a reconciliation signal behind, and the retry must converge exactly once.
+$evidenceBefore=$count('commercial_payment_evidence');
+$exceptionsBefore=$count('commercial_exceptions');
+$settlementsBefore=$count('commercial_obligation_settlements');
+$purchasesBefore=$count('commercial_purchases');
+$unattributedReference='prov-fail-unattributed';
+$ingestUnattributed=static function(string $reference):array{
+    return (new \Delnavazan\Platform\Core\Application\CommercialPaymentService())->ingest(array(
+        'provider_key'=>'synthetic_provider','provider_reference'=>$reference,'evidence_kind'=>'success',
+        'amount_minor'=>'100','currency'=>'AUD','obligation_reference'=>'unknown-offer-reference:1',
+        'provider_occurred_at'=>gmdate('Y-m-d H:i:s'),'evidence_channel'=>'provider_evidence',
+        'evidence_reference'=>'evidence-'.$reference,'evidence_at'=>gmdate('Y-m-d H:i:s'),
+    ),dzn_r1_fix_key('unattributed-'.$reference));
+};
+$expectInjected(fn()=>$ingestUnattributed($unattributedReference),'dzn_phase_2a2r1_after_unattributed_evidence_insert','unattributed evidence intake failed after its evidence row');
+dzn_r1_fix_assert($count('commercial_payment_evidence')===$evidenceBefore,'a failed unattributed intake left evidence behind');
+dzn_r1_fix_assert($count('commercial_exceptions')===$exceptionsBefore,'a failed unattributed intake left a reconciliation signal behind');
+$unattributed=$ingestUnattributed($unattributedReference);
+dzn_r1_fix_assert($unattributed['processing_state']==='unmatched'&&$unattributed['reason_code']==='unmatched_payment_evidence','the retry must preserve and route the unattributed evidence');
+dzn_r1_fix_assert($count('commercial_payment_evidence')===$evidenceBefore+1,'the retry must record exactly one evidence row');
+dzn_r1_fix_assert($count('commercial_obligation_settlements')===$settlementsBefore&&$count('commercial_purchases')===$purchasesBefore,'unattributed evidence must never settle or purchase');
+
 echo "Phase 2A.2-R1 failure runtime passed\n";

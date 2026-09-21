@@ -99,6 +99,19 @@ try{
         if($worker==='w1')$hold('dzn_phase_2a2r1_after_claim_insert');
         $result['outcome']=dzn_r1_fix_handoff($entitlement,'race-'.$worker);
         $result['ok']=true;
+    }elseif($mode==='unattributed_conflict'||$mode==='unattributed_convergence'){
+        $result['action']='ingest_unattributed_fact';
+        // The holder keeps its initially-unattributed evidence row uncommitted inside its own
+        // transaction while the contender submits its own facts for the same provider reference.
+        if($worker==='w1')$hold('dzn_phase_2a2r1_after_unattributed_evidence_insert');
+        $amount=$worker==='w1'?(int)$state['amount_a']:(int)$state['amount_b'];
+        $result['outcome']=(new \Delnavazan\Platform\Core\Application\CommercialPaymentService())->ingest(array(
+            'provider_key'=>'synthetic_provider','provider_reference'=>(string)$state['provider_reference'],'evidence_kind'=>'success',
+            'amount_minor'=>(string)$amount,'currency'=>'AUD','obligation_reference'=>(string)$state['obligation_reference'],
+            'provider_occurred_at'=>(string)$state['provider_occurred_at'],'evidence_channel'=>'provider_evidence',
+            'evidence_reference'=>'evidence-unattributed-'.$worker,'evidence_at'=>gmdate('Y-m-d H:i:s'),
+        ),dzn_r1_fix_key('unattributed-'.$worker));
+        $result['ok']=true;
     }else{
         throw new RuntimeException('Unknown Phase R1 concurrency mode');
     }

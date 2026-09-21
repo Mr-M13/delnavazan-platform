@@ -77,13 +77,21 @@ final class CommercialCapacityService {
                 $this->authority->commit();
                 return $result;
             }
-            $this->schedules->ensureAndLockTeacherRoot($teacherId,$now,$actor);
+            $offer=$this->authority->offer((int)$offerHint->id,true);
+            if(!$offer)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+            // The owning capacity authority proves the same authoritative commercial/ownership
+            // lineage the payment authority proved, before it releases the predecessor hold or claims
+            // successor capacity: a corrupt stored aggregate may not release any existing capacity,
+            // claim any successor capacity or create any Phase-N occupancy.
+            CommercialLineageValidator::assertForOffer($offer,true,$this->authority,$this->continuations);
+            // The Phase-Q pre-payment hold is locked BEFORE the Teacher scheduling root, exactly as
+            // Phase Q's own hold path does, so the repository lock order (hold → Teacher root) is
+            // preserved rather than inverted by this command.
             $reservation=$this->continuations->reservationForCase($caseId,true);
             if(!$reservation||(int)$reservation->id!==$reservationId)throw new \InvalidArgumentException('continuation_reservation_required');
             if((int)$reservation->teacher_id!==$teacherId||(int)$reservation->student_id!==$studentId)throw new \InvalidArgumentException('canonical_continuation_integrity_conflict');
             if(!CanonicalContinuationRule::capacityEffective((string)$reservation->state,(string)$reservation->expires_at,$now))throw new \InvalidArgumentException('continuation_reservation_expired');
-            $offer=$this->authority->offer((int)$offerHint->id,true);
-            if(!$offer||!CommercialValidator::offerValid($offer,$this->authority->obligationsForOffer((int)$offerHint->id,true),$this->authority->offerAdjustments((int)$offerHint->id)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+            $this->schedules->ensureAndLockTeacherRoot($teacherId,$now,$actor);
             $pattern=$this->capacity->activePatternFor($studentId,$courseId,true);
             if($pattern!==null&&(int)$pattern->course_id!==$courseId)throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             if($pattern){

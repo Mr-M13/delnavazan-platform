@@ -99,6 +99,15 @@ if($mode==='duplicate_evidence'){
     $state['entitlement_a']=dzn_r1_fix_entitlement((int)$offerA['offer_id']);
     $state['entitlement_b']=dzn_r1_fix_entitlement((int)$offerB['offer_id']);
     $state['scenario_a']=$a;$state['scenario_b']=$b;
+}elseif($mode==='unattributed_conflict'||$mode==='unattributed_convergence'){
+    // Initially-unattributed provider evidence: no obligation reference resolves, so both workers
+    // enter the unattributed intake path for the same provider reference. The conflict mode sends a
+    // materially different immutable fact set; the convergence mode sends an identical one.
+    dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_promotion_redemptions','commercial_promotions','commercial_prices','commercial_products','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
+    $state['obligation_reference']='unattributed-'.wp_generate_uuid4();
+    $state['provider_occurred_at']=gmdate('Y-m-d H:i:s');
+    $state['amount_a']=100;
+    $state['amount_b']=$mode==='unattributed_conflict'?1:100;
 }else{
     fwrite(STDERR,"Unknown Phase R1 concurrency mode: ".$mode."\n");exit(1);
 }

@@ -6,6 +6,12 @@ production cutover.** Schema 25 / migration `025_commercial_purchase_funding_aut
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
 tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
 
+Correction round 2 is the current candidate: additive descendants of the reviewed correction-round-1
+commit `186fc5012fe294ea3d91b85aeefdd738448471a0` that close the four remaining integrity findings
+plus behavioural coverage and one documentation item (§0b). Independent re-review of correction
+round 2 has **not** occurred, so this state is `CORRECTION ROUND 2 CANDIDATE — AWAITING INDEPENDENT
+RE-REVIEW`: not passed, not merged, not deployed.
+
 ## 0. Independent review correction round 1
 
 The first independent review of candidate `10fe40618af3de76f2af37a093e611af10cc6ccc` failed on eight
@@ -21,6 +27,26 @@ findings. All eight are corrected on descendants of that commit (never rewritten
 | R1-MAJOR-006 Teacher serialisation for claim release | `releaseClaim()` acquires the canonical per-Teacher scheduling root before reading or mutating the claim intervals, preserving the established global lock order and adding no inverse edge. |
 | R1-MAJOR-007 migration + structural integrity | The repository migration policy deliberately avoids foreign keys and CHECK constraints, so equivalent durable enforcement is implemented instead: class-B policy allowlisting with a fail-closed read for a malformed or structural stored key, funding-plan/entitlement/purchase/offer ownership validation, offer↔product↔case Course and Student ownership validation, claim/interval Teacher and aggregate validation, and a corruption suite that exercises every listed cross-authority reference. |
 | R1-MAJOR-008 critical test proof | Behavioural runtime, corruption and concurrency coverage asserts durable database state and authority ownership for every corrected invariant (see §5). |
+
+## 0b. Independent review correction round 2
+
+The independent re-review of correction round 1 candidate `186fc5012fe294ea3d91b85aeefdd738448471a0`
+(tree `40fc2643eacc6811882b552785f55e7db5c04e30`) failed on four substantive integrity areas plus
+behavioural coverage and one documentation item. All six are corrected on additive descendants of that
+commit (never rewritten, never rebased, never squashed):
+
+| Finding | Correction |
+| --- | --- |
+| R1-BLOCK-001 account-adjustment source ↔ immutable snapshot | `CommercialLineageValidator` now locks the authoritative adjustment source and proves it still corresponds exactly to the immutable `commercial_offer_adjustments` row captured at issuance: source id/type, kind, percentage basis points or fixed minor units, currency, application order, the recomputed discount against the **post-promotion running amount**, the offer's recorded contribution and the re-derived canonical snapshot digest (single-sourced with the issuance write). Any mismatch fails closed before redemption, adjustment consumption, evidence acceptance, settlement, purchase, entitlement, funding, capacity or Term truth, and the historical snapshot is never repaired or rewritten. |
+| R1-BLOCK-004 authoritative offer lineage | One canonical, transaction-aware `CommercialLineageValidator` proves the stored chain `continuation case → authorised first regular slot → pre-payment hold → product → price → offer → Student → Teacher → Course (canonical Enrolment)`. It is reusable from a caller's transaction, operates on authoritative stored rows, fails closed on missing/mismatched/replaced relationships, locks the aggregate rows where the caller's serialization requires it, and is invoked by the offer read seam, payment acceptance, capacity handoff and Term binding. |
+| R1-MAJOR-005 / R1-C1-NEW-001 concurrent initially-unattributed evidence | `recordUnattributed()` now recovers through the one canonical duplicate-evidence boundary: the winner is reloaded and revalidated, the incoming immutable facts are canonicalised with the same `evidence_fact_digest` algorithm, identical facts converge idempotently, and a materially different fact set preserves the winner unchanged and durably routes `conflicting_payment_evidence`. The conflicting fact set is never stored, never attributed as equivalent, and never manufactures settlement truth. |
+| R1-MAJOR-007 integrity at owning mutation boundaries | Every owning mutation authority invokes the one canonical aggregate validator immediately before its mutation — payment acceptance, promotion/redemption consumption, account-adjustment consumption, capacity handoff, Term binding and evidence duplicate recovery — instead of relying on request validation, a read endpoint, a later verifier or post-purchase Term creation. No database foreign key or CHECK constraint is added; the established application/verifier integrity architecture is preserved. |
+| R1-MAJOR-008 behavioural coverage | The corruption runtime now proves the at-rest account-adjustment mutation and rewritten snapshot, and proves that the same stored Course/ownership corruption is independently rejected by payment acceptance, capacity handoff and Term binding (each exercised directly, each asserting zero downstream mutation and authoritative predecessor state). A new deterministic concurrency mode covers initially-unattributed evidence with conflicting immutable facts, plus its identical-facts convergence counterpart, and the failure runtime injects a failure at the unattributed evidence write boundary. |
+| R1-C1-NEW-002 documentation synchronisation | This document's testing matrix now lists the concurrency modes that are actually executed, the continuity record and changelog record correction round 2, and the new initially-unattributed conflicting-facts mode is listed here rather than claimed without execution evidence. |
+
+R1-BLOCK-002 (exact protected interval → Phase-N occupancy), R1-BLOCK-003 (historical commercial
+capacity lifecycle) and R1-MAJOR-006 (Teacher-root serialization for claim release) passed the
+independent re-review and are deliberately unchanged.
 
 ## 1. What this phase owns
 
@@ -86,9 +112,9 @@ provider ever becoming business authority:
 | `tests/phase-2a2r1-contract.php` and the full `tests/*contract*.php` set (32 files) | pass |
 | `tests/phase-2a2r1-migration-runtime.php` | pass (Schema 25 identity, repeat safety, verifier refuses provider columns and mutable append-only columns) |
 | `tests/phase-2a2r1-runtime.php` | pass (full-payment, two-instalment, early tranche 2, duplicate/mismatched/unattributed/refund evidence, succession, flexible, policy registry, exceptions, deferment allowance, Term-close guard) |
-| `tests/phase-2a2r1-failure-runtime.php` | pass (9 injected write boundaries, each fully rolled back, each retry converging) |
-| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed) |
-| `tests/phase-2a2r1-concurrency-runner.sh` (`duplicate_evidence`, `handoff_vs_schedule`, `settlement_vs_lesson_seven`, `unrelated_commitments`) | pass |
+| `tests/phase-2a2r1-failure-runtime.php` | pass (10 injected write boundaries — including the initially-unattributed evidence boundary — each fully rolled back, each retry converging) |
+| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed, plus the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding) |
+| `tests/phase-2a2r1-concurrency-runner.sh` (`duplicate_evidence`, `handoff_vs_schedule`, `settlement_vs_lesson_seven`, `unrelated_commitments`, `promotion_global_limit`, `conflicting_evidence_replay`, `release_vs_satisfaction`, `unattributed_conflict`, `unattributed_convergence`) | pass (nine executed modes; the last two are the correction-round-2 initially-unattributed evidence races with conflicting and with identical immutable facts) |
 | `tests/phase-2a2m-runtime.php` (regression) | pass |
 | `tests/phase-2a2q-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`assignment_changed` in its own assignment-replacement scenario). Pre-existing environment/fixture-order dependency, not an R1 regression |
 

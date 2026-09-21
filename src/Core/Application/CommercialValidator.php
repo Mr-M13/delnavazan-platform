@@ -125,6 +125,142 @@ final class CommercialValidator {
         return $recordedOffer===$incomingOffer&&$recordedObligation===$incomingObligation;
     }
 
+    /**
+     * Canonical identity of one immutable offer-adjustment snapshot row.
+     *
+     * The write boundary (offer issuance) and every later verification boundary must derive the
+     * digest through this single implementation: the snapshot digest proves the snapshot itself, and
+     * re-deriving it is what detects a rewritten or fabricated pricing snapshot.
+     */
+    public static function adjustmentSnapshotDigest(string $sourceType,int $sourceId,string $kind,?int $percentageBp,?int $fixedAmountMinor,int $appliedAmountMinor,string $currency):string{
+        return CommercialIdempotency::payload(array(
+            'source_type'=>$sourceType,'source_id'=>$sourceId,'kind'=>$kind,
+            'percentage_bp'=>$percentageBp,'amount_minor'=>$fixedAmountMinor,
+            'applied_amount_minor'=>$appliedAmountMinor,'currency'=>$currency,
+        ));
+    }
+
+    /**
+     * The immutable pricing pipeline order: promotion first, then the account adjustment.
+     *
+     * Returns the snapshot row for one source type only when the stored snapshot set is itself
+     * coherent — contiguous orders starting at one, no duplicate order, and the requested source in
+     * its canonical position. A null result is corruption, never "no snapshot".
+     */
+    public static function adjustmentSnapshotFor(object $offer,array $snapshots,string $sourceType):?object{
+        $expectedOrder=match($sourceType){
+            'promotion'=>1,
+            'account_adjustment'=>$offer->promotion_id!==null?2:1,
+            default=>null,
+        };
+        if($expectedOrder===null)return null;
+        $orders=array();$found=null;
+        foreach($snapshots as $snapshot){
+            $order=(int)$snapshot->application_order;
+            if($order<1||isset($orders[$order]))return null;
+            $orders[$order]=true;
+            if((string)$snapshot->source_type!==$sourceType)continue;
+            if($found!==null)return null;
+            $found=$snapshot;
+        }
+        ksort($orders);
+        if(array_keys($orders)!==range(1,count($orders)))return null;
+        if($found===null||(int)$found->application_order!==$expectedOrder)return null;
+        if($expectedOrder>1&&!isset($orders[$expectedOrder-1]))return null;
+        return $found;
+    }
+
+    /**
+     * Exact correspondence between a locked promotional source and its immutable snapshot.
+     *
+     * The discount arithmetic of a promotion is owned by the promotion authority (eligibility,
+     * Term scope and product scope all participate), so this proves the identity, economics, order,
+     * currency and snapshot digest, and the applied amount is revalidated by that authority.
+     */
+    public static function promotionSnapshotMatches(object $source,object $snapshot,string $offerCurrency,int $offerPromotionAmountMinor):bool{
+        if((string)$snapshot->source_type!=='promotion')return false;
+        return self::adjustmentSourceIdentityMatches(
+            (int)$source->id,(string)$source->kind,
+            $source->percentage_bp===null?null:(int)$source->percentage_bp,
+            $source->fixed_amount_minor===null?null:(int)$source->fixed_amount_minor,
+            $source->currency===null?null:(string)$source->currency,
+            $snapshot,'promotion',$offerCurrency,$offerPromotionAmountMinor
+        );
+    }
+
+    /**
+     * Exact correspondence between a locked account-adjustment source and its immutable snapshot.
+     *
+     * The adjustment is recomputed against the correct running purchase amount — the amount AFTER
+     * any earlier immutable pipeline stage, so a snapshot whose application order follows a promotion
+     * is recomputed against the post-promotion amount rather than the gross Term price — and the
+     * canonical snapshot digest is re-derived. Every monetary comparison is integer minor units.
+     */
+    public static function accountAdjustmentSnapshotMatches(object $source,object $snapshot,int $runningAmountMinor,int $expectedOrder,string $offerCurrency,int $offerAdjustmentAmountMinor):bool{
+        if((string)$snapshot->source_type!=='account_adjustment')return false;
+        if((int)$snapshot->application_order!==$expectedOrder)return false;
+        if(!self::adjustmentSourceIdentityMatches(
+            (int)$source->id,(string)$source->kind,
+            $source->percentage_bp===null?null:(int)$source->percentage_bp,
+            $source->amount_minor===null?null:(int)$source->amount_minor,
+            $source->currency===null?null:(string)$source->currency,
+            $snapshot,'account_adjustment',$offerCurrency,$offerAdjustmentAmountMinor
+        ))return false;
+        $applied=self::recomputedAdjustmentAmount($source,$runningAmountMinor);
+        if($applied===null)return false;
+        return $applied===(int)$snapshot->applied_amount_minor&&$applied===$offerAdjustmentAmountMinor;
+    }
+
+    /**
+     * The exact discount one account-adjustment source produces against one running amount.
+     *
+     * A percentage adjustment is recomputed against the running amount it actually applied to and a
+     * fixed adjustment is bounded by that same amount, so a snapshot can never be justified by an
+     * arithmetic path the issuance boundary would not have produced.
+     */
+    public static function recomputedAdjustmentAmount(object $source,int $runningAmountMinor):?int{
+        $kind=(string)($source->kind??'');
+        $currency=$source->currency;
+        if(!in_array($kind,CommercialRule::ADJUSTMENT_KINDS,true))return null;
+        if($kind==='percentage'){
+            if($source->percentage_bp===null||$source->amount_minor!==null)return null;
+            $percentage=(int)$source->percentage_bp;
+            if($percentage<1||$percentage>CommercialMoney::MAX_BASIS_POINTS)return null;
+            return CommercialMoney::discount($runningAmountMinor,CommercialMoney::percentage($runningAmountMinor,$percentage));
+        }
+        if($source->amount_minor===null||$source->percentage_bp!==null)return null;
+        $fixed=(int)$source->amount_minor;
+        if($fixed<1)return null;
+        if($currency!==null&&CommercialRule::currency((string)$currency)!==(string)$currency)return null;
+        return CommercialMoney::discount($runningAmountMinor,$fixed);
+    }
+
+    /**
+     * Identity, economics, currency and snapshot-digest correspondence for one snapshotted source.
+     *
+     * The caller supplies the authoritative economics of the locked source, because the two source
+     * authorities store their fixed amount under their own column (`fixed_amount_minor` for a
+     * promotion, `amount_minor` for an account adjustment). Everything else is proved here.
+     */
+    private static function adjustmentSourceIdentityMatches(int $sourceId,string $sourceKind,?int $percentage,?int $fixed,?string $sourceCurrency,object $snapshot,string $sourceType,string $offerCurrency,int $offerAmountMinor):bool{
+        if((int)$snapshot->source_id!==$sourceId)return false;
+        if((string)$snapshot->kind!==$sourceKind)return false;
+        if(!in_array((string)$snapshot->kind,CommercialRule::ADJUSTMENT_KINDS,true))return false;
+        if($sourceKind==='percentage'){
+            if($percentage===null||$percentage<1||$percentage>CommercialMoney::MAX_BASIS_POINTS)return false;
+            if($fixed!==null)return false;
+        }else{
+            if($fixed===null||$fixed<1||$percentage!==null)return false;
+            if($sourceCurrency===null||CommercialRule::currency($sourceCurrency)!==$sourceCurrency)return false;
+        }
+        if($snapshot->percentage_bp===null?$percentage!==null:(int)$snapshot->percentage_bp!==$percentage)return false;
+        if($snapshot->amount_minor===null?$fixed!==null:(int)$snapshot->amount_minor!==$fixed)return false;
+        if((string)$snapshot->currency!==$offerCurrency)return false;
+        if($sourceCurrency!==null&&$sourceCurrency!==$offerCurrency)return false;
+        if((int)$snapshot->applied_amount_minor!==$offerAmountMinor)return false;
+        return hash_equals((string)$snapshot->snapshot_digest,self::adjustmentSnapshotDigest($sourceType,$sourceId,$sourceKind,$percentage,$fixed,$offerAmountMinor,$offerCurrency));
+    }
+
     /** A settlement must be the exact obligation amount in the obligation currency. */
     public static function settlementValid(object $settlement,object $obligation):bool{
         if((int)$settlement->obligation_id!==(int)$obligation->id)return false;

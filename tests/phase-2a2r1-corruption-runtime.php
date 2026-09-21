@@ -122,4 +122,110 @@ dzn_r1_fix_assert((new \Delnavazan\Platform\Core\Application\CommercialPolicySer
 $rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialPolicyService())->set('TERM_SESSION_COUNT',array('policy_value'=>'12','value_type'=>'weeks','reason_code'=>'illegal','evidence_channel'=>'staff_record','evidence_reference'=>'policy-probe','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('policy-probe')),'Structural invariants are not configurable commercial policies','a structural invariant key written through the policy authority');
 $wpdb->query($wpdb->prepare("DELETE FROM {$p}commercial_policies WHERE policy_key=%s AND policy_version=%d",'TERM_SESSION_COUNT',1));
 
+// ---------------------------------------------------------------------------
+// Correction round 2 (A): the authoritative account-adjustment source, and the immutable snapshot
+// itself, are revalidated at purchase acceptance. A source mutated after offer issuance, or a
+// rewritten snapshot, must fail closed before any redemption, consumption, evidence, settlement,
+// purchase, entitlement, funding, capacity or Term truth exists.
+// ---------------------------------------------------------------------------
+$d=dzn_r1_fix_scenario($sources[6],'adjustment-corrupt',4);
+$productD=dzn_r1_fix_product((int)$d['course_id'],'AU',20000,'adjustment-corrupt');
+dzn_r1_fix_pattern($d,'adjustment-corrupt');
+$adjustmentD=(new \Delnavazan\Platform\Core\Application\CommercialAdjustmentService())->grant(array(
+    'beneficiary_student_id'=>(int)$d['student_id'],'kind'=>'percentage','percentage_bp'=>500,
+    'reason_code'=>'service_inconvenience','evidence_channel'=>'staff_record',
+    'evidence_reference'=>'adjustment-corrupt','evidence_at'=>gmdate('Y-m-d H:i:s'),
+),dzn_r1_fix_key('adjustment-corrupt'));
+$offerD=dzn_r1_fix_offer($d,$productD,'full','adjustment-corrupt');
+dzn_r1_fix_assert((int)$offerD['base_amount_minor']===20000&&(int)$offerD['discount_total_minor']===1000&&(int)$offerD['amount_due_minor']===19000,'the snapshotted adjustment must price the offer deterministically');
+$snapshotD=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_offer_adjustments WHERE offer_id=%d AND source_type='account_adjustment'",(int)$offerD['offer_id']));
+dzn_r1_fix_assert($snapshotD!==null,'the offer must record the immutable adjustment snapshot');
+$snapshotDigestD=(string)$snapshotD->snapshot_digest;
+$truthCounts=static function() use($wpdb,$p,$d,$offerD,$adjustmentD):array{
+    return array(
+        'evidence'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE offer_id=%d",(int)$offerD['offer_id'])),
+        'settlements'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements s INNER JOIN {$p}commercial_offer_obligations o ON o.id=s.obligation_id WHERE o.offer_id=%d",(int)$offerD['offer_id'])),
+        'purchases'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$offerD['offer_id'])),
+        'entitlements'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_entitlements WHERE beneficiary_student_id=%d",(int)$d['student_id'])),
+        'redemptions'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_promotion_redemptions WHERE offer_id=%d",(int)$offerD['offer_id'])),
+        'consumptions'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_account_adjustment_events WHERE adjustment_id=%d AND event_type='consumed'",(int)$adjustmentD['adjustment_id'])),
+        'claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE student_id=%d",(int)$d['student_id'])),
+        'plans'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE enrolment_id=%d",(int)$d['enrolment_id'])),
+    );
+};
+$assertNoCommercialTruth=static function(array $counts,string $context):void{
+    foreach($counts as $name=>$value)dzn_r1_fix_assert($value===0,$context.' must create no commercial truth: '.$name);
+};
+// 1. The authoritative source is mutated after the offer snapshot.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_account_adjustments SET percentage_bp=%d WHERE id=%d",9000,(int)$adjustmentD['adjustment_id']));
+$rejected(fn()=>dzn_r1_fix_settle($offerD,1,'prov-adjustment-corrupt'),'commercial_adjustment_snapshot_conflict','acceptance against an adjustment source mutated after its snapshot');
+$assertNoCommercialTruth($truthCounts(),'a source/snapshot mismatch at acceptance');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_account_adjustments WHERE id=%d",(int)$adjustmentD['adjustment_id']))==='granted','a refused acceptance must leave the adjustment unconsumed');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT percentage_bp FROM {$p}commercial_account_adjustments WHERE id=%d",(int)$adjustmentD['adjustment_id']))===9000,'a refused acceptance must never silently repair the mutated source');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT snapshot_digest FROM {$p}commercial_offer_adjustments WHERE id=%d",(int)$snapshotD->id))===$snapshotDigestD,'a refused acceptance must never rewrite the historical snapshot');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_account_adjustments SET percentage_bp=%d WHERE id=%d",500,(int)$adjustmentD['adjustment_id']));
+// 2. The immutable snapshot itself is rewritten; the digest recomputation must catch it.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offer_adjustments SET applied_amount_minor=%d WHERE id=%d",(int)$snapshotD->applied_amount_minor-1,(int)$snapshotD->id));
+$rejected(fn()=>dzn_r1_fix_settle($offerD,1,'prov-adjustment-corrupt'),'commercial_adjustment_snapshot_conflict','acceptance against a rewritten immutable adjustment snapshot');
+$assertNoCommercialTruth($truthCounts(),'a rewritten snapshot at acceptance');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offer_adjustments SET applied_amount_minor=%d WHERE id=%d",(int)$snapshotD->applied_amount_minor,(int)$snapshotD->id));
+// The restored aggregate settles once and consumes the exact snapshotted adjustment.
+$settledD=dzn_r1_fix_settle($offerD,1,'prov-adjustment-corrupt');
+dzn_r1_fix_assert($settledD['processing_state']==='accepted'&&(int)$settledD['effective_sessions']===12,'the restored adjustment source must settle exactly once');
+$consumedD=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_account_adjustments WHERE id=%d",(int)$adjustmentD['adjustment_id']));
+dzn_r1_fix_assert((string)$consumedD->state==='consumed'&&(int)$consumedD->consumed_offer_id===(int)$offerD['offer_id'],'acceptance must consume the exact snapshotted adjustment');
+
+// ---------------------------------------------------------------------------
+// Correction round 2 (B): one stored Course/ownership corruption — a product re-scoped to another
+// Course, which leaves every individual row plausible — is rejected by EACH owning mutation
+// authority, exercised directly. An earlier boundary rejecting it never stands in for a later one.
+// ---------------------------------------------------------------------------
+$otherCourseId=(int)$sources[10]['course_id'];
+$corruptProduct=static function(int $productId,int $courseId) use($wpdb,$p):void{
+    dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}commercial_products SET course_id=%d WHERE id=%d",$courseId,$productId))===1,'the Course corruption probe must move exactly one product');
+};
+// B1. Payment acceptance rejects the corruption before any commercial truth exists.
+$e=dzn_r1_fix_scenario($sources[7],'lineage-acceptance',5);
+$productE=dzn_r1_fix_product((int)$e['course_id'],'AU',22000,'lineage-acceptance');
+dzn_r1_fix_pattern($e,'lineage-acceptance');
+$offerE=dzn_r1_fix_offer($e,$productE,'full','lineage-acceptance');
+dzn_r1_fix_assert($otherCourseId!==(int)$e['course_id'],'the fixture must expose two distinct Courses');
+$corruptProduct($productE,$otherCourseId);
+$rejected(fn()=>dzn_r1_fix_settle($offerE,1,'prov-lineage-acceptance'),'commercial_course_continuity_conflict','payment acceptance over a stored product/Course mismatch');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE offer_id=%d",(int)$offerE['offer_id']))===0,'a refused acceptance must leave no evidence behind');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements s INNER JOIN {$p}commercial_offer_obligations o ON o.id=s.obligation_id WHERE o.offer_id=%d",(int)$offerE['offer_id']))===0,'a refused acceptance must settle nothing');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$offerE['offer_id']))===0,'a refused acceptance must create no purchase');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_entitlements WHERE beneficiary_student_id=%d",(int)$e['student_id']))===0,'a refused acceptance must create no entitlement');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT course_id FROM {$p}commercial_products WHERE id=%d",$productE))===$otherCourseId,'a refused acceptance must never silently repair the stored relationship');
+$corruptProduct($productE,(int)$e['course_id']);
+$settledE=dzn_r1_fix_settle($offerE,1,'prov-lineage-acceptance');
+dzn_r1_fix_assert($settledE['processing_state']==='accepted'&&(int)$settledE['effective_sessions']===12,'acceptance must converge once the stored relationship is restored');
+// B2. Capacity handoff rejects the same corruption before any capacity mutation.
+$f=dzn_r1_fix_scenario($sources[8],'lineage-capacity',6);
+$productF=dzn_r1_fix_product((int)$f['course_id'],'AU',22000,'lineage-capacity');
+dzn_r1_fix_pattern($f,'lineage-capacity');
+$offerF=dzn_r1_fix_offer($f,$productF,'full','lineage-capacity');
+dzn_r1_fix_settle($offerF,1,'prov-lineage-capacity');
+dzn_r1_fix_activate_enrolment((int)$f['enrolment_id'],'lineage-capacity');
+$entitlementF=dzn_r1_fix_entitlement((int)$offerF['offer_id']);
+$corruptProduct($productF,$otherCourseId);
+$rejected(fn()=>dzn_r1_fix_handoff($entitlementF,'lineage-capacity'),'commercial_course_continuity_conflict','capacity handoff over a stored product/Course mismatch');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementF))===0,'a refused handoff must create no successor claim');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}canonical_continuation_reservations WHERE id=%d",(int)$f['reservation_id']))==='active','a refused handoff must not release the predecessor hold');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals i INNER JOIN {$p}commercial_capacity_claims c ON c.id=i.claim_id WHERE c.student_id=%d",(int)$f['student_id']))===0,'a refused handoff must claim no interval');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT reconciliation_state FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$offerF['offer_id']))==='none','a refused handoff must not mark a lost capacity reconciliation');
+$corruptProduct($productF,(int)$f['course_id']);
+$handoffF=dzn_r1_fix_handoff($entitlementF,'lineage-capacity');
+dzn_r1_fix_assert((int)$handoffF['interval_count']===12,'the restored aggregate must hand off every committed interval');
+// B3. Term binding rejects the same corruption again, at its own boundary, before Term creation.
+$termsBefore=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$f['enrolment_id']));
+$corruptProduct($productF,$otherCourseId);
+$rejected(fn()=>dzn_r1_fix_bind($entitlementF,'lineage-binding'),'commercial_course_continuity_conflict','Term binding over a stored product/Course mismatch');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$f['enrolment_id']))===$termsBefore,'a refused binding must create no canonical Term');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementF))===0,'a refused binding must create no funding plan');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_entitlements WHERE id=%d",$entitlementF))==='issued','a refused binding must leave the entitlement retryable');
+$corruptProduct($productF,(int)$f['course_id']);
+$bindingF=dzn_r1_fix_bind($entitlementF,'lineage-binding');
+dzn_r1_fix_assert((int)$bindingF['term_id']>0&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementF))===1,'the restored aggregate must bind exactly one Term and one funding plan');
+
 echo "Phase 2A.2-R1 corruption runtime passed\n";

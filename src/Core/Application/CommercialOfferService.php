@@ -178,17 +178,11 @@ final class CommercialOfferService {
 
     public function offer(int $offerId):array{
         CommercialSupport::requireCapability('dzn_view_commercial_authority');
-        $offer=$this->repository->offer($offerId);
-        if(!$offer)throw new \InvalidArgumentException('commercial_offer_required');
+        if($this->repository->offer($offerId)===null)throw new \InvalidArgumentException('commercial_offer_required');
+        // Reading an authoritative offer proves the same stored aggregate every mutation owner proves:
+        // one canonical validator, one relationship model, no read-specific variant.
+        $offer=CommercialLineageValidator::assertOfferAggregate($offerId,false,$this->repository,$this->continuations);
         $obligations=$this->repository->obligationsForOffer($offerId);
-        if(!CommercialValidator::offerValid($offer,$obligations,$this->repository->offerAdjustments($offerId)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
-        // Logical ownership: the offer's Course must be the product's Course and its continuation
-        // lineage (case, authorised slot, hold) must still exist and agree with the offer identity.
-        $product=$this->repository->product((int)$offer->product_id);
-        $case=$this->continuations->caseById((int)$offer->continuation_case_id);
-        if(!$product||!$case)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
-        if(!CommercialValidator::courseConsistent(array((int)$product->course_id,(int)$offer->course_id,(int)$case->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
-        if((int)$case->student_id!==(int)$offer->beneficiary_student_id||(int)$case->student_id!==(int)$offer->student_id)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
         return $this->result($offer,$obligations,false,false);
     }
 
@@ -222,12 +216,11 @@ final class CommercialOfferService {
     }
     private function offerAdjustment(int $offerId,int $order,string $sourceType,int $sourceId,object $source,?int $fixedAmountMinor,int $applied,string $currency,string $now,int $actor):void{
         $kind=(string)$source->kind;
-        $snapshot=CommercialIdempotency::payload(array(
-            'source_type'=>$sourceType,'source_id'=>$sourceId,'kind'=>$kind,
-            'percentage_bp'=>$source->percentage_bp===null?null:(int)$source->percentage_bp,
-            'amount_minor'=>$fixedAmountMinor,
-            'applied_amount_minor'=>$applied,'currency'=>$currency,
-        ));
+        $snapshot=CommercialValidator::adjustmentSnapshotDigest(
+            $sourceType,$sourceId,$kind,
+            $source->percentage_bp===null?null:(int)$source->percentage_bp,
+            $fixedAmountMinor,$applied,$currency
+        );
         $this->repository->insertOfferAdjustment(array(
             'uid'=>Identifier::uid(),'offer_id'=>$offerId,'application_order'=>$order,'source_type'=>$sourceType,
             'source_id'=>$sourceId,'kind'=>$kind,
