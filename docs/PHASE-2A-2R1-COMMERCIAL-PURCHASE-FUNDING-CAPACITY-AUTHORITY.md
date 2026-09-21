@@ -6,11 +6,13 @@ production cutover.** Schema 25 / migration `025_commercial_purchase_funding_aut
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
 tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
 
-Correction round 2 is the current candidate: additive descendants of the reviewed correction-round-1
-commit `186fc5012fe294ea3d91b85aeefdd738448471a0` that close the four remaining integrity findings
-plus behavioural coverage and one documentation item (§0b). Independent re-review of correction
-round 2 has **not** occurred, so this state is `CORRECTION ROUND 2 CANDIDATE — AWAITING INDEPENDENT
-RE-REVIEW`: not passed, not merged, not deployed.
+Correction round 3 is the current candidate: additive descendants of the reviewed correction-round-2
+commit `3aaf3081a0d5d12501715589a2a518c68af5ad98`, closing the single remaining integrity defect
+(`R1-MAJOR-007` / `NEW-C2-001`: complete purchase/entitlement commitment ownership before capacity and
+Term truth — §0c). Correction round 2's own independent re-review FAILED on exactly that defect while
+passing every other area, and is recorded as historical review evidence. Independent re-review of
+correction round 3 has **not** occurred, so this state is `CORRECTION ROUND 3 CANDIDATE — AWAITING
+INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
 
 ## 0. Independent review correction round 1
 
@@ -47,6 +49,35 @@ commit (never rewritten, never rebased, never squashed):
 R1-BLOCK-002 (exact protected interval → Phase-N occupancy), R1-BLOCK-003 (historical commercial
 capacity lifecycle) and R1-MAJOR-006 (Teacher-root serialization for claim release) passed the
 independent re-review and are deliberately unchanged.
+
+## 0c. Independent review correction round 3
+
+The independent re-review of correction round 2 candidate
+`3aaf3081a0d5d12501715589a2a518c68af5ad98` (tree `dfba34c3a986f4a4cb9aa2f9a8b77a953efbf119`)
+**PASSED** the account-adjustment snapshot correspondence, the exact protected-interval occupancy
+identity, the historical capacity lifecycle, the upstream offer lineage, provider-evidence
+convergence, Teacher-root claim-release serialization, the round-2 behavioural/concurrency matrix and
+the documented matrix, and **FAILED one remaining integrity area**:
+
+**`R1-MAJOR-007` / `NEW-C2-001` — purchase/entitlement ownership is not revalidated before capacity
+and Term truth.** The round-2 validator proved the upstream aggregate *from the offer*, so following
+`entitlement.purchase_id → purchase.offer_id → offer` proved only that the selected **offer** was
+valid. It did not prove that the selected **purchase and entitlement** still belong to that exact
+offer and still carry the immutable accepted commitment.
+
+| Correction Round 3 | Change |
+| --- | --- |
+| One canonical commitment validator | `CommercialCommitmentValidator` proves `entitlement → purchase → offer → canonical upstream offer lineage` from stored rows, and delegates the upstream proof to `CommercialLineageValidator` rather than duplicating it. |
+| Entitlement → purchase | The exact purchase, equal beneficiary (entitlement, purchase and offer), the bounded session quantity equal to the accepted offer's commitment, a mutation-appropriate entitlement state, and the canonical entitlement aggregate. |
+| Purchase → offer | The exact accepted offer, and its **own** purchase (`purchaseByOffer` identity, so one accepted offer can only ever own one purchase); equal beneficiary, product, currency, accepted amount, payment plan; `accepted`, valid reconciliation state, valid acceptance instant and version. |
+| Acceptance evidence | The evidence row that minted the purchase must still be an accepted evidence row for this exact offer and one of that offer's obligations. |
+| Existing claim ownership | A claim consumed by handoff or Term binding must belong to the same entitlement, purchase, Student, Teacher, Course, commitment size and pre-payment hold — including the idempotent existing-claim fast path, so a valid claim from another commitment can never satisfy this chain. |
+| Owning boundaries | Both `CommercialCapacityService::handoffFromEntitlement()` and `CommercialTermFundingService::bindEntitlementToTerm()` prove the commitment before any capacity truth, before the Phase-Q hold is released, and before Phase-L Term creation. Read endpoints are unchanged and are explicitly **not** relied upon. |
+| Corruption evidence | Two otherwise fully valid accepted commitments: a purchase repointed at another otherwise-valid offer (the alternate offer is asserted valid while the corruption is in place), a re-pointed beneficiary/product/currency/amount/plan, a re-pointed or resized entitlement, and a claim belonging to another commitment. Each case fails closed at both owning boundaries, creates no claim/interval/funding/Term truth, is never silently repaired, and converges once the authoritative value is restored. |
+
+R1-BLOCK-001, R1-BLOCK-002, R1-BLOCK-003, R1-BLOCK-004, R1-MAJOR-005, R1-MAJOR-006, R1-MAJOR-008,
+R1-C1-NEW-001 and R1-C1-NEW-002 passed the independent re-review and are deliberately unchanged; the
+round-3 evidence re-runs all of them.
 
 ## 1. What this phase owns
 
@@ -113,7 +144,7 @@ provider ever becoming business authority:
 | `tests/phase-2a2r1-migration-runtime.php` | pass (Schema 25 identity, repeat safety, verifier refuses provider columns and mutable append-only columns) |
 | `tests/phase-2a2r1-runtime.php` | pass (full-payment, two-instalment, early tranche 2, duplicate/mismatched/unattributed/refund evidence, succession, flexible, policy registry, exceptions, deferment allowance, Term-close guard) |
 | `tests/phase-2a2r1-failure-runtime.php` | pass (10 injected write boundaries — including the initially-unattributed evidence boundary — each fully rolled back, each retry converging) |
-| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed, plus the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding) |
+| `tests/phase-2a2r1-corruption-runtime.php` | pass (offer, settlement, protected interval, entitlement and evidence corruption all fail closed; the correction-round-2 matrix: an account-adjustment source mutated after its snapshot, a rewritten immutable snapshot, and one stored Course/ownership corruption independently rejected by payment acceptance, capacity handoff and Term binding; and the correction-round-3 commitment matrix: purchase ownership/economic corruption — including a purchase repointed at another otherwise-valid offer — entitlement ownership corruption, and a capacity claim belonging to another commitment, each rejected at both capacity handoff and Term binding, never silently repaired, and converging after restoration) |
 | `tests/phase-2a2r1-concurrency-runner.sh` (`duplicate_evidence`, `handoff_vs_schedule`, `settlement_vs_lesson_seven`, `unrelated_commitments`, `promotion_global_limit`, `conflicting_evidence_replay`, `release_vs_satisfaction`, `unattributed_conflict`, `unattributed_convergence`) | pass (nine executed modes; the last two are the correction-round-2 initially-unattributed evidence races with conflicting and with identical immutable facts) |
 | `tests/phase-2a2l-runtime.php`, `tests/phase-2a2m0-runtime.php`, `tests/phase-2a2m-runtime.php`, `tests/phase-2a2n-runtime.php`, `tests/phase-2a2o-runtime.php` (adjacent regressions for the authorities R1 integrates with) | pass |
 | `tests/phase-2a2p-runtime.php` (regression) | **cannot run green on a freshly built disposable runtime, and fails identically on the untouched base `1b9d7aae`** (`no_available_source` at its own fixture step). Pre-existing environment/fixture dependency, not an R1 regression |

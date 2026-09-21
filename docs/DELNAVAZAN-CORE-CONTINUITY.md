@@ -13,7 +13,7 @@
 | Phase 2A.2-M implementation merge | `ed11086ad8ddc65899c3b855248611b1eb9e09a4`; tree `85a8309bb6179a2061c86245ea1ad9a975c00c2e` |
 | Platform | 0.1.0 |
 | Current authoritative main | Phase 2A.2-Q implementation merge `815a301679fdebc5d058646749e5a206ab492629`; the docs-only closeout commit that follows is recorded in the task closeout because a commit cannot embed its own hash |
-| Active Platform candidate | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority. Branch `phase-2a2r1-commercial-purchase-funding-authority`, authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Committed on the R1 branch and awaiting independent review; not merged into `main`, not deployed.** Candidate commit/tree SHAs are recorded in the task closeout because a commit cannot embed its own hash. `main` remains Schema 24 / Phase Q. |
+| Active Platform candidate | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority. Branch `phase-2a2r1-commercial-purchase-funding-authority`, authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`, Schema 25 / migration `025_commercial_purchase_funding_authority` / build `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Correction round 3 is the current candidate on the R1 branch, awaiting independent re-review; not merged into `main`, not deployed.** Correction round 1 (`10fe4061`) and correction round 2 (`186fc501` → `3aaf3081`) are immutable historical review evidence: round 1 failed on eight findings, round 2 passed all but `R1-MAJOR-007` / `NEW-C2-001` (complete purchase/entitlement commitment ownership before capacity and Term truth). Candidate commit/tree SHAs are recorded in the task closeout because a commit cannot embed its own hash. `main` remains Schema 24 / Phase Q. |
 | Schema | 24 |
 | Migrations | 001–024; latest `024_post_intro_continuation_slot_reservation_authority` |
 | Build identity | `phase2a2q-post-intro-continuation-slot-reservation-20260920.1` |
@@ -395,7 +395,7 @@ capacity rows non-blocking; Course identity continuity; canonical provider-evide
 Teacher-root serialisation for claim release; durable structural-integrity enforcement in place of
 foreign keys; behavioural proof for each). The reviewed commit was not rewritten and no force push was
 used.
-**Correction round 2 (current candidate):** the independent re-review of `186fc5012fe294ea3d91b85aeefdd738448471a0`
+**Correction round 2 (historical; independent re-review FAILED on one remaining defect):** the independent re-review of `186fc5012fe294ea3d91b85aeefdd738448471a0`
 (tree `40fc2643eacc6811882b552785f55e7db5c04e30`) passed the exact protected-interval identity, the
 historical commercial-capacity lifecycle and the Teacher-root claim-release serialisation, and failed
 four remaining integrity areas plus behavioural coverage and one documentation item. Additive
@@ -411,8 +411,27 @@ immutable facts are durably routed instead of silently converging onto the first
 every owning mutation boundary directly in failure/corruption/concurrency evidence; and (v) synchronise
 this document, the Phase R1 testing matrix and the changelog with the modes actually executed. The
 reviewed commits remain immutable and no force push was used. State:
-`CORRECTION ROUND 2 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW` (not passed, not merged, not deployed).
-No database foreign key or CHECK constraint was added.
+`CORRECTION ROUND 2 CANDIDATE`; that candidate's own independent re-review then passed every area
+above but failed `R1-MAJOR-007` / `NEW-C2-001` (complete purchase/entitlement commitment ownership
+before capacity and Term truth), which correction round 3 closes. No database foreign key or CHECK
+constraint was added.
+**Correction round 3 (current candidate):** additive descendants of the reviewed correction-round-2
+commit `3aaf3081a0d5d12501715589a2a518c68af5ad98` (tree `dfba34c3a986f4a4cb9aa2f9a8b77a953efbf119`).
+One canonical `CommercialCommitmentValidator` now proves the downstream commitment chain —
+`entitlement → purchase → offer → canonical upstream offer lineage` — row-by-row from stored values,
+including the purchase's own-purchase identity for its offer, the accepted beneficiary/product/
+currency/amount/plan snapshot, the bounded session quantity, the mutation-appropriate entitlement
+state, the acceptance evidence that minted the purchase, and the ownership of any existing protected
+capacity claim (including the idempotent existing-claim fast path). Capacity handoff and Term binding
+prove it before creating any capacity claim, protected interval, Term or funding plan and before
+releasing the Phase-Q hold; read endpoints remain unchanged and are explicitly not relied upon for
+integrity. Corruption evidence covers a purchase repointed at another otherwise-valid offer, a
+re-pointed beneficiary/product/currency/amount/plan, a re-pointed or resized entitlement and a claim
+belonging to another commitment, each failing closed at both owning boundaries with no silent repair
+and converging after restoration. The reviewed commits remain immutable and no force push was used.
+State: `CORRECTION ROUND 3 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW` (not passed, not merged, not
+deployed). Schema 25 / migration `025_commercial_purchase_funding_authority` / build
+`phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged.
 Deferred to Phase R2: recurring enrolment, renewal cycles and next-Term boundary movement, automatic
 and manual collection modes, the four-week manual guarantee, recovery/lapse, refund review trajectory
 and the channel-neutral notification intents. Terms & Conditions alignment remains a separate

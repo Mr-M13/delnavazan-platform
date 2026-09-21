@@ -5,6 +5,50 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — candidate, unmerged — 2026-09-20
 
+### Correction round 3 (independent re-review of `3aaf3081a0d5d12501715589a2a518c68af5ad98` failed on one remaining defect)
+
+The independent re-review of correction round 2 passed every area — account-adjustment source ↔
+immutable snapshot, exact protected-interval → Phase-N identity, historical capacity lifecycle,
+upstream Course/ownership offer lineage, provider-evidence convergence, Teacher-root claim-release
+serialisation, the round-2 behavioural/corruption/concurrency matrix and the documented matrix — and
+failed `R1-MAJOR-007` / `NEW-C2-001`: the downstream commitment layer created by acceptance
+(purchase, entitlement) was not revalidated at the mutation owners, so following
+`entitlement.purchase_id → purchase.offer_id → offer` proved only that the *selected offer* was valid.
+Additive descendants of `3aaf3081` close that defect; no reviewed commit was amended, rebased,
+squashed or force-pushed.
+
+- One canonical `CommercialCommitmentValidator` proves `entitlement → purchase → offer → canonical
+  upstream offer lineage` from stored rows and delegates the upstream proof to
+  `CommercialLineageValidator` instead of duplicating it. Proved: the exact purchase; the purchase's
+  **own** purchase identity for its offer (one accepted offer can only own one purchase); equal
+  beneficiary across entitlement/purchase/offer; equal product, currency, accepted amount and payment
+  plan; `accepted` state, valid reconciliation state/instant/version; the bounded session quantity
+  equal to the accepted offer's commitment; a mutation-appropriate entitlement state; and the
+  acceptance evidence that minted the purchase still being an accepted evidence row for this exact
+  offer and one of its obligations.
+- A protected-capacity claim consumed by handoff or Term binding must belong to the same entitlement,
+  purchase, Student, Teacher, Course, commitment size and pre-payment hold — including the idempotent
+  existing-claim fast path, so a valid claim from another commitment can never satisfy the chain.
+- Both owning boundaries enforce it before any downstream truth:
+  `CommercialCapacityService::handoffFromEntitlement()` before the successor claim, before protected
+  intervals, before the Phase-Q hold is released and before any capacity mutation; and
+  `CommercialTermFundingService::bindEntitlementToTerm()` before Phase-L Term creation and before the
+  funding plan. Read endpoints remain unchanged and are explicitly not relied upon for integrity, and
+  no corrupted row is ever repaired.
+- Corruption evidence: two otherwise fully valid accepted commitments. A purchase repointed at another
+  otherwise-valid offer (asserted valid while the corruption is in place, so the rejection is about
+  ownership), a re-pointed beneficiary/product/currency/amount/plan, a re-pointed or resized
+  entitlement, and a claim belonging to another commitment — each rejected at both capacity handoff
+  and Term binding with zero downstream truth, never silently repaired, and converging after
+  restoration. `commercial_entitlements`/`commercial_purchases` uniqueness means the repointed cases
+  are probed against an unpurchased alternate offer and with a temporarily displaced sibling
+  entitlement, both restored by the probe.
+- Validation (owner-executed, disposable WordPress 6.8.3 + MariaDB 11.4.13, fresh database per suite)
+  is recorded in `docs/PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md` §5. Schema 25 /
+  migration `025_commercial_purchase_funding_authority` / build
+  `phase2a2r1-commercial-purchase-funding-authority-20260920.1` are unchanged. State:
+  `CORRECTION ROUND 3 CANDIDATE — AWAITING INDEPENDENT RE-REVIEW`; not passed, not merged, not deployed.
+
 ### Correction round 2 (independent re-review of `186fc5012fe294ea3d91b85aeefdd738448471a0` failed)
 
 The independent re-review passed the exact protected-interval → Phase-N identity, the historical

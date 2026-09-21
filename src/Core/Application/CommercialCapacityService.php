@@ -68,22 +68,27 @@ final class CommercialCapacityService {
             $this->authority->lockAccountRoot($studentId,$actor);
             $entitlement=$this->authority->entitlement($entitlementId,true);
             if(!$entitlement||!CommercialValidator::entitlementValid($entitlement))throw new \InvalidArgumentException('commercial_entitlement_integrity_conflict');
+            // Complete commitment-ownership proof before anything else consumes the commitment:
+            // entitlement → purchase → offer → canonical upstream lineage.
+            $commitment=CommercialCommitmentValidator::assertForEntitlement($entitlement,CommercialCommitmentValidator::STATES_PRE_CAPACITY,true,$this->authority,$this->continuations);
             if((int)$entitlement->beneficiary_student_id!==$studentId)throw new \RuntimeException('Commercial capacity context changed');
             $existing=$this->capacity->claimForEntitlement($entitlementId,true);
             $now=CommercialSupport::now();
+            // Including the idempotent existing-claim path: a claim that belongs to a different
+            // purchase may never be accepted as this commitment's successor capacity.
+            if($existing)CommercialCommitmentValidator::assertClaimBelongsToCommitment($existing,$commitment['entitlement'],$commitment['purchase'],$commitment['offer']);
             if($existing){
                 $result=$this->claimResult($existing,false,true);
                 $this->writeCommand($digest,$payload,'establish_protected_capacity',$studentId,$teacherId,(int)$purchaseHint->id,(int)$offerHint->id,$entitlementId,(int)$existing->id,0,'active',$now,$actor);
                 $this->authority->commit();
                 return $result;
             }
-            $offer=$this->authority->offer((int)$offerHint->id,true);
-            if(!$offer)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
-            // The owning capacity authority proves the same authoritative commercial/ownership
-            // lineage the payment authority proved, before it releases the predecessor hold or claims
-            // successor capacity: a corrupt stored aggregate may not release any existing capacity,
-            // claim any successor capacity or create any Phase-N occupancy.
-            CommercialLineageValidator::assertForOffer($offer,true,$this->authority,$this->continuations);
+            // The owning capacity authority proves the same authoritative commercial commitment the
+            // payment authority created — entitlement → purchase → offer → upstream lineage — before it
+            // releases the predecessor hold or claims successor capacity: a corrupt stored aggregate may
+            // not release any existing capacity, claim any successor capacity or create any Phase-N
+            // occupancy.
+            $offer=$commitment['offer'];
             // The Phase-Q pre-payment hold is locked BEFORE the Teacher scheduling root, exactly as
             // Phase Q's own hold path does, so the repository lock order (hold → Teacher root) is
             // preserved rather than inverted by this command.

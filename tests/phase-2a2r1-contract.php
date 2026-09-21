@@ -7,6 +7,7 @@ $rule=file_get_contents($root.'/src/Core/Application/CommercialRule.php');
 $money=file_get_contents($root.'/src/Core/Application/CommercialMoney.php');
 $validator=file_get_contents($root.'/src/Core/Application/CommercialValidator.php');
 $lineage=file_get_contents($root.'/src/Core/Application/CommercialLineageValidator.php');
+$commitment=file_get_contents($root.'/src/Core/Application/CommercialCommitmentValidator.php');
 $offer=file_get_contents($root.'/src/Core/Application/CommercialOfferService.php');
 $payment=file_get_contents($root.'/src/Core/Application/CommercialPaymentService.php');
 $funding=file_get_contents($root.'/src/Core/Application/CommercialTermFundingService.php');
@@ -29,8 +30,8 @@ $continuationRule=file_get_contents($root.'/src/Core/Application/CanonicalContin
 $authorityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialAuthorityRepository.php');
 $paymentRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialPaymentRepository.php');
 $capacityRepo=file_get_contents($root.'/src/Core/Infrastructure/Repository/CommercialCapacityRepository.php');
-$phaseR1=$rule.$money.$validator.$lineage.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
-$phaseR1Application=$rule.$money.$validator.$lineage.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
+$phaseR1=$rule.$money.$validator.$lineage.$commitment.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency.$authorityRepo.$paymentRepo.$capacityRepo;
+$phaseR1Application=$rule.$money.$validator.$lineage.$commitment.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<25)throw new RuntimeException('Missing Phase R1 schema identity');
 if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r1-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
@@ -186,15 +187,15 @@ if(str_contains($lineage,'CommercialValidator::courseConsistent'))throw new Runt
 if(str_contains($lineage,'INSERT INTO')||str_contains($lineage,'UPDATE ')||str_contains($lineage,'DELETE FROM'))throw new RuntimeException('The lineage validator must never mutate storage');
 // Every owning mutation authority invokes the one validator, and the read seam reuses it.
 if(!str_contains($payment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Payment acceptance must prove the aggregate at its owning boundary');
-if(!str_contains($capacity,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Capacity handoff must prove the aggregate before any capacity mutation');
-if(!str_contains($funding,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Term binding must prove the aggregate before Term creation');
+if(!str_contains($capacity,'CommercialCommitmentValidator::assertForEntitlement'))throw new RuntimeException('Capacity handoff must prove the commitment before any capacity mutation');
+if(!str_contains($funding,'CommercialCommitmentValidator::assertForEntitlement'))throw new RuntimeException('Term binding must prove the commitment before Term creation');
 if(!str_contains($offer,'CommercialLineageValidator::assertOfferAggregate'))throw new RuntimeException('The authoritative offer read must reuse the one canonical validator');
 if(str_contains($capacityAuthority,'CommercialLineageValidator'))throw new RuntimeException('Protected-interval arbitration must not acquire a second lineage variant');
 // The aggregate proof must run before the capacity mutation and keep the repository lock order.
 $handoff=substr($capacity,strpos($capacity,'public function handoffFromEntitlement'));
 $handoff=substr($handoff,0,strpos($handoff,'public function releaseClaim'));
-if(strpos($handoff,'CommercialLineageValidator::assertForOffer')>strpos($handoff,'ensureAndLockTeacherRoot'))throw new RuntimeException('The aggregate proof must precede the Teacher scheduling root');
-if(strpos($handoff,'CommercialLineageValidator::assertForOffer')>strpos($handoff,'insertClaim'))throw new RuntimeException('The aggregate proof must precede the successor claim');
+if(strpos($handoff,'CommercialCommitmentValidator::assertForEntitlement')>strpos($handoff,'ensureAndLockTeacherRoot'))throw new RuntimeException('The aggregate proof must precede the Teacher scheduling root');
+if(strpos($handoff,'CommercialCommitmentValidator::assertForEntitlement')>strpos($handoff,'insertClaim'))throw new RuntimeException('The aggregate proof must precede the successor claim');
 if(strpos($handoff,'insertClaim')>strpos($handoff,'setReservationState'))throw new RuntimeException('The predecessor hold must still be released only after the successor claim is durable');
 if(!str_contains($authorityRepo,'no code path may acquire it after an Enrolment-chain or Teacher-root lock'))throw new RuntimeException('The commercial account-root lock contract must stay documented');
 
@@ -236,5 +237,65 @@ foreach(array('unattributed_conflict','duplicate_evidence','handoff_vs_schedule'
 if(!str_contains($phaseDoc,'Correction round 2'))throw new RuntimeException('The Phase R1 document must record correction round 2');
 $continuity=@file_get_contents($root.'/docs/DELNAVAZAN-CORE-CONTINUITY.md');
 if(!is_string($continuity)||!str_contains($continuity,'Correction round 2'))throw new RuntimeException('The continuity record must record correction round 2');
+
+// Correction Round 3 — one canonical commitment validator: entitlement → purchase → offer → lineage.
+if(!str_contains($commitment,'final class CommercialCommitmentValidator'))throw new RuntimeException('The canonical commercial commitment validator is missing');
+if(!str_contains($commitment,'public static function assertForEntitlement')||!str_contains($commitment,'public static function assertCommitment')||!str_contains($commitment,'public static function assertClaimBelongsToCommitment'))throw new RuntimeException('The commitment validator must expose both entry points and the claim-ownership proof');
+if(str_contains($commitment,'CommercialValidator::courseConsistent')&&!str_contains($commitment,'commercial_course_continuity_conflict'))throw new RuntimeException('The commitment validator must fail closed on course continuity');
+// The complete persisted commitment surface is proved, not merely the identity chain.
+foreach(array(
+    'entitlement->purchase_id','entitlement->beneficiary_student_id','entitlement->session_count',
+    'purchase->offer_id','purchase->beneficiary_student_id','purchase->product_id','purchase->currency',
+    'purchase->amount_minor','purchase->plan_kind','purchase->reconciliation_state','purchase->purchase_version',
+    'offer->committed_sessions','offer->amount_due_minor','offer->plan_kind','purchaseByOffer','first_evidence_id',
+) as $proved) if(!str_contains($commitment,$proved))throw new RuntimeException('The commitment validator must prove: '.$proved);
+if(!str_contains($commitment,'CommercialValidator::entitlementValid')||!str_contains($commitment,'CommercialValidator::evidenceValid'))throw new RuntimeException('The commitment validator must reuse the canonical entitlement/evidence validity');
+// The creating boundary must persist exactly the accepted-offer snapshot the validator proves.
+foreach(array(
+    "'offer_id'=>(int)\$offer->id","'beneficiary_student_id'=>(int)\$offer->beneficiary_student_id",
+    "'product_id'=>(int)\$offer->product_id","'currency'=>(string)\$offer->currency",
+    "'amount_minor'=>(int)\$offer->amount_due_minor","'plan_kind'=>(string)\$offer->plan_kind",
+) as $written) if(!str_contains($payment,$written))throw new RuntimeException('Purchase creation must persist the accepted offer snapshot the commitment validator proves: '.$written);
+foreach(array(
+    "'purchase_id'=>\$purchaseId","'beneficiary_student_id'=>(int)\$offer->beneficiary_student_id",
+    "'session_count'=>(int)\$offer->committed_sessions",
+) as $written) if(!str_contains($payment,$written))throw new RuntimeException('Entitlement creation must persist the accepted commitment the commitment validator proves: '.$written);
+if(!str_contains($commitment,'in_array((string)$entitlement->state,$allowedEntitlementStates,true)'))throw new RuntimeException('The entitlement state must be validated against the requested mutation');
+if(!str_contains($commitment,'STATES_PRE_CAPACITY')||!str_contains($commitment,'STATES_PRE_TERM'))throw new RuntimeException('Mutation-specific entitlement states must be explicit');
+// It delegates the upstream aggregate proof instead of duplicating it, and never mutates storage.
+if(!str_contains($commitment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('The commitment validator must delegate the upstream offer lineage proof');
+foreach(array('INSERT INTO','UPDATE ','DELETE FROM') as $sql) if(str_contains($commitment,$sql))throw new RuntimeException('The commitment validator must never write storage: '.$sql);
+// Both downstream mutation owners consume the one implementation, not their own comparisons.
+if(substr_count($capacity,'CommercialCommitmentValidator::assertForEntitlement')!==1||substr_count($funding,'CommercialCommitmentValidator::assertForEntitlement')!==1)throw new RuntimeException('Each downstream mutation owner must prove the commitment exactly once');
+if(substr_count($capacity,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')!==1||substr_count($funding,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')!==1)throw new RuntimeException('Each downstream mutation owner must prove its existing claim belongs to the commitment');
+if(substr_count($commitment,'commercial_commitment_integrity_conflict')<1||substr_count($commitment,'$conflict')<8)throw new RuntimeException('The commitment ownership comparisons must fail closed with one controlled reason');
+if(str_contains($capacity.' '.$funding,'amount_due_minor'))throw new RuntimeException('Accepted-amount ownership must not be re-implemented outside the canonical commitment validator');
+if(str_contains($capacity.' '.$funding,'purchaseByOffer'))throw new RuntimeException('Purchase/offer ownership must not be re-implemented outside the canonical commitment validator');
+// Ordering: commitment proof precedes every downstream mutation, including the Phase-Q release.
+if(strpos($handoff,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')===false)throw new RuntimeException('The idempotent existing-claim path must prove claim ownership');
+if(strpos($handoff,'CommercialCommitmentValidator::assertForEntitlement')>strpos($handoff,'$existing=$this->capacity->claimForEntitlement'))throw new RuntimeException('The commitment proof must precede the existing-claim decision');
+if(strpos($handoff,'ensureAndLockTeacherRoot')>strpos($handoff,'insertClaim'))throw new RuntimeException('The Teacher root must still precede the successor claim');
+if(strpos($handoff,'insertClaim')>strpos($handoff,'setReservationState'))throw new RuntimeException('The predecessor hold must still be released only after the successor claim is durable');
+$binding=substr($funding,strpos($funding,'public function bindEntitlementToTerm'));
+$binding=substr($binding,0,strpos($binding,'public function fundingPlanForTerm'));
+if(strpos($binding,'CommercialCommitmentValidator::assertForEntitlement')>strpos($binding,'insertFundingPlan'))throw new RuntimeException('The commitment proof must precede the funding plan');
+if(strpos($binding,'CommercialCommitmentValidator::assertForEntitlement')>strpos($binding,'CanonicalTermAuthorityService())->create('))throw new RuntimeException('The commitment proof must precede Phase-L Term creation');
+if(strpos($binding,'CommercialCommitmentValidator::assertClaimBelongsToCommitment')>strpos($binding,'insertFundingPlan'))throw new RuntimeException('Claim ownership must be proved before the funding plan');
+// C2 preservation: the upstream validator stays untouched and still owns the read/payment seams.
+if(!str_contains($offer,'CommercialLineageValidator::assertOfferAggregate'))throw new RuntimeException('The offer read seam must still reuse the upstream lineage validator');
+if(!str_contains($payment,'CommercialLineageValidator::assertForOffer'))throw new RuntimeException('Payment acceptance must still prove the upstream aggregate');
+if(str_contains($commitment,'public static function adjustmentSnapshotFor'))throw new RuntimeException('The commitment validator must not duplicate upstream pricing-snapshot semantics');
+
+// Correction Round 3 — behavioural corruption coverage for the commitment layer.
+foreach(array(
+    'purchase.offer_id-alternate-valid-offer','purchase.beneficiary','purchase.product','purchase.currency',
+    'purchase.amount','purchase.plan','entitlement.beneficiary','entitlement.session_count',
+    'claim.purchase','claim.student','claim.committed_sessions',
+) as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The commitment corruption matrix is missing: '.$probe);
+foreach(array('entitlementPurchaseProbe','purchase.offer_id-alternate-valid-offer-with-claim','$assertOfferG2Valid') as $probe) if(!str_contains($corruptionRuntime,$probe))throw new RuntimeException('The commitment corruption matrix is missing: '.$probe);
+if(!str_contains($corruptionRuntime,'commercial_commitment_integrity_conflict')||!str_contains($corruptionRuntime,'commercial_capacity_integrity_conflict'))throw new RuntimeException('The commitment corruption matrix must assert both controlled reasons');
+if(!str_contains($corruptionRuntime,'must never silently repair')||!str_contains($corruptionRuntime,'must be restorable'))throw new RuntimeException('The commitment corruption matrix must prove no silent repair and exact restoration');
+if(!str_contains($phaseDoc,'Correction round 3'))throw new RuntimeException('The Phase R1 document must record correction round 3');
+if(!str_contains($continuity,'Correction round 3'))throw new RuntimeException('The continuity record must record correction round 3');
 
 echo "Phase 2A.2-R1 contract passed\n";

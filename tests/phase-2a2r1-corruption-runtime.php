@@ -228,4 +228,145 @@ $corruptProduct($productF,(int)$f['course_id']);
 $bindingF=dzn_r1_fix_bind($entitlementF,'lineage-binding');
 dzn_r1_fix_assert((int)$bindingF['term_id']>0&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementF))===1,'the restored aggregate must bind exactly one Term and one funding plan');
 
+// ---------------------------------------------------------------------------
+// Correction round 3 (NEW-C2-001): the complete commercial commitment chain is proved at every
+// mutation owner that creates capacity or Term truth. Two otherwise fully valid accepted
+// commitments are built, then persisted commitment-layer facts are corrupted one at a time. Each
+// corruption must fail closed at capacity handoff (and, once a claim exists, at Term binding too),
+// create no downstream truth, never be silently repaired, and converge normally once restored.
+// ---------------------------------------------------------------------------
+$g=dzn_r1_fix_scenario($sources[9],'commitment-g',7);
+$productG=dzn_r1_fix_product((int)$g['course_id'],'AU',25000,'commitment-g');
+dzn_r1_fix_pattern($g,'commitment-g');
+$offerG=dzn_r1_fix_offer($g,$productG,'two_instalments','commitment-g');
+// A second, otherwise fully valid and economically identical offer for the SAME continuation case:
+// it has no purchase, so it can be used as "another otherwise-valid offer" that only offer identity
+// distinguishes from the accepted one.
+$offerG2=dzn_r1_fix_offer($g,$productG,'two_instalments','commitment-g2');
+$offerG2Id=(int)$offerG2['offer_id'];
+$offerGId=(int)$offerG['offer_id'];
+$assertOfferG2Valid=static function() use($offerG2Id):void{
+    \Delnavazan\Platform\Core\Application\CommercialLineageValidator::assertOfferAggregate($offerG2Id);
+};
+dzn_r1_fix_settle($offerG,1,'prov-commitment-g');
+dzn_r1_fix_activate_enrolment((int)$g['enrolment_id'],'commitment-g');
+$entitlementG=dzn_r1_fix_entitlement((int)$offerG['offer_id']);
+// A second accepted commitment whose offer, purchase and entitlement are themselves fully valid.
+$h=dzn_r1_fix_scenario($sources[10],'commitment-h',8);
+$productH=dzn_r1_fix_product((int)$h['course_id'],'AU',25000,'commitment-h');
+dzn_r1_fix_pattern($h,'commitment-h');
+$offerH=dzn_r1_fix_offer($h,$productH,'two_instalments','commitment-h');
+dzn_r1_fix_settle($offerH,1,'prov-commitment-h');
+dzn_r1_fix_activate_enrolment((int)$h['enrolment_id'],'commitment-h');
+$entitlementH=dzn_r1_fix_entitlement((int)$offerH['offer_id']);
+$purchaseIdOf=static function(int $offerId) use($wpdb,$p):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_purchases WHERE offer_id=%d",$offerId));};
+$purchaseG=$purchaseIdOf((int)$offerG['offer_id']);
+$purchaseH=$purchaseIdOf((int)$offerH['offer_id']);
+dzn_r1_fix_assert($purchaseG>0&&$purchaseH>0&&$purchaseG!==$purchaseH,'both accepted commitments must own their own purchase');
+// Both commitments and the alternate offer are valid before any corruption: a rejection caused by a
+// repointed purchase must therefore be about ownership, not about an independently malformed offer.
+\Delnavazan\Platform\Core\Application\CommercialLineageValidator::assertOfferAggregate($offerGId);
+\Delnavazan\Platform\Core\Application\CommercialLineageValidator::assertOfferAggregate($offerG2Id);
+\Delnavazan\Platform\Core\Application\CommercialLineageValidator::assertOfferAggregate((int)$offerH['offer_id']);
+\Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::assertCommitment($entitlementG,\Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::STATES_PRE_CAPACITY);
+\Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::assertCommitment($entitlementH,\Delnavazan\Platform\Core\Application\CommercialCommitmentValidator::STATES_PRE_CAPACITY);
+
+$mutate=static function(string $table,int $id,string $column,string $placeholder,mixed $value) use($wpdb,$p):void{
+    dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}{$table} SET {$column}={$placeholder} WHERE id=%d",$value,$id))===1,'the commitment corruption probe must move exactly one row: '.$table.'.'.$column);
+};
+$readValue=static function(string $table,int $id,string $column) use($wpdb,$p){
+    return $wpdb->get_var($wpdb->prepare("SELECT {$column} FROM {$p}{$table} WHERE id=%d",$id));
+};
+$claimCountG=static function() use($wpdb,$p,$entitlementG):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementG));};
+$intervalCount=static function() use($wpdb,$p,$entitlementG):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals i INNER JOIN {$p}commercial_capacity_claims c ON c.id=i.claim_id WHERE c.entitlement_id=%d",$entitlementG));};
+$planCountG=static function() use($wpdb,$p,$entitlementG):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",$entitlementG));};
+$termCountG=static function() use($wpdb,$p,$g):int{return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$g['enrolment_id']));};
+// One corruption probe: corrupt, prove both mutation owners fail closed with zero downstream truth,
+// prove the corrupted row is not silently repaired, restore, and prove restoration is exact.
+$commitmentProbe=static function(string $label,string $table,int $id,string $column,string $placeholder,mixed $corruptValue,?callable $whileCorrupt=null) use($wpdb,$p,$mutate,$readValue,$rejected,$entitlementG,$claimCountG,$intervalCount,$planCountG,$termCountG,$g):void{
+    $original=$readValue($table,$id,$column);
+    $expectClaim=$claimCountG()>0?1:0;
+    $mutate($table,$id,$column,$placeholder,$corruptValue);
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$corruptValue,$label.': the corruption probe did not persist');
+    // The corruption material itself stays valid: the rejection must be about ownership.
+    if($whileCorrupt!==null)$whileCorrupt();
+    // 1. Capacity handoff is the owning authority for capacity truth.
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementG,'commitment-'.$label),'commercial_commitment_integrity_conflict','capacity handoff over a corrupted commitment layer ('.$label.')');
+    dzn_r1_fix_assert($claimCountG()===$expectClaim,$label.': a refused handoff must not create or duplicate a successor claim');
+    dzn_r1_fix_assert($intervalCount()===$expectClaim*12,$label.': a refused handoff must not create or duplicate protected intervals');
+    dzn_r1_fix_assert($planCountG()===0&&$termCountG()===0,$label.': a refused handoff must create no funding or Term truth');
+    // 2. Term binding is the owning authority for canonical Term truth (once a claim is available).
+    if($expectClaim===1){
+        $rejected(fn()=>dzn_r1_fix_bind($entitlementG,'commitment-'.$label),'commercial_commitment_integrity_conflict','Term binding over a corrupted commitment layer ('.$label.')');
+        dzn_r1_fix_assert($planCountG()===0&&$termCountG()===0,$label.': a refused binding must create no Term and no funding plan');
+        dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_entitlements WHERE id=%d",$entitlementG))==='issued',$label.': a refused binding must leave the entitlement retryable');
+    }
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$corruptValue,$label.': a refused mutation must never silently repair the corrupted row');
+    $mutate($table,$id,$column,$placeholder,$original);
+    dzn_r1_fix_assert($readValue($table,$id,$column)==$original,$label.': the authoritative value must be restorable');
+};
+
+// Phase 1 — purchase and entitlement ownership/economic corruption before any capacity exists.
+$commitmentProbe('purchase.offer_id-alternate-valid-offer','commercial_purchases',$purchaseG,'offer_id','%d',$offerG2Id,$assertOfferG2Valid);
+$commitmentProbe('purchase.beneficiary','commercial_purchases',$purchaseG,'beneficiary_student_id','%d',(int)$h['student_id']);
+$commitmentProbe('purchase.product','commercial_purchases',$purchaseG,'product_id','%d',$productH);
+$commitmentProbe('purchase.currency','commercial_purchases',$purchaseG,'currency','%s','NZD');
+$commitmentProbe('purchase.amount','commercial_purchases',$purchaseG,'amount_minor','%d',(int)$readValue('commercial_purchases',$purchaseG,'amount_minor')+1);
+$commitmentProbe('purchase.plan','commercial_purchases',$purchaseG,'plan_kind','%s','full');
+// entitlement.purchase_id → another purchase. `commercial_entitlements` links are unique per purchase,
+// so the other commitment's entitlement is displaced for the duration of the probe and restored after;
+// the corrupted relationship under test is exactly "this entitlement belongs to another commitment".
+$entitlementPurchaseProbe=static function(string $label,bool $withClaim) use($wpdb,$p,$mutate,$readValue,$rejected,$entitlementG,$entitlementH,$purchaseG,$purchaseH,$claimCountG,$intervalCount,$planCountG,$termCountG):void{
+    $originalH=$readValue('commercial_entitlements',$entitlementH,'purchase_id');
+    $mutate('commercial_entitlements',$entitlementH,'purchase_id','%d',999999);
+    $mutate('commercial_entitlements',$entitlementG,'purchase_id','%d',$purchaseH);
+    dzn_r1_fix_assert($readValue('commercial_entitlements',$entitlementG,'purchase_id')==$purchaseH,$label.': the corruption probe did not persist');
+    $expectClaim=$claimCountG()>0?1:0;
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementG,'entitlement-purchase-'.$label),'commercial_commitment_integrity_conflict','capacity handoff over an entitlement that belongs to another purchase');
+    dzn_r1_fix_assert($claimCountG()===$expectClaim&&$intervalCount()===$expectClaim*12,$label.': a refused handoff must not create capacity truth');
+    dzn_r1_fix_assert($planCountG()===0&&$termCountG()===0,$label.': a refused handoff must create no Term or funding truth');
+    if($withClaim){
+        $rejected(fn()=>dzn_r1_fix_bind($entitlementG,'entitlement-purchase-'.$label),'commercial_commitment_integrity_conflict','Term binding over an entitlement that belongs to another purchase');
+        dzn_r1_fix_assert($planCountG()===0&&$termCountG()===0,$label.': a refused binding must create no Term and no funding plan');
+        dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_entitlements WHERE id=%d",$entitlementG))==='issued',$label.': a refused binding must leave the entitlement retryable');
+    }
+    dzn_r1_fix_assert($readValue('commercial_entitlements',$entitlementG,'purchase_id')==$purchaseH,$label.': a refused mutation must never silently repair the entitlement');
+    $mutate('commercial_entitlements',$entitlementG,'purchase_id','%d',$purchaseG);
+    $mutate('commercial_entitlements',$entitlementH,'purchase_id','%d',$originalH);
+    dzn_r1_fix_assert($readValue('commercial_entitlements',$entitlementG,'purchase_id')==$purchaseG&&$readValue('commercial_entitlements',$entitlementH,'purchase_id')==$originalH,$label.': the entitlement ownership must be restorable');
+};
+$entitlementPurchaseProbe('pre-capacity',false);
+$commitmentProbe('entitlement.beneficiary','commercial_entitlements',$entitlementG,'beneficiary_student_id','%d',(int)$h['student_id']);
+$commitmentProbe('entitlement.session_count','commercial_entitlements',$entitlementG,'session_count','%d',6);
+// The commitment still converges: the restored aggregate hands over exactly one successor claim.
+$handoffG=dzn_r1_fix_handoff($entitlementG,'commitment-g');
+dzn_r1_fix_assert((int)$handoffG['interval_count']===12&&$claimCountG()===1&&$intervalCount()===12,'the restored commitment must hand over exactly one claim of twelve intervals');
+dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}canonical_continuation_reservations WHERE id=%d",(int)$g['reservation_id']))==='released','a converged handoff must release the Phase-Q predecessor hold');
+$claimIdG=(int)$handoffG['claim_id'];
+
+// Phase 2 — the same commitment-layer corruptions once a claim exists, plus a claim that belongs to
+// another commitment. Both mutation owners must reject, and no further truth may be created.
+$commitmentProbe('purchase.offer_id-alternate-valid-offer-with-claim','commercial_purchases',$purchaseG,'offer_id','%d',$offerG2Id,$assertOfferG2Valid);
+$commitmentProbe('purchase.amount-with-claim','commercial_purchases',$purchaseG,'amount_minor','%d',(int)$readValue('commercial_purchases',$purchaseG,'amount_minor')+7);
+$entitlementPurchaseProbe('with-claim',true);
+// A foreign claim may never satisfy this commitment's chain, on either owning boundary.
+$foreignClaimProbe=static function(string $label,string $table,string $column,string $placeholder,mixed $corruptValue) use($mutate,$readValue,$rejected,$entitlementG,$claimIdG,$claimCountG,$intervalCount,$planCountG,$termCountG):void{
+    $original=$readValue($table,$claimIdG,$column);
+    $mutate($table,$claimIdG,$column,$placeholder,$corruptValue);
+    $rejected(fn()=>dzn_r1_fix_handoff($entitlementG,'foreign-claim-'.$label),'commercial_capacity_integrity_conflict','capacity handoff reusing a claim from another commitment ('.$label.')');
+    $rejected(fn()=>dzn_r1_fix_bind($entitlementG,'foreign-claim-'.$label),'commercial_capacity_integrity_conflict','Term binding reusing a claim from another commitment ('.$label.')');
+    dzn_r1_fix_assert($claimCountG()===1&&$intervalCount()===12,$label.': a refused mutation must not create or duplicate claim capacity');
+    dzn_r1_fix_assert($planCountG()===0&&$termCountG()===0,$label.': a refused mutation must create no Term and no funding plan');
+    dzn_r1_fix_assert($readValue($table,$claimIdG,$column)==$corruptValue,$label.': a refused mutation must never silently repair the claim');
+    $mutate($table,$claimIdG,$column,$placeholder,$original);
+    dzn_r1_fix_assert($readValue($table,$claimIdG,$column)==$original,$label.': the claim authority must be restorable');
+};
+$foreignClaimProbe('claim.purchase','commercial_capacity_claims','purchase_id','%d',$purchaseH);
+$foreignClaimProbe('claim.student','commercial_capacity_claims','student_id','%d',(int)$h['student_id']);
+$foreignClaimProbe('claim.committed_sessions','commercial_capacity_claims','committed_sessions','%d',6);
+// The restored commitment binds exactly one canonical Term and one funding plan.
+$bindingG=dzn_r1_fix_bind($entitlementG,'commitment-g');
+dzn_r1_fix_assert((int)$bindingG['term_id']>0&&$planCountG()===1&&$termCountG()===1,'the restored commitment must bind exactly one Term and one funding plan');
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE entitlement_id=%d",$entitlementG))===1,'convergence must not duplicate the successor claim');
+
 echo "Phase 2A.2-R1 corruption runtime passed\n";

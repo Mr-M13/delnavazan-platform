@@ -144,13 +144,15 @@ final class CommercialTermFundingService {
             $claim=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CommercialCapacityRepository())->claimForEntitlement($entitlementId,true);
             if(!$claim)throw new \InvalidArgumentException('commercial_capacity_handoff_required');
             if((string)$claim->state!=='active')throw new \InvalidArgumentException('commercial_capacity_claim_not_active');
-            // The Term authority's own boundary proves the stored commercial aggregate again before
-            // Phase L creates anything: reaching Term binding with corrupted ownership/course lineage
-            // fails here, so a Term can never be created from a corrupt aggregate even though an
-            // earlier authority may have committed before the corruption appeared.
-            $offer=$this->repository->offer((int)$purchase->offer_id,true);
-            if(!$offer)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
-            CommercialLineageValidator::assertForOffer($offer,true,$this->repository);
+            // The Term authority's own boundary proves the complete commitment chain again before
+            // Phase L creates anything: entitlement → purchase → offer → upstream lineage, plus the
+            // protected-capacity claim belonging to that same commitment. Reaching Term binding with a
+            // corrupted purchase, entitlement or claim ownership fails here, so no Term or funding plan
+            // is ever created from a corrupt commitment even though an earlier authority may have
+            // committed before the corruption appeared.
+            $commitment=CommercialCommitmentValidator::assertForEntitlement($entitlement,CommercialCommitmentValidator::STATES_PRE_TERM,true,$this->repository);
+            CommercialCommitmentValidator::assertClaimBelongsToCommitment($claim,$commitment['entitlement'],$commitment['purchase'],$commitment['offer']);
+            $offer=$commitment['offer'];
             // Course identity continuity across the accepted offer, its claim and the Term's Enrolment.
             if(!CommercialValidator::courseConsistent(array((int)$offer->course_id,(int)$claim->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $enrolmentHint=$this->repository->canonicalEnrolmentFor($studentId,$courseId,false);
