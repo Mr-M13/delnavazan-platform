@@ -81,9 +81,9 @@ final class CommercialCapacityRepository {
      * valid `protected` interval blocks. The caller excludes only the claim interval that authorises
      * the exact Lesson being scheduled.
      */
-    public function overlappingIntervals(int $teacherId,string $startsAt,string $occupiedEnd,int $excludeClaimId=0,bool $lock=false):array{
+    public function overlappingIntervals(int $teacherId,string $startsAt,string $occupiedEnd,int $excludeIntervalId=0,bool $lock=false):array{
         global $wpdb;$suffix=$lock?' FOR UPDATE':'';
-        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}commercial_capacity_claim_intervals WHERE teacher_id=%d AND claim_id<>%d AND starts_at_utc<%s AND occupied_ends_at_utc>%s ORDER BY id{$suffix}",$teacherId,$excludeClaimId,$occupiedEnd,$startsAt))?:array();
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}commercial_capacity_claim_intervals WHERE teacher_id=%d AND id<>%d AND starts_at_utc<%s AND occupied_ends_at_utc>%s ORDER BY id{$suffix}",$teacherId,$excludeIntervalId,$occupiedEnd,$startsAt))?:array();
     }
     public function protectedIntervalsForTeacher(int $teacherId,string $fromUtc,string $toUtc):array{
         global $wpdb;

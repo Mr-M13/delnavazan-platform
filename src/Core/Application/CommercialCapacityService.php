@@ -85,6 +85,7 @@ final class CommercialCapacityService {
             $offer=$this->authority->offer((int)$offerHint->id,true);
             if(!$offer||!CommercialValidator::offerValid($offer,$this->authority->obligationsForOffer((int)$offerHint->id,true),$this->authority->offerAdjustments((int)$offerHint->id)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
             $pattern=$this->capacity->activePatternFor($studentId,$courseId,true);
+            if($pattern!==null&&(int)$pattern->course_id!==$courseId)throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             if($pattern){
                 $sourceKind='regular_pattern';
                 $intervals=$this->patterns->intervalsFor($pattern,(int)$offer->committed_sessions);
@@ -162,6 +163,11 @@ final class CommercialCapacityService {
             $hint=$this->capacity->claim($claimId);
             if(!$hint)throw new \InvalidArgumentException('commercial_capacity_claim_required');
             $this->authority->lockAccountRoot((int)$hint->student_id,$actor);
+            // Releasing protected capacity is a capacity mutation: it serialises on the same
+            // canonical per-Teacher scheduling root as Q holds, the R1 handoff and Phase-N.
+            $now=CommercialSupport::now();
+            $this->schedules->ensureAndLockTeacherRoot((int)$hint->teacher_id,$now,$actor);
+            do_action('dzn_phase_2a2r1_teacher_root_held','release_protected_capacity',(int)$hint->teacher_id);
             $claim=$this->capacity->claim($claimId,true);
             $intervals=$this->capacity->intervals($claimId,true);
             if(!$claim||!CommercialValidator::claimValid($claim,$intervals))throw new \InvalidArgumentException('commercial_capacity_integrity_conflict');

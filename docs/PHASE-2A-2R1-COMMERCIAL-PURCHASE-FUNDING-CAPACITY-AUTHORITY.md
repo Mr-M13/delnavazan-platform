@@ -6,6 +6,22 @@ production cutover.** Schema 25 / migration `025_commercial_purchase_funding_aut
 `phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
 tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
 
+## 0. Independent review correction round 1
+
+The first independent review of candidate `10fe40618af3de76f2af37a093e611af10cc6ccc` failed on eight
+findings. All eight are corrected on descendants of that commit (never rewritten):
+
+| Finding | Correction |
+| --- | --- |
+| R1-BLOCK-001 promotion redemption + adjustment consumption | Accepted purchase convergence is now the only consumption boundary: the promotion row and the exact snapshotted adjustment are locked and revalidated, both promotion limits are enforced under that lock, exactly one redemption and one `granted → consumed` transition with its append-only event are written, replay converges, and a second purchase can never reuse the adjustment. Offer issuance still consumes nothing. |
+| R1-BLOCK-002 exact protected interval → Phase-N occupancy | A protected interval authorises an occupancy only when it IS that interval: Teacher, Term, canonical session, exact UTC bounds, buffered occupied end, schedule timezone and local wall clock. Zero, multiple, time, Teacher, Term, sequence or timezone/wall-clock mismatches fail closed, the exact interval is locked inside the scheduling transaction, and only that one interval is excluded from arbitration. |
+| R1-BLOCK-003 historical capacity intervals | Only `claim.state = active` AND `interval.state = protected` blocks. `satisfied` and `released` rows are history; a legitimately released claim is reusable and no longer reported as corruption, while genuinely impossible aggregates still fail closed. |
+| R1-BLOCK-004 Course identity continuity | The continuation case, authorised slot, hold, product, offer, recurring pattern, claim and Term Enrolment must agree on one Course. R1 selects or substitutes no Course; every mismatch fails closed before any commercial truth, capacity mutation or Term creation. |
+| R1-MAJOR-005 exact provider-evidence convergence | Each evidence row stores a canonical immutable-fact digest (provider key, reference, kind, exact nullable amount and currency, obligation reference, occurrence instant, account digest, attributed offer/obligation). Identical facts converge idempotently; a material difference preserves the original row, never manufactures settlement truth and routes `conflicting_payment_evidence` / `ambiguous_obligation_attribution`, sequentially and concurrently. |
+| R1-MAJOR-006 Teacher serialisation for claim release | `releaseClaim()` acquires the canonical per-Teacher scheduling root before reading or mutating the claim intervals, preserving the established global lock order and adding no inverse edge. |
+| R1-MAJOR-007 migration + structural integrity | The repository migration policy deliberately avoids foreign keys and CHECK constraints, so equivalent durable enforcement is implemented instead: class-B policy allowlisting with a fail-closed read for a malformed or structural stored key, funding-plan/entitlement/purchase/offer ownership validation, offer↔product↔case Course and Student ownership validation, claim/interval Teacher and aggregate validation, and a corruption suite that exercises every listed cross-authority reference. |
+| R1-MAJOR-008 critical test proof | Behavioural runtime, corruption and concurrency coverage asserts durable database state and authority ownership for every corrected invariant (see §5). |
+
 ## 1. What this phase owns
 
 R1 establishes the canonical commercial authority that lets a paid Term exist without a payment

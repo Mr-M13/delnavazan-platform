@@ -46,6 +46,42 @@ if($mode==='duplicate_evidence'){
         $intervals=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d ORDER BY interval_sequence LIMIT 1",0));
         $state['target_interval']=array('local_wall_date'=>gmdate('Y-m-d',strtotime((string)$a['reservation']->starts_at_utc.' UTC')),'local_wall_time'=>(string)$a['reservation']->local_wall_time);
     }
+}elseif($mode==='promotion_global_limit'){
+    dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_promotion_redemptions','commercial_promotions','commercial_prices','commercial_products','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
+    $a=dzn_r1_fix_scenario($sources[0],'limit-a',1);
+    $b=dzn_r1_fix_scenario($sources[1],'limit-b',2);
+    $productA=dzn_r1_fix_product((int)$a['course_id'],'AU',25000,'limit-a');
+    $productB=dzn_r1_fix_product((int)$b['course_id'],'AU',25000,'limit-b');
+    dzn_r1_fix_pattern($a,'limit-a');
+    dzn_r1_fix_pattern($b,'limit-b');
+    (new \Delnavazan\Platform\Core\Application\CommercialPromotionService())->define(array('promotion_code'=>'RACELIMIT','kind'=>'percentage','percentage_bp'=>1000,'first_term_only'=>false,'per_beneficiary_limit'=>1,'max_redemptions'=>1,'evidence_channel'=>'staff_record','evidence_reference'=>'promo-limit','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('promo-limit'));
+    $offerA=(new \Delnavazan\Platform\Core\Application\CommercialOfferService())->issue(array('continuation_case_id'=>(int)$a['case_id'],'product_id'=>$productA,'region_code'=>'AU','plan_kind'=>'full','promotion_code'=>'RACELIMIT','evidence_channel'=>'staff_record','evidence_reference'=>'offer-limit-a','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('offer-limit-a'));
+    $offerB=(new \Delnavazan\Platform\Core\Application\CommercialOfferService())->issue(array('continuation_case_id'=>(int)$b['case_id'],'product_id'=>$productB,'region_code'=>'AU','plan_kind'=>'full','promotion_code'=>'RACELIMIT','evidence_channel'=>'staff_record','evidence_reference'=>'offer-limit-b','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('offer-limit-b'));
+    $state['offer_a']=$offerA;$state['offer_b']=$offerB;
+}elseif($mode==='conflicting_evidence_replay'){
+    dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_promotion_redemptions','commercial_promotions','commercial_prices','commercial_products','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
+    $a=dzn_r1_fix_scenario($sources[0],'conflict-a',1);
+    $product=dzn_r1_fix_product((int)$a['course_id'],'AU',25000,'conflict-a');
+    dzn_r1_fix_pattern($a,'conflict-a');
+    $state['offer']=dzn_r1_fix_offer($a,$product,'full','conflict-a');
+    $state['provider_reference']='prov-conflict-'.wp_generate_uuid4();
+}elseif($mode==='release_vs_satisfaction'){
+    dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_promotion_redemptions','commercial_promotions','commercial_prices','commercial_products','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
+    $a=dzn_r1_fix_scenario($sources[0],'release-a',1);
+    $product=dzn_r1_fix_product((int)$a['course_id'],'AU',25000,'release-a');
+    dzn_r1_fix_pattern($a,'release-a');
+    $offer=dzn_r1_fix_offer($a,$product,'full','release-a');
+    dzn_r1_fix_settle($offer,1,'prov-release-1');
+    dzn_r1_fix_activate_enrolment((int)$a['enrolment_id'],'release-a');
+    $entitlement=dzn_r1_fix_entitlement((int)$offer['offer_id']);
+    $handoff=dzn_r1_fix_handoff($entitlement,'release-a');
+    $binding=dzn_r1_fix_bind($entitlement,'release-a');
+    (new \Delnavazan\Platform\Core\Application\CanonicalTermAuthorityService())->activate((int)$binding['term_id'],'authorised',dzn_r1_fix_evidence('release-term'),dzn_r1_fix_key('release-term'));
+    $assignment=(new \Delnavazan\Platform\Core\Application\TeacherAssignmentService())->assignInitial((int)$a['enrolment_id'],dzn_r1_fix_key('release-assignment'));
+    $lesson=(new \Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityService())->createStandard((int)$binding['term_id'],(int)$assignment['assignment_id'],dzn_r1_fix_evidence('release-lesson'),dzn_r1_fix_key('release-lesson'));
+    $interval=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND interval_sequence=1",(int)$handoff['claim_id']));
+    $state['claim_id']=(int)$handoff['claim_id'];$state['lesson_id']=(int)$lesson['lesson_id'];$state['assignment_id']=(int)$assignment['assignment_id'];
+    $state['interval']=array('local_wall_date'=>(string)$interval->local_wall_date,'local_wall_time'=>(string)$interval->local_wall_time);
 }elseif($mode==='unrelated_commitments'){
     dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_prices','commercial_products','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
     $a=dzn_r1_fix_scenario($sources[0],'race-a',1);

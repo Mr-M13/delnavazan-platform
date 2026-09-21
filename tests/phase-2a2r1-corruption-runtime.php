@@ -64,4 +64,62 @@ $rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialPaymentServ
 $wpdb->query($wpdb->prepare("UPDATE {$p}commercial_payment_evidence SET processing_state='accepted' WHERE id=%d",$evidenceId));
 dzn_r1_fix_assert((new \Delnavazan\Platform\Core\Application\CommercialPaymentService())->evidence($evidenceId)['processing_state']==='accepted','the repaired evidence must read normally');
 
+// ---------------------------------------------------------------------------
+// Cross-authority reference integrity (correction round 1): every logical ownership link used for a
+// funding, capacity or policy decision must fail closed when it references the wrong authority.
+// ---------------------------------------------------------------------------
+$readyA=$bindingA['term_id'];
+$planA=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_term_funding_plans WHERE term_id=%d",(int)$readyA));
+dzn_r1_fix_assert($planA!==null,'the funding plan must exist');
+// Course: an offer whose Course is not its product's Course.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offers SET course_id=%d WHERE id=%d",(int)$sources[3]['course_id'],(int)$offerA['offer_id']));
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialOfferService())->offer((int)$offerA['offer_id']),'commercial_course_continuity_conflict','reading an offer whose Course contradicts its product');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offers SET course_id=%d WHERE id=%d",(int)$a['course_id'],(int)$offerA['offer_id']));
+// Student: an offer whose beneficiary is not its continuation case's Student.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offers SET beneficiary_student_id=%d WHERE id=%d",(int)$sources[4]['student_id'],(int)$offerA['offer_id']));
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialOfferService())->offer((int)$offerA['offer_id']),'commercial_offer_integrity_conflict','reading an offer whose beneficiary contradicts its continuation case');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_offers SET beneficiary_student_id=%d WHERE id=%d",(int)$a['student_id'],(int)$offerA['offer_id']));
+// Purchase/entitlement/offer chain: an entitlement bound to a different purchase's offer.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_term_funding_plans SET offer_id=%d WHERE id=%d",(int)$offerB['offer_id'],(int)$planA->id));
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->fundingPlanForTerm((int)$readyA),'commercial_funding_integrity_conflict','a funding plan whose offer contradicts its purchase');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_term_funding_plans SET offer_id=%d WHERE id=%d",(int)$planA->offer_id,(int)$planA->id));
+// Term/Enrolment ownership: an entitlement whose Term contradicts its funding plan.
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_entitlements SET term_id=%d WHERE id=%d",(int)$readyA+1000,$entitlementA));
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->fundingPlanForTerm((int)$readyA),'commercial_funding_integrity_conflict','an entitlement bound to another Term while its plan authorises this one');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_entitlements SET term_id=%d WHERE id=%d",(int)$readyA,$entitlementA));
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_entitlements SET enrolment_id=%d WHERE id=%d",(int)$sources[2]['enrolment_id'],$entitlementA));
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->fundingPlanForTerm((int)$readyA),'commercial_funding_integrity_conflict','an entitlement bound to another Enrolment while its plan authorises this one');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_entitlements SET enrolment_id=(SELECT enrolment_id FROM {$p}commercial_term_funding_plans WHERE id=%d) WHERE id=%d",(int)$planA->id,$entitlementA));
+// Obligation ownership: a settlement whose obligation belongs to another offer.
+$obligationA_b=(int)$obligationA['obligation_id'];
+$c=dzn_r1_fix_scenario($sources[5],'corruption-c',3);
+$productC=dzn_r1_fix_product((int)$c['course_id'],'AU',20000,'corruption-c');
+dzn_r1_fix_pattern($c,'corruption-c');
+$offerC=dzn_r1_fix_offer($c,$productC,'two_instalments','corruption-c');
+$freeObligation=dzn_r1_fix_obligation($offerC,2);
+dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$freeObligation['obligation_id']))===0,'the ownership probe needs an unsettled obligation');
+dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}commercial_obligation_settlements SET obligation_id=%d, amount_minor=%d WHERE obligation_id=%d",(int)$freeObligation['obligation_id'],(int)$freeObligation['amount_minor']+1,$obligationA_b))===1,'the settlement ownership probe must move exactly one settlement');
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->obligationStatus((int)$offerC['offer_id']),'commercial_funding_integrity_conflict','a settlement pointing at another offer obligation with a contradicting amount');
+// The offer the settlement was taken from simply reports its own obligation as unsettled: the
+// mismatch is detected where the invalid reference actually lands, not by inventing a failure.
+$movedAway=(new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->obligationStatus((int)$offerA['offer_id']);
+dzn_r1_fix_assert((int)$movedAway['effective']===0&&$movedAway['obligations'][0]['settled']===false,'the moved settlement must leave its original obligation unsettled');
+dzn_r1_fix_assert($wpdb->query($wpdb->prepare("UPDATE {$p}commercial_obligation_settlements SET obligation_id=%d, amount_minor=%d WHERE obligation_id=%d",$obligationA_b,(int)$obligationA['amount_minor'],(int)$freeObligation['obligation_id']))===1,'the settlement ownership probe must be restorable');
+dzn_r1_fix_assert((new \Delnavazan\Platform\Core\Application\CommercialTermFundingService())->effectiveSessions((int)$offerA['offer_id'])===12,'the settlement ownership must be restorable');
+// Teacher ownership: an interval that claims another Teacher.
+$otherTeacher=(int)($fixture['teachers'][1]??0);
+dzn_r1_fix_assert($otherTeacher>0&&$otherTeacher!==(int)$a['teacher_id'],'a second Teacher is required for the ownership proof');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_capacity_claim_intervals SET teacher_id=%d WHERE claim_id=%d",$otherTeacher,(int)$handoffA['claim_id']));
+$rejected(fn()=>\Delnavazan\Platform\Core\Application\CommercialCapacityAuthority::conflictingClaimCount($otherTeacher,(string)$intervalRow->starts_at_utc,(string)$intervalRow->occupied_ends_at_utc),'commercial_capacity_integrity_conflict','a protected interval claiming another Teacher');
+$wpdb->query($wpdb->prepare("UPDATE {$p}commercial_capacity_claim_intervals SET teacher_id=%d WHERE claim_id=%d",(int)$a['teacher_id'],(int)$handoffA['claim_id']));
+// Policy registry: a malformed class-B row fails the read closed, and a structural invariant key can
+// never be presented as configuration.
+dzn_r1_fix_assert($wpdb->insert($p.'commercial_policies',array('uid'=>\Delnavazan\Platform\Core\Support\Identifier::uid(),'policy_key'=>'PAYMENT_RECOVERY_POLICY','policy_version'=>9,'policy_value'=>'not-a-policy','value_type'=>'bogus','status'=>'active','recorded_at'=>gmdate('Y-m-d H:i:s'),'recorded_by'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'created_by'=>1))!==false,'the malformed policy probe must be insertable for the proof');
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialPolicyService())->current('PAYMENT_RECOVERY_POLICY'),'commercial_policy_integrity_conflict','a malformed stored runtime policy');
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}commercial_policies WHERE policy_key=%s AND policy_version=%d",'PAYMENT_RECOVERY_POLICY',9));
+dzn_r1_fix_assert($wpdb->insert($p.'commercial_policies',array('uid'=>\Delnavazan\Platform\Core\Support\Identifier::uid(),'policy_key'=>'TERM_SESSION_COUNT','policy_version'=>1,'policy_value'=>'12','value_type'=>'weeks','status'=>'active','recorded_at'=>gmdate('Y-m-d H:i:s'),'recorded_by'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'created_by'=>1))!==false,'the structural policy probe must be insertable for the proof');
+dzn_r1_fix_assert((new \Delnavazan\Platform\Core\Application\CommercialPolicyService())->current('INTRO_BOOKING_HORIZON')['set']===false,'a structural invariant key must never be presented as configuration');
+$rejected(fn()=>(new \Delnavazan\Platform\Core\Application\CommercialPolicyService())->set('TERM_SESSION_COUNT',array('policy_value'=>'12','value_type'=>'weeks','reason_code'=>'illegal','evidence_channel'=>'staff_record','evidence_reference'=>'policy-probe','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('policy-probe')),'Structural invariants are not configurable commercial policies','a structural invariant key written through the policy authority');
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}commercial_policies WHERE policy_key=%s AND policy_version=%d",'TERM_SESSION_COUNT',1));
+
 echo "Phase 2A.2-R1 corruption runtime passed\n";

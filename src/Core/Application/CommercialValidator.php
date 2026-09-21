@@ -85,7 +85,44 @@ final class CommercialValidator {
         if($amount!==null&&(int)$amount<1)return false;
         if($currency!==null&&CommercialRule::currency((string)$currency)!==(string)$currency)return false;
         if($evidence->obligation_reference_digest!==null&&!self::digest((string)$evidence->obligation_reference_digest))return false;
+        if(!self::digest((string)($evidence->evidence_fact_digest??'')))return false;
         return self::utc((string)$evidence->ingested_at);
+    }
+
+    /**
+     * Exact protected-interval ↔ canonical-occupancy identity.
+     *
+     * A commercial protected interval authorises a Phase-N schedule only when the authoritative
+     * occupancy is the same interval: same Teacher, same UTC bounds (including the buffered
+     * occupied end), same schedule timezone and same local wall clock. Matching only Term plus
+     * canonical session sequence is deliberately insufficient.
+     */
+    public static function intervalMatchesSchedule(object $interval,array $schedule):bool{
+        foreach(array('teacher_id','starts_at_utc','ends_at_utc','occupied_ends_at_utc','schedule_timezone','local_wall_date','local_wall_time') as $field){
+            if(!isset($schedule[$field]))return false;
+            if((string)$interval->{$field}!==(string)$schedule[$field])return false;
+        }
+        return true;
+    }
+    /** Course identity must be continuous across every authority that represents it. */
+    public static function courseConsistent(array $courses):bool{
+        $expected=null;
+        foreach($courses as $courseId){
+            if($courseId===null)continue;
+            $courseId=(int)$courseId;
+            if($courseId<1)return false;
+            if($expected===null){$expected=$courseId;continue;}
+            if($courseId!==$expected)return false;
+        }
+        return $expected!==null;
+    }
+    /** Whether recorded evidence already carries the incoming (nullable) attribution. */
+    public static function evidenceAttributionMatches(object $evidence,?object $offer,?object $obligation):bool{
+        $recordedOffer=$evidence->offer_id===null?null:(int)$evidence->offer_id;
+        $recordedObligation=$evidence->obligation_id===null?null:(int)$evidence->obligation_id;
+        $incomingOffer=$offer===null?null:(int)$offer->id;
+        $incomingObligation=$obligation===null?null:(int)$obligation->id;
+        return $recordedOffer===$incomingOffer&&$recordedObligation===$incomingObligation;
     }
 
     /** A settlement must be the exact obligation amount in the obligation currency. */

@@ -51,19 +51,41 @@ final class CommercialPaymentService {
         $evidence=CommercialSupport::evidence($input);
         $now=CommercialSupport::now();
 
+        $obligation=$obligationDigest===null?null:$this->repository->obligationByReferenceDigest($obligationDigest);
+        $offer=$obligation===null?null:$this->repository->offer((int)$obligation->offer_id);
+        // A replay is idempotent ONLY when every immutable provider fact is identical; a null value is
+        // part of the identity. A material difference is preserved and routed, never rewritten.
+        $factDigest=CommercialIdempotency::providerFact(array(
+            'provider_key'=>$providerKey,'provider_reference_digest'=>$providerDigest,'evidence_kind'=>$kind,
+            'amount_minor'=>$amount,'currency'=>$currency,'obligation_reference_digest'=>$obligationDigest,
+            'provider_occurred_at'=>$occurredAt,'provider_account_digest'=>$accountDigest,
+            'offer_id'=>$offer!==null?(int)$offer->id:null,'obligation_id'=>$obligation!==null?(int)$obligation->id:null,
+        ));
         $existing=$this->payments->evidenceByProviderReference($providerKey,$providerDigest);
         if($existing){
-            if((string)$existing->evidence_kind!==$kind||($amount!==null&&(int)$existing->amount_minor!==$amount)||($currency!==null&&(string)$existing->currency!==$currency)){
-                throw new \RuntimeException('Idempotency conflict');
+            if(!hash_equals((string)$existing->evidence_fact_digest,$factDigest)){
+                $conflicting=!CommercialValidator::evidenceAttributionMatches($existing,$offer,$obligation);
+                $this->exceptions->recordAfterFailure(array(
+                    'reason_code'=>$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence',
+                    'severity'=>'error',
+                    'summary'=>'A different provider-evidence fact arrived for an existing provider reference',
+                    'student_id'=>$offer!==null?(int)$offer->beneficiary_student_id:null,
+                    'teacher_id'=>$offer!==null?(int)$offer->teacher_id:null,
+                    'offer_id'=>$offer!==null?(int)$offer->id:null,
+                    'obligation_id'=>$obligation!==null?(int)$obligation->id:null,
+                    'evidence_id'=>(int)$existing->id,
+                    'fingerprint_value'=>$providerKey.':'.$providerDigest,
+                ));
+                $outcome=$this->evidenceOutcome($existing);
+                $outcome['conflicting']=true;
+                $outcome['conflict_reason']=$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence';
+                return $outcome;
             }
             return $this->evidenceOutcome($existing);
         }
-
-        $obligation=$obligationDigest===null?null:$this->repository->obligationByReferenceDigest($obligationDigest);
-        $offer=$obligation===null?null:$this->repository->offer((int)$obligation->offer_id);
         if($obligation===null||$offer===null){
             // Unattributable evidence is never guessed: it is preserved and routed for reconciliation.
-            return $this->recordUnattributed($input,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now);
+            return $this->recordUnattributed($input,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now);
         }
         $studentId=(int)$offer->beneficiary_student_id;
         $digest=CommercialSupport::keyString($key);
@@ -81,34 +103,37 @@ final class CommercialPaymentService {
             if(!$offer||!$obligation)throw new \InvalidArgumentException('commercial_obligation_required');
             $obligations=$this->repository->obligationsForOffer((int)$offer->id,true);
             if(!CommercialValidator::offerValid($offer,$obligations,$this->repository->offerAdjustments((int)$offer->id)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
-            if($kind!=='success')return $this->recordNonSettlement($offer,$obligation,$kind,$providerKey,$providerDigest,$amount,$currency,$occurredAt,$accountDigest,$evidence,$digest,$payload,$actor,$now);
+            if($kind!=='success')return $this->recordNonSettlement($offer,$obligation,$kind,$providerKey,$providerDigest,$factDigest,$amount,$currency,$occurredAt,$accountDigest,$evidence,$digest,$payload,$actor,$now);
 
             // Exact, provider-neutral acceptance checks. Nothing here can be influenced by a client.
             if(!in_array((string)$offer->state,array('issued','accepted'),true)){
                 $this->repository->commit();
-                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'invalid_or_expired_offer');
+                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'invalid_or_expired_offer');
             }
             if($offer->expires_at!==null&&$occurredAt!==null&&$occurredAt>(string)$offer->expires_at){
                 $this->repository->commit();
-                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'late_payment_after_offer_window');
+                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'late_payment_after_offer_window');
             }
             if((int)$obligation->amount_minor!==(int)$amount){
                 $this->repository->commit();
-                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'amount_mismatch');
+                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'amount_mismatch');
             }
             if((string)$obligation->currency!==(string)$currency){
                 $this->repository->commit();
-                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'currency_mismatch');
+                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'currency_mismatch');
             }
             $settlement=$this->payments->settlementForObligation((int)$obligation->id,true);
             if($settlement){
                 $this->repository->commit();
-                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'conflicting_payment_evidence');
+                return $this->reject($offer,$obligation,$providerKey,$providerDigest,$factDigest,$kind,$amount,$currency,$occurredAt,$obligationDigest,$accountDigest,$evidence,$actor,$now,'conflicting_payment_evidence');
             }
             $purchase=$this->repository->purchaseByOffer((int)$offer->id,true);
+            // Accepted purchase convergence is the ONLY boundary at which the accepted offer's
+            // commercial benefits are consumed. Offer issuance merely snapshots them.
+            $this->consumeBenefits($offer,(string)$occurredAt,$now,$actor);
             $evidenceId=$this->payments->insertEvidence(array(
                 'uid'=>Identifier::uid(),'reference_code'=>null,'provider_key'=>$providerKey,'provider_account_digest'=>$accountDigest,
-                'evidence_reference_digest'=>$providerDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
+                'evidence_reference_digest'=>$providerDigest,'evidence_fact_digest'=>$factDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
                 'obligation_reference_digest'=>$obligationDigest,'provider_occurred_at'=>$occurredAt,'ingested_at'=>$now,
                 'processing_state'=>'accepted','reason_code'=>null,'offer_id'=>(int)$offer->id,
                 'purchase_id'=>$purchase?(int)$purchase->id:null,'obligation_id'=>(int)$obligation->id,
@@ -156,9 +181,34 @@ final class CommercialPaymentService {
             );
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload);
+            $constraint=$this->repository->duplicate($e)??$this->payments->duplicate($e);
+            if($constraint==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload);
+            // A concurrent duplicate of the same provider reference converges on the recorded fact:
+            // identical facts are idempotent, a material difference is preserved and routed.
+            if(in_array($constraint,array('provider_reference','evidence_id'),true)){
+                $recorded=$this->payments->evidenceByProviderReference($providerKey,$providerDigest);
+                if($recorded)return $this->convergeConcurrentDuplicate($recorded,$factDigest,$offer,$obligation,$providerKey,$providerDigest);
+            }
             throw $e;
         }
+    }
+
+    /** Reconcile a duplicate that lost the insert race, using only the recorded immutable facts. */
+    private function convergeConcurrentDuplicate(object $recorded,string $factDigest,?object $offer,?object $obligation,string $providerKey,string $providerDigest):array{
+        if(hash_equals((string)$recorded->evidence_fact_digest,$factDigest))return $this->evidenceOutcome($recorded);
+        $conflicting=!CommercialValidator::evidenceAttributionMatches($recorded,$offer,$obligation);
+        $this->exceptions->recordAfterFailure(array(
+            'reason_code'=>$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence',
+            'severity'=>'error',
+            'summary'=>'A concurrently ingested provider-evidence fact differs from the recorded fact',
+            'offer_id'=>$recorded->offer_id===null?null:(int)$recorded->offer_id,
+            'obligation_id'=>$recorded->obligation_id===null?null:(int)$recorded->obligation_id,
+            'evidence_id'=>(int)$recorded->id,'fingerprint_value'=>$providerKey.':'.$providerDigest,
+        ));
+        $outcome=$this->evidenceOutcome($recorded);
+        $outcome['conflicting']=true;
+        $outcome['conflict_reason']=$conflicting?'ambiguous_obligation_attribution':'conflicting_payment_evidence';
+        return $outcome;
     }
 
     public function evidence(int $evidenceId):array{
@@ -175,15 +225,30 @@ final class CommercialPaymentService {
     }
 
     /** Preserve unattributable evidence and route it; never guess which obligation it belongs to. */
-    private function recordUnattributed(array $input,string $providerKey,string $providerDigest,string $kind,?int $amount,?string $currency,?string $occurredAt,?string $obligationDigest,?string $accountDigest,array $evidence,int $actor,string $now):array{
+    private function recordUnattributed(array $input,string $providerKey,string $providerDigest,string $factDigest,string $kind,?int $amount,?string $currency,?string $occurredAt,?string $obligationDigest,?string $accountDigest,array $evidence,int $actor,string $now):array{
         $requiresAttribution=in_array($kind,array('success','refund'),true);
         $this->payments->begin();
         try{
             $existing=$this->payments->evidenceByProviderReference($providerKey,$providerDigest,true);
-            if($existing){$this->payments->commit();return $this->evidenceOutcome($existing);}
+            if($existing){
+                if(!hash_equals((string)$existing->evidence_fact_digest,$factDigest)){
+                    $this->exceptions->recordWithinTransaction(array(
+                        'reason_code'=>'conflicting_payment_evidence','severity'=>'error',
+                        'summary'=>'A different unattributed provider-evidence fact arrived for an existing provider reference',
+                        'evidence_id'=>(int)$existing->id,'fingerprint_value'=>$providerKey.':'.$providerDigest,
+                    ));
+                    $this->payments->commit();
+                    $outcome=$this->evidenceOutcome($existing);
+                    $outcome['conflicting']=true;
+                    $outcome['conflict_reason']='conflicting_payment_evidence';
+                    return $outcome;
+                }
+                $this->payments->commit();
+                return $this->evidenceOutcome($existing);
+            }
             $evidenceId=$this->payments->insertEvidence(array(
                 'uid'=>Identifier::uid(),'reference_code'=>null,'provider_key'=>$providerKey,'provider_account_digest'=>$accountDigest,
-                'evidence_reference_digest'=>$providerDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
+                'evidence_reference_digest'=>$providerDigest,'evidence_fact_digest'=>$factDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
                 'obligation_reference_digest'=>$obligationDigest,'provider_occurred_at'=>$occurredAt,'ingested_at'=>$now,
                 'processing_state'=>$requiresAttribution?'unmatched':'accepted',
                 'reason_code'=>$requiresAttribution?'unmatched_payment_evidence':null,
@@ -208,11 +273,11 @@ final class CommercialPaymentService {
     }
 
     /** A non-success fact is durable evidence with no financial or academic consequence. */
-    private function recordNonSettlement(object $offer,object $obligation,string $kind,string $providerKey,string $providerDigest,?int $amount,?string $currency,?string $occurredAt,?string $accountDigest,array $evidence,string $digest,string $payload,int $actor,string $now):array{
+    private function recordNonSettlement(object $offer,object $obligation,string $kind,string $providerKey,string $providerDigest,string $factDigest,?int $amount,?string $currency,?string $occurredAt,?string $accountDigest,array $evidence,string $digest,string $payload,int $actor,string $now):array{
         $purchase=$this->repository->purchaseByOffer((int)$offer->id);
         $evidenceId=$this->payments->insertEvidence(array(
             'uid'=>Identifier::uid(),'reference_code'=>null,'provider_key'=>$providerKey,'provider_account_digest'=>$accountDigest,
-            'evidence_reference_digest'=>$providerDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
+            'evidence_reference_digest'=>$providerDigest,'evidence_fact_digest'=>$factDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
             'obligation_reference_digest'=>(string)$obligation->obligation_reference_digest,'provider_occurred_at'=>$occurredAt,
             'ingested_at'=>$now,'processing_state'=>'accepted','reason_code'=>null,'offer_id'=>(int)$offer->id,
             'purchase_id'=>$purchase?(int)$purchase->id:null,'obligation_id'=>(int)$obligation->id,'created_at'=>$now,'created_by'=>$actor,
@@ -239,11 +304,11 @@ final class CommercialPaymentService {
     }
 
     /** Refuse a success that cannot be accepted, and keep the evidence plus its reason durable. */
-    private function reject(object $offer,object $obligation,string $providerKey,string $providerDigest,string $kind,?int $amount,?string $currency,?string $occurredAt,?string $obligationDigest,?string $accountDigest,array $evidence,int $actor,string $now,string $reason):array{
+    private function reject(object $offer,object $obligation,string $providerKey,string $providerDigest,string $factDigest,string $kind,?int $amount,?string $currency,?string $occurredAt,?string $obligationDigest,?string $accountDigest,array $evidence,int $actor,string $now,string $reason):array{
         $purchase=$this->repository->purchaseByOffer((int)$offer->id);
         $evidenceId=$this->payments->insertEvidence(array(
             'uid'=>Identifier::uid(),'reference_code'=>null,'provider_key'=>$providerKey,'provider_account_digest'=>$accountDigest,
-            'evidence_reference_digest'=>$providerDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
+            'evidence_reference_digest'=>$providerDigest,'evidence_fact_digest'=>$factDigest,'evidence_kind'=>$kind,'amount_minor'=>$amount,'currency'=>$currency,
             'obligation_reference_digest'=>$obligationDigest,'provider_occurred_at'=>$occurredAt,'ingested_at'=>$now,
             'processing_state'=>'rejected','reason_code'=>$reason,'offer_id'=>(int)$offer->id,
             'purchase_id'=>$purchase?(int)$purchase->id:null,'obligation_id'=>(int)$obligation->id,'created_at'=>$now,'created_by'=>$actor,
@@ -280,6 +345,67 @@ final class CommercialPaymentService {
             'state'=>'issued','term_id'=>null,'enrolment_id'=>null,'issued_at'=>$now,'bound_at'=>null,
             'entitlement_version'=>1,'created_at'=>$now,'created_by'=>$actor,'updated_at'=>$now,'updated_by'=>$actor,
         ));
+    }
+    /**
+     * Consume the exact commercial benefits represented by the accepted immutable offer.
+     *
+     * Runs inside the purchase-acceptance transaction. The promotion row (and the adjustment row)
+     * are locked before their limits or state are read, so concurrent acceptance can never exceed a
+     * global or per-beneficiary limit, and an adjustment can never discount two purchases. Every
+     * check is revalidated against the recorded snapshot rather than trusted from issuance time, and
+     * a repeat of the same acceptance converges on the existing redemption/consumption.
+     */
+    private function consumeBenefits(object $offer,string $occurredAt,string $now,int $actor):void{
+        $offerId=(int)$offer->id;
+        $studentId=(int)$offer->beneficiary_student_id;
+        if($offer->promotion_id!==null){
+            $promotion=$this->repository->promotion((int)$offer->promotion_id,true);
+            if(!$promotion)throw new \InvalidArgumentException('commercial_promotion_integrity_conflict');
+            $redeemed=$this->repository->redemptionForOffer($offerId);
+            if($redeemed&&(int)$redeemed->promotion_id!==(int)$promotion->id)throw new \InvalidArgumentException('commercial_promotion_integrity_conflict');
+            if(!$redeemed){
+                $recorded=(int)($offer->promotion_amount_minor??0);
+                if($recorded<1)throw new \InvalidArgumentException('commercial_promotion_integrity_conflict');
+                $prior=$this->repository->purchasesForBeneficiary($studentId);
+                $eligibility=(new CommercialPromotionService($this->repository))->resolveEligibility($promotion,$studentId,(int)$offer->product_id,(string)$offer->currency,(int)$offer->base_amount_minor,$occurredAt,$prior!==array(),$this->repository,true);
+                if(!$eligibility['eligible'])throw new \InvalidArgumentException('promotion_ineligible:'.$eligibility['reason']);
+                if((int)$eligibility['amount_minor']!==$recorded)throw new \InvalidArgumentException('promotion_snapshot_conflict');
+                $sequence=$this->repository->redemptionCount((int)$promotion->id,true)+1;
+                if($promotion->max_redemptions!==null&&$sequence>(int)$promotion->max_redemptions)throw new \InvalidArgumentException('promotion_usage_limit_reached');
+                $beneficiaryCount=$this->repository->beneficiaryRedemptionCount((int)$promotion->id,$studentId,true);
+                if($beneficiaryCount+1>(int)$promotion->per_beneficiary_limit)throw new \InvalidArgumentException('promotion_beneficiary_limit_reached');
+                $this->repository->insertRedemption(array(
+                    'uid'=>Identifier::uid(),'promotion_id'=>(int)$promotion->id,'beneficiary_student_id'=>$studentId,
+                    'offer_id'=>$offerId,'redemption_sequence'=>$sequence,'state'=>'consumed','consumed_at'=>$now,
+                    'revoked_at'=>null,'revoked_by'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor,
+                ));
+            }
+        }
+        if($offer->account_adjustment_id!==null){
+            $adjustment=$this->repository->adjustment((int)$offer->account_adjustment_id,true);
+            if(!$adjustment)throw new \InvalidArgumentException('commercial_adjustment_integrity_conflict');
+            if((int)$adjustment->beneficiary_student_id!==$studentId)throw new \InvalidArgumentException('commercial_adjustment_beneficiary_mismatch');
+            if($adjustment->product_id!==null&&(int)$adjustment->product_id!==(int)$offer->product_id)throw new \InvalidArgumentException('commercial_adjustment_product_mismatch');
+            if((string)$adjustment->kind==='fixed'&&(string)$adjustment->currency!==(string)$offer->currency)throw new \InvalidArgumentException('commercial_adjustment_currency_mismatch');
+            if((int)($offer->account_adjustment_amount_minor??0)<1)throw new \InvalidArgumentException('commercial_adjustment_integrity_conflict');
+            $state=(string)$adjustment->state;
+            if($state==='consumed'){
+                if((int)$adjustment->consumed_offer_id!==$offerId)throw new \InvalidArgumentException('commercial_adjustment_already_consumed');
+                return;
+            }
+            if($state!=='granted')throw new \InvalidArgumentException('commercial_adjustment_not_available');
+            $sequence=$this->repository->maxAdjustmentEventSequence((int)$adjustment->id)+1;
+            $this->repository->updateAdjustmentState((int)$adjustment->id,(int)$adjustment->adjustment_version,array(
+                'state'=>'consumed','consumed_offer_id'=>$offerId,'consumed_at'=>$now,'updated_at'=>$now,'updated_by'=>$actor,
+            ));
+            $this->repository->insertAdjustmentEvent(array(
+                'uid'=>Identifier::uid(),'adjustment_id'=>(int)$adjustment->id,'event_sequence'=>$sequence,
+                'event_type'=>'consumed','from_state'=>'granted','to_state'=>'consumed','offer_id'=>$offerId,
+                'reason_code'=>'accepted_purchase','evidence_channel'=>(string)$offer->evidence_channel,
+                'evidence_reference_digest'=>(string)$offer->evidence_reference_digest,'occurred_at'=>$occurredAt,
+                'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
+            ));
+        }
     }
     private function funding():CommercialTermFundingService{return new CommercialTermFundingService($this->repository,$this->payments);}
     private function evidenceOutcome(object $evidence):array{

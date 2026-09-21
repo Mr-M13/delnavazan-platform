@@ -42,6 +42,9 @@ final class CommercialPatternService {
         try{
             if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload);$this->repository->commit();return $result;}
             $course=$this->standardCourse($courseId);
+            // The pattern must reference the same Course identity as its authorised slot: a pattern
+            // for another Course would silently move the commitment's academic context.
+            if((int)$slot->course_id!==$courseId)throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $existing=$this->repository->patternForSlotAuthority($slotAuthorityId,true);
             if($existing){
                 $this->repository->commit();

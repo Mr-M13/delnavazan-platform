@@ -21,6 +21,9 @@ final class CommercialPolicyService {
         $this->requireKey($policyKey,'view');
         $row=$this->repository->latestPolicy($policyKey);
         if(!$row)return array('policy_key'=>$policyKey,'set'=>false,'version'=>null,'value'=>null,'value_type'=>null,'effective_from'=>null);
+        // A stored row that is not a valid class-B policy (for example a hand-inserted structural
+        // invariant key) fails the read closed instead of being presented as configuration.
+        if(!CommercialValidator::policyValid($row))throw new \InvalidArgumentException('commercial_policy_integrity_conflict');
         return array(
             'policy_key'=>$policyKey,'set'=>$row->policy_value!==null,'version'=>(int)$row->policy_version,
             'value'=>$row->policy_value===null?null:(string)$row->policy_value,

@@ -25,6 +25,22 @@ final class CommercialIdempotency {
         if(trim($reference)==='')throw new \InvalidArgumentException('Obligation reference required');
         return hash_hmac('sha256','commercial_obligation:'.$reference,wp_salt('dzn_commercial'));
     }
+    /**
+     * Canonical identity of one immutable provider-evidence fact.
+     *
+     * Every authoritative immutable fact participates, and a null value is part of the identity
+     * (`null` is encoded explicitly, never dropped), so a replay is idempotent ONLY when the facts
+     * are identical and any material difference is a conflict rather than a silent convergence.
+     *
+     * @param array<string,mixed> $facts
+     */
+    public static function providerFact(array $facts):string{
+        $normalised=array();
+        foreach($facts as $key=>$value){
+            $normalised[(string)$key]=$value===null?array('null'=>true):$value;
+        }
+        return hash_hmac('sha256','commercial_provider_fact:'.wp_json_encode($normalised,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),wp_salt('dzn_commercial'));
+    }
     public static function promotionCode(string $code):string{
         if(trim($code)==='')throw new \InvalidArgumentException('Promotion code required');
         return hash_hmac('sha256','commercial_promotion_code:'.strtoupper(trim($code)),wp_salt('dzn_commercial'));

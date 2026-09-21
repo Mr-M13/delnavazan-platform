@@ -30,7 +30,9 @@ function dzn_r1_fix_scenario(array $source,string $label,int $sequence):array{
     $lessonId=(int)(new LessonService())->create(array('student_id'=>(int)$source['student_id'],'teacher_id'=>(int)$source['teacher_id'],'course_id'=>(int)$source['course_id'],'lesson_type'=>'introductory','status'=>'draft'));
     // Distinct scenarios must never share a Teacher interval: each occupies a 45-minute window, so
     // consecutive scenarios start two hours apart.
-    $wall=gmdate('Y-m-d H:i:s',strtotime('-3 days')-($sequence*7200));
+    // Fixed mid-day past anchor with a distinct per-scenario offset: derived intervals stay clear of
+    // the daily availability window boundary regardless of the time of day the suite runs at.
+    $wall=gmdate('Y-m-d H:i:s',strtotime(gmdate('Y-m-d',strtotime('-4 days')).' 12:00:00 UTC')-($sequence*3600));
     (new LessonScheduleService())->initial($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),'reason'=>$label));
     $slotWall=gmdate('Y-m-d H:i:s',strtotime($wall)+7*86400);
     $slot=$continuation->recordFirstRegularSlot($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'slot-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('slot-'.$label));
@@ -91,6 +93,9 @@ function dzn_r1_fix_handoff(int $entitlementId,string $label):array{
 }
 function dzn_r1_fix_bind(int $entitlementId,string $label):array{
     return (new CommercialTermFundingService())->bindEntitlementToTerm($entitlementId,dzn_r1_fix_evidence('bind-'.$label),dzn_r1_fix_key('bind-'.$label));
+}
+function dzn_r1_fix_release_claim(int $claimId,string $label):array{
+    return (new CommercialCapacityService())->releaseClaim($claimId,dzn_r1_fix_evidence('release-'.$label)+array('release_reason_code'=>'commercial_resolution'),dzn_r1_fix_key('release-'.$label));
 }
 /** A commercial-free canonical Term with one unscheduled Lesson, used as competing capacity. */
 function dzn_r1_fix_free_lesson(array $source,string $label):array{

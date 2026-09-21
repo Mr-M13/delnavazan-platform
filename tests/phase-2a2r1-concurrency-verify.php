@@ -38,6 +38,24 @@ if($mode==='duplicate_evidence'){
     wp_set_current_user(1);
     (new CanonicalLessonAuthorityService())->createStandard((int)$state['term_id'],(int)$state['assignment_id'],dzn_r1_fix_evidence('after-race-seven'),dzn_r1_fix_key('after-race-seven'));
     dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}lessons WHERE term_id=%d AND canonical_sequence=7",(int)$state['term_id']))===1,'the seventh Lesson must be materialisable after the committed settlement');
+}elseif($mode==='promotion_global_limit'){
+    dzn_r1_fix_assert($w1['ok']===true,'the first acceptance must succeed');
+    dzn_r1_fix_assert($w2['ok']===false&&str_contains((string)($w2['message']??''),'promotion_usage_limit_reached'),'the second acceptance must fail closed on the global redemption limit');
+    dzn_r1_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_promotion_redemptions")===1,'a global promotion maximum must never be exceeded under concurrency');
+    dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$state['offer_b']['offer_id']))===0,'the refused acceptance must not create a purchase');
+    dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_purchases WHERE offer_id=%d",(int)$state['offer_a']['offer_id']))===1,'the winning acceptance must create exactly one purchase');
+}elseif($mode==='conflicting_evidence_replay'){
+    dzn_r1_fix_assert($w1['ok']===true,'the original evidence must settle');
+    dzn_r1_fix_assert($w2['ok']===true&&($w2['outcome']['conflicting']??false)===true,'a concurrent conflicting replay must be reported as conflicting');
+    dzn_r1_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements")===1,'a conflicting replay must never manufacture a second settlement');
+    dzn_r1_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_payment_evidence")===1,'a conflicting replay must never rewrite or duplicate the original evidence');
+    dzn_r1_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_exceptions WHERE state='open'")>=1,'a conflicting replay must be routed into durable review');
+}elseif($mode==='release_vs_satisfaction'){
+    dzn_r1_fix_assert($w1['ok']===true,'the authorised claim release must succeed');
+    dzn_r1_fix_assert($w2['ok']===true,'a schedule after an authorised release must succeed');
+    dzn_r1_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$state['claim_id']))==='released','the claim must remain released');
+    dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$state['claim_id']))===0,'no protected interval may survive the release');
+    dzn_r1_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d AND applicable_slot=1",(int)$state['lesson_id']))===1,'the released interval must be reusable by the surviving schedule');
 }elseif($mode==='unrelated_commitments'){
     dzn_r1_fix_assert($w1['ok']===true&&$w2['ok']===true,'independent commitments must both establish their capacity');
     dzn_r1_fix_assert($count('commercial_capacity_claims')===2,'each commitment must own exactly one claim');

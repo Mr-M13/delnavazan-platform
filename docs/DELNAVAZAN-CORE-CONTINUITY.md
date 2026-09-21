@@ -388,6 +388,13 @@ webhook, credential or subscription object exists.
 
 Detailed contract, integration table, testing evidence, exclusions and follow-ups:
 [PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md](PHASE-2A-2R1-COMMERCIAL-PURCHASE-FUNDING-CAPACITY-AUTHORITY.md).
+**Correction round 1:** the first independent review of `10fe40618af3de76f2af37a093e611af10cc6ccc`
+failed on eight findings; all eight are corrected on descendants of that commit (benefit consumption
+at accepted purchase convergence; exact protected-interval ↔ Phase-N occupancy identity; historical
+capacity rows non-blocking; Course identity continuity; canonical provider-evidence fact convergence;
+Teacher-root serialisation for claim release; durable structural-integrity enforcement in place of
+foreign keys; behavioural proof for each). The reviewed commit was not rewritten and no force push was
+used.
 Deferred to Phase R2: recurring enrolment, renewal cycles and next-Term boundary movement, automatic
 and manual collection modes, the four-week manual guarantee, recovery/lapse, refund review trajectory
 and the channel-neutral notification intents. Terms & Conditions alignment remains a separate

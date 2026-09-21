@@ -69,8 +69,14 @@ final class CommercialOfferService {
             if(!$reservation)throw new \InvalidArgumentException('continuation_reservation_required');
             $now=CommercialSupport::now();
             if(!CanonicalContinuationRule::capacityEffective((string)$reservation->state,(string)$reservation->expires_at,$now))throw new \InvalidArgumentException('continuation_reservation_expired');
+            $slotAuthority=$this->continuations->slotAuthorityForIntro((int)$case->intro_lesson_id,true);
+            if(!$slotAuthority)throw new \InvalidArgumentException('first_regular_slot_authority_required');
             $product=$this->repository->product($productId,true);
             if(!$product||$product->archived_at!==null||(string)$product->status!=='active')throw new \InvalidArgumentException('commercial_product_required');
+            // Course identity must be continuous across the continuation case, the authorised first
+            // regular slot, its hold, the sellable product and this offer. R1 has no Course-selection
+            // authority and never infers or substitutes a Course.
+            if(!CommercialValidator::courseConsistent(array((int)$case->course_id,(int)$slotAuthority->course_id,(int)$reservation->course_id,(int)$product->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $price=$this->catalogue->resolvePrice($productId,$region['region_code'],true);
             $currency=(string)$price->currency;
             $base=(int)$price->amount_minor;
@@ -101,8 +107,6 @@ final class CommercialOfferService {
             if($amountDue<1)throw new \InvalidArgumentException('commercial_offer_amount_invalid');
             $amounts=$this->decompose($planKind,$amountDue);
             $authorityBasis=$this->authorityBasis($studentId,$actor);
-            $slotAuthority=$this->continuations->slotAuthorityForIntro((int)$case->intro_lesson_id,true);
-            if(!$slotAuthority)throw new \InvalidArgumentException('first_regular_slot_authority_required');
             $offerUid=Identifier::uid();
             $offerId=$this->repository->insertOffer(array(
                 'uid'=>$offerUid,'reference_code'=>null,'beneficiary_student_id'=>$studentId,'authority_basis'=>$authorityBasis,
@@ -178,6 +182,13 @@ final class CommercialOfferService {
         if(!$offer)throw new \InvalidArgumentException('commercial_offer_required');
         $obligations=$this->repository->obligationsForOffer($offerId);
         if(!CommercialValidator::offerValid($offer,$obligations,$this->repository->offerAdjustments($offerId)))throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+        // Logical ownership: the offer's Course must be the product's Course and its continuation
+        // lineage (case, authorised slot, hold) must still exist and agree with the offer identity.
+        $product=$this->repository->product((int)$offer->product_id);
+        $case=$this->continuations->caseById((int)$offer->continuation_case_id);
+        if(!$product||!$case)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
+        if(!CommercialValidator::courseConsistent(array((int)$product->course_id,(int)$offer->course_id,(int)$case->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
+        if((int)$case->student_id!==(int)$offer->beneficiary_student_id||(int)$case->student_id!==(int)$offer->student_id)throw new \InvalidArgumentException('commercial_offer_integrity_conflict');
         return $this->result($offer,$obligations,false,false);
     }
 

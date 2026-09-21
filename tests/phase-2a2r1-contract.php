@@ -103,7 +103,48 @@ if(!str_contains($payment,'conflicting_payment_evidence'))throw new RuntimeExcep
 if(!str_contains($payment,'CommercialValidator::offerValid'))throw new RuntimeException('Payment acceptance must validate the offer aggregate');
 if(!str_contains($payment,'purchaseByOffer'))throw new RuntimeException('One purchase per offer must be enforced through the canonical lookup');
 if(!str_contains($funding,'$isEffective=$settled&&!$blocked;'))throw new RuntimeException('Academic effectiveness must require every lower-sequence obligation to be settled');
-if(!str_contains($funding,'min((int)$plan->committed_sessions,$this->effectiveSessions((int)$plan->offer_id))'))throw new RuntimeException('The Term allowance must be derived and bounded by the commitment');
+if(!str_contains($funding,"min((int)\$plan['committed_sessions'],\$this->effectiveSessions((int)\$plan['offer_id']))"))throw new RuntimeException('The Term allowance must be derived and bounded by the commitment');
+
+// Correction Round 1 — accepted-purchase benefit consumption is the only consumption boundary.
+if(!str_contains($payment,'private function consumeBenefits'))throw new RuntimeException('Purchase acceptance must consume the accepted offer benefits');
+if(!str_contains($payment,'$this->consumeBenefits($offer,(string)$occurredAt,$now,$actor);'))throw new RuntimeException('Benefit consumption must run inside accepted purchase convergence');
+if(!str_contains($payment,'insertRedemption')||!str_contains($payment,'updateAdjustmentState'))throw new RuntimeException('The payment authority must consume the promotion redemption and the account adjustment');
+if(!str_contains($payment,'promotion_usage_limit_reached')||!str_contains($payment,'promotion_beneficiary_limit_reached')||!str_contains($payment,'commercial_adjustment_already_consumed'))throw new RuntimeException('Benefit consumption must enforce both promotion limits and single adjustment consumption');
+foreach(array('insertRedemption','updateAdjustmentState') as $forbidden) if(str_contains($offer,$forbidden))throw new RuntimeException('Offer issuance must never consume a commercial benefit: '.$forbidden);
+if(!str_contains($payment,'CommercialValidator::evidenceAttributionMatches'))throw new RuntimeException('Conflicting evidence replay must distinguish attribution conflicts');
+
+// Correction Round 1 — exact protected interval ↔ Phase-N occupancy identity.
+if(!str_contains($validator,'public static function intervalMatchesSchedule'))throw new RuntimeException('Exact interval identity matching is missing');
+foreach(array('starts_at_utc','ends_at_utc','occupied_ends_at_utc','schedule_timezone','local_wall_date','local_wall_time','teacher_id') as $field) if(!str_contains($validator,$field))throw new RuntimeException('Exact interval identity must include '.$field);
+foreach(array('protected_interval_mismatch','protected_interval_missing','protected_interval_teacher_mismatch') as $reason) if(!str_contains($capacityAuthority,$reason))throw new RuntimeException('Exact interval identity must fail closed with '.$reason);
+if(!str_contains($capacityAuthority,'$repository->claimsForTerm($termId,true)')||!str_contains($capacityAuthority,'$repository->intervals((int)$claim->id,true)'))throw new RuntimeException('The authorising interval must be locked inside the scheduling transaction');
+if(!str_contains($schedules,'CommercialCapacityAuthority::assertScheduleAllowed($lesson,$schedule??array())'))throw new RuntimeException('Phase N must authorise against the exact schedule identity');
+if(!str_contains($schedules,'CommercialCapacityAuthority::satisfyForLesson($lesson,(int)$versionId,$schedule??array(),$actor,$now)'))throw new RuntimeException('Phase N must satisfy using the exact schedule identity');
+
+// Correction Round 1 — historical capacity rows are never blockers, and only the exact interval is excluded.
+if(!str_contains($capacityAuthority,"if((string)\$claim->state!=='active')continue;"))throw new RuntimeException('A historical claim must not block arbitration');
+if(!str_contains($capacityAuthority,"if((string)\$interval->state!=='protected')continue;"))throw new RuntimeException('A satisfied or released interval must not block arbitration');
+if(!str_contains($capacityRepo,'WHERE teacher_id=%d AND id<>%d'))throw new RuntimeException('Conflict arbitration must exclude only the exact authorising interval');
+if(str_contains($capacityRepo,'claim_id<>%d'))throw new RuntimeException('Conflict arbitration must never exclude a whole commercial claim');
+
+// Correction Round 1 — Course identity continuity across every represented authority.
+foreach(array($offer,$pattern,$funding) as $source) if(!str_contains($source,'commercial_course_continuity_conflict'))throw new RuntimeException('Course identity continuity must be enforced');
+if(!str_contains($validator,'public static function courseConsistent'))throw new RuntimeException('The shared Course continuity check is missing');
+
+// Correction Round 1 — claim release participates in the canonical Teacher serialisation.
+if(substr_count($capacity,'ensureAndLockTeacherRoot')<2)throw new RuntimeException('Claim release must acquire the canonical Teacher scheduling root');
+if(!str_contains($capacity,'Releasing protected capacity is a capacity mutation'))throw new RuntimeException('Claim release must document its serialisation boundary');
+
+// Correction Round 1 — exact provider-evidence fact identity.
+if(!str_contains($idempotency,'public static function providerFact'))throw new RuntimeException('The canonical provider-evidence fact digest is missing');
+if(!str_contains($migration,'evidence_fact_digest'))throw new RuntimeException('Payment evidence must durably store its fact identity');
+if(substr_count($payment,'evidence_fact_digest')<3)throw new RuntimeException('Every evidence write must record its fact identity');
+
+// Correction Round 1 — durable structural integrity proof (repository policy avoids foreign keys).
+if(!str_contains($validator,'public static function policyValid'))throw new RuntimeException('Runtime policy validation is missing');
+if(!str_contains($policy,"if(!CommercialValidator::policyValid(\$row))throw new \InvalidArgumentException('commercial_policy_integrity_conflict');"))throw new RuntimeException('A stored non-class-B policy must fail the read closed');
+if(!str_contains($funding,'commercial_funding_integrity_conflict'))throw new RuntimeException('The funding ownership chain must fail closed');
+if(!str_contains($offer,"if((int)\$case->student_id!==(int)\$offer->beneficiary_student_id"))throw new RuntimeException('Offer ownership must be validated against its continuation case');
 if(!str_contains($funding,'CommercialValidator::entitlementValid'))throw new RuntimeException('Term binding must validate the entitlement aggregate');
 if(!str_contains($funding,'commercial_capacity_handoff_required'))throw new RuntimeException('A Term must not be bound before its successor capacity is durable');
 if(!str_contains($funding,'create(')||!str_contains($funding,'self::CAPABILITY'))throw new RuntimeException('Term binding must use the existing canonical Term authority');

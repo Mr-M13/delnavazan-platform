@@ -30,6 +30,7 @@ final class CommercialTermFundingService {
      * @return array{settled:int,effective:int,prerequisites_satisfied:bool,obligations:array<int,array<string,mixed>>}
      */
     public function obligationStatus(int $offerId):array{
+        if($offerId<1||!$this->repository->offer($offerId))throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
         $obligations=$this->repository->obligationsForOffer($offerId);
         $settledByObligation=array();
         foreach($this->payments->settlementsForOffer($offerId) as $settlement)$settledByObligation[(int)$settlement->obligation_id]=$settlement;
@@ -78,9 +79,9 @@ final class CommercialTermFundingService {
      */
     public function standardAllowanceForTerm(int $termId):?int{
         if($termId<1)return null;
-        $plan=$this->repository->fundingPlanForTerm($termId);
+        $plan=$this->fundingPlanForTerm($termId);
         if(!$plan)return null;
-        return min((int)$plan->committed_sessions,$this->effectiveSessions((int)$plan->offer_id));
+        return min((int)$plan['committed_sessions'],$this->effectiveSessions((int)$plan['offer_id']));
     }
     /** Transaction-participating static form used by the canonical Lesson issuance guard. */
     public static function standardAllowance(int $termId):?int{
@@ -143,8 +144,11 @@ final class CommercialTermFundingService {
             $claim=(new \Delnavazan\Platform\Core\Infrastructure\Repository\CommercialCapacityRepository())->claimForEntitlement($entitlementId,true);
             if(!$claim)throw new \InvalidArgumentException('commercial_capacity_handoff_required');
             if((string)$claim->state!=='active')throw new \InvalidArgumentException('commercial_capacity_claim_not_active');
+            // Course identity continuity across the accepted offer, its claim and the Term's Enrolment.
+            if(!CommercialValidator::courseConsistent(array((int)$offer->course_id,(int)$claim->course_id)))throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $enrolmentHint=$this->repository->canonicalEnrolmentFor($studentId,$courseId,false);
             if(!$enrolmentHint)throw new \InvalidArgumentException('canonical_enrolment_required');
+            if((int)$enrolmentHint->course_id!==(int)$offer->course_id)throw new \InvalidArgumentException('commercial_course_continuity_conflict');
             $enrolmentId=(int)$enrolmentHint->id;
             // The canonical Term is created by the existing Phase-L authority inside this
             // transaction, under this command's own commercial capability: one writer, one commit.
@@ -187,6 +191,17 @@ final class CommercialTermFundingService {
     public function fundingPlanForTerm(int $termId):?array{
         $plan=$this->repository->fundingPlanForTerm($termId);
         if(!$plan)return null;
+        // Logical ownership chain: a funding plan must reference its own entitlement's purchase and
+        // that purchase's offer, and the Term/Enrolment it claims to authorise. A broken reference
+        // fails closed rather than silently funding an unrelated Term.
+        $entitlement=$this->repository->entitlement((int)$plan->entitlement_id);
+        $purchase=$this->repository->purchase((int)$plan->purchase_id);
+        if(!$entitlement||!$purchase)throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
+        if((int)$entitlement->purchase_id!==(int)$plan->purchase_id)throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
+        if((int)$purchase->offer_id!==(int)$plan->offer_id)throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
+        if((int)$entitlement->beneficiary_student_id!==(int)$purchase->beneficiary_student_id)throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
+        if((int)$entitlement->term_id!==(int)$plan->term_id||(int)$entitlement->enrolment_id!==(int)$plan->enrolment_id)throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
+        if((string)$entitlement->state!=='term_bound')throw new \InvalidArgumentException('commercial_funding_integrity_conflict');
         return array(
             'term_id'=>(int)$plan->term_id,'enrolment_id'=>(int)$plan->enrolment_id,'entitlement_id'=>(int)$plan->entitlement_id,
             'purchase_id'=>(int)$plan->purchase_id,'offer_id'=>(int)$plan->offer_id,

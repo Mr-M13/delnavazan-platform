@@ -67,7 +67,10 @@ $scenario=function(int $index,string $label,int $slotOffsetDays=7,?string $expli
     static $sequence=0;$sequence++;
     $src=$sources[$index%count($sources)];
     $lessonId=(int)(new LessonService())->create(array('student_id'=>(int)$src['student_id'],'teacher_id'=>(int)$src['teacher_id'],'course_id'=>(int)$src['course_id'],'lesson_type'=>'introductory','status'=>'draft'));
-    $wall=gmdate('Y-m-d H:i:s',strtotime('-3 days')-($sequence*3600));
+    // Anchor every scenario at a fixed mid-day past instant with a distinct offset so the derived
+    // regular intervals never straddle the daily availability window boundary, whatever the time of
+    // day the suite runs at.
+    $wall=gmdate('Y-m-d H:i:s',strtotime(gmdate('Y-m-d',strtotime('-4 days')).' 12:00:00 UTC')-($sequence*3600));
     (new LessonScheduleService())->initial($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),'reason'=>$label));
     $occurrence=$wpdb->get_row($wpdb->prepare("SELECT v.* FROM {$p}lesson_schedule_versions v INNER JOIN {$p}lessons l ON l.id=v.lesson_id AND l.current_schedule_version_id=v.id WHERE v.lesson_id=%d AND v.superseded_at IS NULL",$lessonId));
     dzn_r1_assert($occurrence!==null,'introductory occurrence fixture missing');
@@ -371,5 +374,75 @@ dzn_r1_assert((string)$released->state==='released'&&(string)$released->release_
 dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$readyJ['claim_id']))===0,'releasing a claim must release its protected intervals');
 $terms->close((int)$readyJ['term_id'],'current',dzn_r1_evidence('close-j-allowed'),dzn_r1_key('close-j-allowed'));
 dzn_r1_assert((string)$wpdb->get_var($wpdb->prepare("SELECT lifecycle_state FROM {$p}terms WHERE id=%d",(int)$readyJ['term_id']))==='closed','the Term must close once its protected capacity is resolved');
+
+// ---------------------------------------------------------------------------
+// K. Correction round 1: benefit consumption, exact interval identity, Course continuity,
+//    historical capacity rows, conflicting evidence and Teacher-root claim release.
+// ---------------------------------------------------------------------------
+$k=$scenario(11,'correction-k');
+$productK=$productFor((int)$k['course_id'],'AU',25000);
+$patterns->establish(array('slot_authority_id'=>(int)$k['slot_authority_id'],'course_id'=>(int)$k['course_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'pattern-k','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('pattern-k'));
+$promotionK=$promotions->define(array('promotion_code'=>'CORRECTION10','kind'=>'percentage','percentage_bp'=>1000,'first_term_only'=>true,'per_beneficiary_limit'=>1,'evidence_channel'=>'staff_record','evidence_reference'=>'promo-k','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('promo-k'));
+$adjustmentK=$adjustments->grant(array('beneficiary_student_id'=>(int)$k['student_id'],'kind'=>'percentage','percentage_bp'=>500,'reason_code'=>'service_inconvenience','evidence_channel'=>'staff_record','evidence_reference'=>'adjustment-k','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('adjustment-k'));
+$offerK=$offers->issue(array('continuation_case_id'=>(int)$k['case_id'],'product_id'=>$productK,'region_code'=>'AU','plan_kind'=>'full','promotion_code'=>'CORRECTION10','account_adjustment_id'=>(int)$adjustmentK['adjustment_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'offer-k','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('offer-k'));
+// Issuance snapshots the benefits but consumes nothing.
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_promotion_redemptions WHERE offer_id=%d",(int)$offerK['offer_id']))===0,'offer issuance must not create a promotion redemption');
+dzn_r1_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_account_adjustments WHERE id=%d",(int)$adjustmentK['adjustment_id']))==='granted','offer issuance must not consume an account adjustment');
+// Course identity continuity: a valid Course-A continuation may never take a Course-B package. This
+// runs while the continuation hold is still live, so the only possible refusal is the Course conflict.
+$otherCourseId=(int)$sources[10]['course_id'];
+dzn_r1_assert($otherCourseId!==(int)$k['course_id'],'the fixture must expose two distinct Courses');
+$productOther=$productFor($otherCourseId,'AU',25000);
+$offersForKBefore=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_offers WHERE continuation_case_id=%d",(int)$k['case_id']));
+dzn_r1_rejected(fn()=>$offers->issue(array('continuation_case_id'=>(int)$k['case_id'],'product_id'=>$productOther,'region_code'=>'AU','plan_kind'=>'full','evidence_channel'=>'staff_record','evidence_reference'=>'offer-cross-course','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('offer-cross-course')),'commercial_course_continuity_conflict','an offer combining a Course-A continuation with a Course-B product');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_offers WHERE continuation_case_id=%d",(int)$k['case_id']))===$offersForKBefore,'a Course-mismatched offer must not be recorded');
+dzn_r1_rejected(fn()=>$patterns->establish(array('slot_authority_id'=>(int)$k['slot_authority_id'],'course_id'=>$otherCourseId,'evidence_channel'=>'staff_record','evidence_reference'=>'pattern-cross-course','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('pattern-cross-course')),'commercial_course_continuity_conflict','a recurring pattern for a Course other than its authorised slot');
+$settledK=$settle($offerK,1,'prov-k-1',(int)$offerK['amount_due_minor'],gmdate('Y-m-d H:i:s'));
+dzn_r1_assert($settledK['processing_state']==='accepted','the corrected acceptance must settle');
+$redemptionK=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_promotion_redemptions WHERE offer_id=%d",(int)$offerK['offer_id']));
+dzn_r1_assert($redemptionK!==null&&(string)$redemptionK->state==='consumed','accepted purchase convergence must consume exactly one promotion redemption');
+dzn_r1_assert((int)$redemptionK->promotion_id===(int)$promotionK['promotion_id']&&(int)$redemptionK->redemption_sequence===1,'the redemption must reference the exact snapshotted promotion');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_promotion_redemptions WHERE promotion_id=%d",(int)$promotionK['promotion_id']))===1,'exactly one redemption may exist for the accepted offer');
+$consumedK=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}commercial_account_adjustments WHERE id=%d",(int)$adjustmentK['adjustment_id']));
+dzn_r1_assert((string)$consumedK->state==='consumed'&&(int)$consumedK->consumed_offer_id===(int)$offerK['offer_id']&&(string)$consumedK->consumed_at!=='','acceptance must atomically consume the exact snapshotted adjustment');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_account_adjustment_events WHERE adjustment_id=%d AND event_type='consumed'",(int)$adjustmentK['adjustment_id']))===1,'adjustment consumption must record exactly one append-only event');
+// Replay converges on the same redemption and the same consumption.
+$replayK=$settle($offerK,1,'prov-k-1',(int)$offerK['amount_due_minor'],gmdate('Y-m-d H:i:s'));
+dzn_r1_assert($replayK['idempotent']===true,'an exact evidence replay must converge idempotently');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_promotion_redemptions WHERE promotion_id=%d",(int)$promotionK['promotion_id']))===1,'replay must not create a second redemption');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_account_adjustment_events WHERE adjustment_id=%d AND event_type='consumed'",(int)$adjustmentK['adjustment_id']))===1,'replay must not record a second consumption event');
+// A materially different fact on the same provider reference is preserved and routed, never settled.
+$settlementsK=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements s INNER JOIN {$p}commercial_offer_obligations o ON o.id=s.obligation_id WHERE o.offer_id=%d",(int)$offerK['offer_id']));
+$evidenceK=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE offer_id=%d",(int)$offerK['offer_id']));
+$originalDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT evidence_fact_digest FROM {$p}commercial_payment_evidence WHERE offer_id=%d LIMIT 1",(int)$offerK['offer_id']));
+$conflictingK=$payments->ingest(array('provider_key'=>'synthetic_provider','provider_reference'=>'prov-k-1','evidence_kind'=>'success','amount_minor'=>'1','currency'=>'AUD','obligation_reference'=>$offerK['offer_uid'].':1','provider_occurred_at'=>gmdate('Y-m-d H:i:s'),'evidence_channel'=>'provider_evidence','evidence_reference'=>'evidence-k-conflict','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('evidence-k-conflict'));
+dzn_r1_assert(($conflictingK['conflicting']??false)===true&&($conflictingK['conflict_reason']??'')==='conflicting_payment_evidence','a materially different replay must be reported as a conflicting evidence fact');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements s INNER JOIN {$p}commercial_offer_obligations o ON o.id=s.obligation_id WHERE o.offer_id=%d",(int)$offerK['offer_id']))===$settlementsK,'a conflicting replay must never manufacture a second settlement');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE offer_id=%d",(int)$offerK['offer_id']))===$evidenceK,'a conflicting replay must never rewrite or duplicate the original evidence');
+dzn_r1_assert((string)$wpdb->get_var($wpdb->prepare("SELECT evidence_fact_digest FROM {$p}commercial_payment_evidence WHERE offer_id=%d LIMIT 1",(int)$offerK['offer_id']))===$originalDigest,'the original evidence fact identity must be preserved');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_exceptions WHERE reason_code='conflicting_payment_evidence' AND offer_id=%d",(int)$offerK['offer_id']))>=1,'a conflicting replay must be routed into durable review');
+
+// The exact protected interval authorises the exact Phase-N occupancy, nothing else.
+$readyK=$readyTerm($k,$offerK,'correction-k');
+$intervalsK=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d ORDER BY interval_sequence",(int)$readyK['claim_id']));
+dzn_r1_assert(count($intervalsK)===12,'the Regular commitment must protect every committed interval');
+$lessonOneK=$lessons->createStandard((int)$readyK['term_id'],(int)$readyK['assignment_id'],dzn_r1_evidence('k-lesson-one'),dzn_r1_key('k-lesson-one'));
+$wrongWallK=gmdate('Y-m-d H:i:s',strtotime((string)$intervalsK[0]->starts_at_utc.' UTC +1 day'));
+dzn_r1_rejected(fn()=>$schedules->schedule((int)$lessonOneK['lesson_id'],(int)$readyK['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wrongWallK,0,10),'local_wall_time'=>substr($wrongWallK,11,8),'reason_code'=>'wrong_time','evidence_channel'=>'staff_record','evidence_reference'=>'k-wrong-time','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('k-wrong-time')),'protected_interval_mismatch','a correct session scheduled at the wrong time');
+// The same commitment's other protected intervals are not an exemption either.
+dzn_r1_rejected(fn()=>$schedules->schedule((int)$lessonOneK['lesson_id'],(int)$readyK['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>(string)$intervalsK[2]->local_wall_date,'local_wall_time'=>(string)$intervalsK[2]->local_wall_time,'reason_code'=>'wrong_interval','evidence_channel'=>'staff_record','evidence_reference'=>'k-wrong-interval','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('k-wrong-interval')),'protected_interval_mismatch','a session scheduled onto another protected interval of its own commitment');
+$scheduledK=$schedules->schedule((int)$lessonOneK['lesson_id'],(int)$readyK['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>(string)$intervalsK[0]->local_wall_date,'local_wall_time'=>(string)$intervalsK[0]->local_wall_time,'reason_code'=>'exact_interval','evidence_channel'=>'staff_record','evidence_reference'=>'k-exact','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('k-exact'));
+dzn_r1_assert((int)$scheduledK['schedule_version_id']>0,'the exact authorised interval must schedule');
+dzn_r1_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_capacity_claim_intervals WHERE id=%d",(int)$intervalsK[0]->id))==='satisfied','the exact interval must become satisfied');
+// A satisfied interval is history: concrete occupancy blocks, not commercial corruption.
+dzn_r1_rejected(fn()=>$schedules->schedule((int)$freeLessonG['lesson_id'],(int)$freeLessonG['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>(string)$intervalsK[0]->local_wall_date,'local_wall_time'=>(string)$intervalsK[0]->local_wall_time,'reason_code'=>'occupancy_conflict','evidence_channel'=>'staff_record','evidence_reference'=>'k-occupancy','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('k-occupancy')),'teacher_slot_conflict','a schedule onto concrete Phase-N occupancy');
+
+// Historical capacity rows are never blockers: a released claim leaves its intervals reusable.
+$capacity->releaseClaim((int)$readyK['claim_id'],dzn_r1_evidence('release-k')+array('release_reason_code'=>'commercial_resolution'),dzn_r1_key('release-k'));
+dzn_r1_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$readyK['claim_id']))==='released','the claim must release');
+dzn_r1_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$readyK['claim_id']))===0,'no protected interval may survive an authorised release');
+CommercialCapacityAuthority::assertNoConflictingClaim((int)$k['teacher_id'],(string)$intervalsK[1]->starts_at_utc,(string)$intervalsK[1]->occupied_ends_at_utc);
+$reused=$schedules->schedule((int)$freeLesson['lesson_id'],(int)$freeLesson['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>(string)$intervalsK[1]->local_wall_date,'local_wall_time'=>(string)$intervalsK[1]->local_wall_time,'reason_code'=>'reuse_after_release','evidence_channel'=>'staff_record','evidence_reference'=>'k-reuse','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_key('k-reuse'));
+dzn_r1_assert((int)$reused['schedule_version_id']>0,'a released historical interval must be reusable by a new legitimate booking');
 
 echo "Phase 2A.2-R1 runtime passed\n";

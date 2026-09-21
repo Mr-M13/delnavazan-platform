@@ -53,6 +53,46 @@ try{
             $outcome=(new CanonicalLessonAuthorityService())->createStandard((int)$state['term_id'],(int)$state['assignment_id'],dzn_r1_fix_evidence('race-lesson-seven'),dzn_r1_fix_key('race-lesson-seven'));
             $result['ok']=true;$result['outcome']=$outcome;
         }
+    }elseif($mode==='promotion_global_limit'){
+        if($worker==='w1'){
+            $result['action']='settle_first_offer';
+            $hold('dzn_phase_2a2r1_after_evidence_insert');
+            $result['outcome']=dzn_r1_fix_settle($state['offer_a'],1,'prov-limit-a');
+            $result['ok']=true;
+        }else{
+            $result['action']='settle_second_offer';
+            $result['outcome']=dzn_r1_fix_settle($state['offer_b'],1,'prov-limit-b');
+            $result['ok']=true;
+        }
+    }elseif($mode==='conflicting_evidence_replay'){
+        if($worker==='w1'){
+            $result['action']='settle_original_fact';
+            $hold('dzn_phase_2a2r1_after_settlement');
+            $result['outcome']=dzn_r1_fix_settle($state['offer'],1,(string)$state['provider_reference']);
+            $result['ok']=true;
+        }else{
+            $result['action']='replay_conflicting_fact';
+            $offer=$state['offer'];
+            $result['outcome']=(new \Delnavazan\Platform\Core\Application\CommercialPaymentService())->ingest(array(
+                'provider_key'=>'synthetic_provider','provider_reference'=>(string)$state['provider_reference'],'evidence_kind'=>'success',
+                'amount_minor'=>'1','currency'=>'AUD','obligation_reference'=>$offer['offer_uid'].':1',
+                'provider_occurred_at'=>gmdate('Y-m-d H:i:s'),'evidence_channel'=>'provider_evidence',
+                'evidence_reference'=>'evidence-conflicting-replay','evidence_at'=>gmdate('Y-m-d H:i:s'),
+            ),dzn_r1_fix_key('evidence-conflicting-replay'));
+            $result['ok']=true;
+        }
+    }elseif($mode==='release_vs_satisfaction'){
+        if($worker==='w1'){
+            $result['action']='release_claim';
+            $hold('dzn_phase_2a2r1_teacher_root_held');
+            $result['outcome']=dzn_r1_fix_release_claim((int)$state['claim_id'],'release-race');
+            $result['ok']=true;
+        }else{
+            $result['action']='schedule_after_release';
+            $target=$state['interval'];
+            $result['outcome']=(new CanonicalLessonScheduleService())->schedule((int)$state['lesson_id'],(int)$state['assignment_id'],array('schedule_timezone'=>'UTC','local_wall_date'=>(string)$target['local_wall_date'],'local_wall_time'=>(string)$target['local_wall_time'],'reason_code'=>'release_race','evidence_channel'=>'staff_record','evidence_reference'=>'release-race','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('release-race'));
+            $result['ok']=true;
+        }
     }elseif($mode==='unrelated_commitments'){
         $entitlement=$worker==='w1'?(int)$state['entitlement_a']:(int)$state['entitlement_b'];
         $result['action']='handoff';
