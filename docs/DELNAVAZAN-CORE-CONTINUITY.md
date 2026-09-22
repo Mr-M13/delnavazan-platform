@@ -733,3 +733,47 @@ Verified archive: `delnavazan-production-theme-0.7.0.zip`, size `3,733,254` byte
 Stable local artifacts are under `~/Library/Application Support/DelnavazanAgentBridge/artifacts/theme-0.7.0/`. No staging or production deployment occurred. User-facing Library publication remains pending because the current remote-Mac tool path does not directly expose those binary files to the ChatGPT file Library/container.
 
 The separate `AUTOMATION-ORCHESTRATOR-V1` run currently has an empty `final.txt`; do not treat it as complete. Continue daemon investigation/testing independently of the closed Theme implementation/review/merge/package chain.
+
+
+### Operational checkpoint — Local orchestration platform V1.3 live / V1.4 in progress — 2026-09-23
+
+The local Delnavazan orchestration path has been materially upgraded and no longer depends on Chrome/browser-composer wakeups for its core implementation/review loop.
+
+Proven local automation state:
+- Workflow daemon V1.1 runs persistently and autonomously handles implementation -> independent review -> PASS/FAIL -> correction -> re-review, with duplicate prevention and crash/restart recovery.
+- Project Planner V1.2 runs persistently above the workflow daemon using a durable project queue with dependencies, priorities, human gates, merge/deploy authorization, and immutable retry attempts.
+- Managed authoritative workspaces are verified against expected repository SHA/tree before execution; retry attempts use immutable execution IDs (`-A2`, etc.).
+- Independent review uses isolated review identities/workspaces rather than reusing implementation run directories.
+- Theme staging-validation preparation was re-run from exact authoritative Theme main `e39f5b5c88b139163bd2a3906631e3d79325b1b5`, tree `34355ca2a76a56933f6c7312ba38b46244e4c538`; the authoritative retry received independent PASS and the queue item is closed.
+- Control Panel V1.3 is live locally at `http://127.0.0.1:8790`, bound to loopback only. It exposes planner/orchestrator health, agent liveness, workflow state, queue, events/errors, and safe controls. V1.3 regression suite passed 61 tests and its read-only Delnavazan canary preserved live state.
+- Planner, orchestrator, and Control Panel are currently healthy persistent local services.
+
+Current project queue:
+- `PLATFORM-R1-CLOSED`: done.
+- `THEME-SINGLE-CONTENT-V1-CLOSED`: done.
+- `THEME-0.7.0-PACKAGE-VERIFIED`: done.
+- `STAGING-VALIDATION-PREP`: done.
+- `THEME-0.7.0-USER-ARTEFACT-PUBLICATION`: blocked after human approval because no executable publication task spec or concrete external publication destination is configured. This is now a configuration blocker, not a human-approval blocker. The verified archive remains safely stored under the local bridge artifacts directory and has not been published or deployed.
+
+Theme package remains:
+- `delnavazan-production-theme-0.7.0.zip`
+- size `3,733,254` bytes
+- SHA-256 `a6f00d658d373614bc37801e71b9b059df6474d76cf309fc3be377fe0d0e04dc`
+- local stable path under `~/Library/Application Support/DelnavazanAgentBridge/artifacts/theme-0.7.0/`.
+
+Safety state:
+- No staging or production deployment is authorized.
+- No product merge is pending.
+- The publication task must not be retried until a concrete destination/task spec exists.
+- The planner now treats this as blocked configuration instead of retrying every tick.
+
+Control Panel V1.4 is now in implementation. Its scope is queue filtering/presets, clearer service-vs-workflow states, a dynamic agent registry, documentation-health/status tracking, explicit configuration-required blockers, and reusable multi-project operations UI. V1.3 remains live until V1.4 passes regression tests and a real read-only Delnavazan canary.
+
+Current exact next actions:
+1. Complete and independently validate Control Panel V1.4 in the bridge only.
+2. Upgrade the live local panel only if V1.4 is explicitly reported safe.
+3. Keep the verified Theme 0.7.0 publication task blocked until a real user-facing destination is configured.
+4. Keep staging/production deployment gated and do not invent new product scope.
+5. Use the Documentation Health view to keep this continuity file and other authoritative docs current as durable automation/project state changes.
+
+**HAMED ACTION REQUIRED:** none unless a publication destination, product-policy decision, or deployment authorization is explicitly requested.
