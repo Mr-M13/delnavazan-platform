@@ -16,6 +16,7 @@ export DZN_PHASE_2A2R1_DB_HOST="db"
 export DZN_PHASE_2A2R1_DB_NAME="${DZN_DB_NAME}"
 export DZN_PHASE_2A2R1_DB_USER="${DZN_DB_USER}"
 export DZN_PHASE_2A2R1_DB_PASSWORD="${DZN_DB_PASSWORD}"
+export DZN_PHASE_2A2R1_WP_ENVIRONMENT_TYPE="${DZN_WP_ENVIRONMENT_TYPE}"
 
 echo "=== Phase 2A.2-R1 concurrency suite (isolated DB state per mode) ==="
 fail=0

@@ -21,6 +21,7 @@ wprun(){
     -e "WORDPRESS_DB_NAME=${DZN_PHASE_2A2R1_DB_NAME:?}" \
     -e "WORDPRESS_DB_USER=${DZN_PHASE_2A2R1_DB_USER:?}" \
     -e "WORDPRESS_DB_PASSWORD=${DZN_PHASE_2A2R1_DB_PASSWORD:?}" \
+    -e "WP_ENVIRONMENT_TYPE=${DZN_PHASE_2A2R1_WP_ENVIRONMENT_TYPE:?}" \
     -v "$wpdir:/var/www/html" -v "$repo:$repo" "$@" \
     wordpress:cli-php8.3 wp eval-file "$file" --path=/var/www/html --user=1 --allow-root
 }
