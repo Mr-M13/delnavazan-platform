@@ -66,6 +66,10 @@ dzn_wp() {
   docker run --rm --network "${DZN_NETWORK}" \
     -u 0 \
     -e "WP_ENVIRONMENT_TYPE=${DZN_WP_ENVIRONMENT_TYPE}" \
+    -e "WORDPRESS_DB_HOST=db" \
+    -e "WORDPRESS_DB_NAME=${DZN_DB_NAME}" \
+    -e "WORDPRESS_DB_USER=${DZN_DB_USER}" \
+    -e "WORDPRESS_DB_PASSWORD=${DZN_DB_PASSWORD}" \
     -v "${DZN_WP_DIR}:/var/www/html" \
     -v "${DZN_REPO_ROOT}:${DZN_REPO_ROOT}" \
     --entrypoint php \
@@ -87,6 +91,10 @@ dzn_wp_env() {
   docker run --rm --network "${DZN_NETWORK}" \
     -u 0 \
     -e "WP_ENVIRONMENT_TYPE=${DZN_WP_ENVIRONMENT_TYPE}" \
+    -e "WORDPRESS_DB_HOST=db" \
+    -e "WORDPRESS_DB_NAME=${DZN_DB_NAME}" \
+    -e "WORDPRESS_DB_USER=${DZN_DB_USER}" \
+    -e "WORDPRESS_DB_PASSWORD=${DZN_DB_PASSWORD}" \
     "${args[@]}" \
     -v "${DZN_WP_DIR}:/var/www/html" \
     -v "${DZN_REPO_ROOT}:${DZN_REPO_ROOT}" \
