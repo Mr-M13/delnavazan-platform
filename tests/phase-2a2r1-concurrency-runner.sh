@@ -16,7 +16,12 @@ wprun(){
   set -- -e "DZN_PHASE_2A2R1_RUNTIME_TEST=concurrency" -e "DZN_PHASE_2A2R1_MODE=$mode"
   [ "$workerArg" != "-" ] && set -- "$@" -e "DZN_PHASE_2A2R1_WORKER=$workerArg"
   [ "$gateArg" != "-" ] && set -- "$@" -e "DZN_PHASE_2A2R1_GATE_DIR=$gateArg"
-  docker run --rm --network "$net" -u 0 -v "$wpdir:/var/www/html" -v "$repo:$repo" "$@" \
+  docker run --rm --network "$net" -u 0 \
+    -e "WORDPRESS_DB_HOST=${DZN_PHASE_2A2R1_DB_HOST:?}" \
+    -e "WORDPRESS_DB_NAME=${DZN_PHASE_2A2R1_DB_NAME:?}" \
+    -e "WORDPRESS_DB_USER=${DZN_PHASE_2A2R1_DB_USER:?}" \
+    -e "WORDPRESS_DB_PASSWORD=${DZN_PHASE_2A2R1_DB_PASSWORD:?}" \
+    -v "$wpdir:/var/www/html" -v "$repo:$repo" "$@" \
     wordpress:cli-php8.3 wp eval-file "$file" --path=/var/www/html --user=1 --allow-root
 }
 waitfor(){
