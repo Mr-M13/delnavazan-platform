@@ -24,7 +24,7 @@ services:
     volumes:
       - db-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p'${DZN_DB_ROOT_PASSWORD:-root}' --silent"]
+      test: ["CMD-SHELL", "if command -v mariadb-admin >/dev/null 2>&1; then mariadb-admin ping -h 127.0.0.1 -uroot -p'${DZN_DB_ROOT_PASSWORD:-root}' --silent; else mysqladmin ping -h 127.0.0.1 -uroot -p'${DZN_DB_ROOT_PASSWORD:-root}' --silent; fi"]
       interval: 5s
       timeout: 5s
       retries: 20
