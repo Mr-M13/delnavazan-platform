@@ -805,3 +805,21 @@ Current planner state:
 - no deployment is authorised.
 
 **HAMED ACTION REQUIRED:** none. CD should review the roadmap output, seed the ordered Platform queue, and start the first safe implementation phase automatically unless the audit identifies a genuine unresolved product decision.
+
+
+### Operational checkpoint — niu-nailhouse.com staging retired — 2026-09-23
+
+Hamed confirmed that the existing `niu-nailhouse.com` staging environment is gone / will not be renewed. It must no longer be treated as an available validation or deployment target.
+
+Effective immediately:
+- no Platform or Theme task may depend on `niu-nailhouse.com` staging;
+- no automated deployment, browser validation, package installation or smoke test should target that host;
+- the default development/runtime validation environment becomes a reproducible local WordPress + MariaDB/MySQL environment on Hamed's Mac;
+- future Platform phases should run migrations, runtime, corruption, concurrency, API and browser validation locally where practical;
+- provider integrations should use mocks/fixtures/test-mode seams locally and remain production-gated;
+- final hosting-compatibility, DNS/HTTPS, OAuth callback, real outbound-delivery and pre-production smoke checks are deferred until a fresh temporary staging environment is intentionally provisioned near production readiness;
+- Theme/plugin installation remains manual by Hamed.
+
+A dedicated local-runtime task should be placed near the front of the Platform completion roadmap so future implementation/review agents can rely on one deterministic disposable environment instead of the retired staging host.
+
+**HAMED ACTION REQUIRED:** none.
