@@ -17,7 +17,10 @@ echo "=== Phase 2A.2-R1 concurrency suite (isolated DB state per mode) ==="
 fail=0
 for mode in ${MODES}; do
   echo "--- mode: ${mode} ---"
-  if "${DZN_REPO_ROOT}/tests/phase-2a2r1-concurrency-runner.sh" "${mode}"; then
+  # Invoke through sh as well as retaining the executable bit on the runner. This keeps the
+  # suite runnable on hosts/checkouts that normalise file modes, while Git preserves the
+  # direct-execution contract used by existing tooling.
+  if sh "${DZN_REPO_ROOT}/tests/phase-2a2r1-concurrency-runner.sh" "${mode}"; then
     echo "PASS  ${mode}"
   else
     echo "FAIL  ${mode}"

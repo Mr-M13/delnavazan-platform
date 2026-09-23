@@ -7,9 +7,11 @@ if ! dzn_wp core is-installed >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "=== Building the Phase 2A.2-J production fixture ==="
-dzn_wp_env "DZN_PHASE_2A2J_RUNTIME_TEST=fixture" -- \
-  eval-file "${DZN_REPO_ROOT}/tests/phase-2a2j-fixture.php" --user=1
+prepare_r1_fixture() {
+  echo "=== Building an isolated Phase 2A.2-J production fixture ==="
+  dzn_wp_env "DZN_PHASE_2A2J_RUNTIME_TEST=fixture" -- \
+    eval-file "${DZN_REPO_ROOT}/tests/phase-2a2j-fixture.php" --user=1
+}
 
 echo
 echo "=== Phase 2A.2-R1 runtime tests ==="
@@ -25,9 +27,12 @@ run_wp_test() {
   fi
 }
 
+prepare_r1_fixture
 run_wp_test "R1 authority runtime"          "DZN_PHASE_2A2R1_RUNTIME_TEST=authority"  "phase-2a2r1-runtime.php"
 run_wp_test "R1 migration runtime (24->25)" "DZN_PHASE_2A2R1_RUNTIME_TEST=migration"  "phase-2a2r1-migration-runtime.php"
+prepare_r1_fixture
 run_wp_test "R1 failure runtime"            "DZN_PHASE_2A2R1_RUNTIME_TEST=failure"    "phase-2a2r1-failure-runtime.php"
+prepare_r1_fixture
 run_wp_test "R1 corruption runtime"         "DZN_PHASE_2A2R1_RUNTIME_TEST=corruption" "phase-2a2r1-corruption-runtime.php"
 
 echo
