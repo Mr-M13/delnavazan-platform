@@ -4,9 +4,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 require_env_file
 
 if [ ! -f "${DZN_WP_DIR}/wp-load.php" ]; then
-  echo "error: WordPress core not present at ${DZN_WP_DIR}." >&2
-  echo "       Run bin/up.sh first so the wordpress image can populate core." >&2
-  exit 1
+  echo "WordPress core not present; downloading it into the disposable bind mount..."
+  mkdir -p "${DZN_WP_DIR}"
+  dzn_wp core download --force
 fi
 
 if dzn_wp core is-installed >/dev/null 2>&1; then

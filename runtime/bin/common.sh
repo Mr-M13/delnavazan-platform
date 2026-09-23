@@ -68,8 +68,9 @@ dzn_wp() {
     -e "WP_ENVIRONMENT_TYPE=${DZN_WP_ENVIRONMENT_TYPE}" \
     -v "${DZN_WP_DIR}:/var/www/html" \
     -v "${DZN_REPO_ROOT}:${DZN_REPO_ROOT}" \
+    --entrypoint php \
     "${DZN_CLI_IMAGE}" \
-    wp --path=/var/www/html --allow-root "$@"
+    -d memory_limit="${DZN_PHP_MEMORY_LIMIT:-512M}" /usr/local/bin/wp --path=/var/www/html --allow-root "$@"
 }
 
 # dzn_wp_env KEY=VALUE [KEY=VALUE ...] -- [wp-arg ...]
@@ -89,8 +90,9 @@ dzn_wp_env() {
     "${args[@]}" \
     -v "${DZN_WP_DIR}:/var/www/html" \
     -v "${DZN_REPO_ROOT}:${DZN_REPO_ROOT}" \
+    --entrypoint php \
     "${DZN_CLI_IMAGE}" \
-    wp --path=/var/www/html --allow-root "$@"
+    -d memory_limit="${DZN_PHP_MEMORY_LIMIT:-512M}" /usr/local/bin/wp --path=/var/www/html --allow-root "$@"
 }
 
 dzn_status() {
