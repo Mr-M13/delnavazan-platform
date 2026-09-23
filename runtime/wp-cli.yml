@@ -1,0 +1,4 @@
+# Shared WP-CLI defaults for the disposable runtime.
+path: /var/www/html
+allow-root: true
+color: false

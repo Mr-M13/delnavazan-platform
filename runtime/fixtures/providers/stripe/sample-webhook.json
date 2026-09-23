@@ -1,0 +1,22 @@
+{
+  "id": "evt_synthetic_00000000000000",
+  "object": "event",
+  "type": "payment_intent.succeeded",
+  "api_version": "2024-06-20",
+  "data": {
+    "object": {
+      "id": "pi_synthetic_00000000000000",
+      "object": "payment_intent",
+      "amount": 21375,
+      "currency": "aud",
+      "status": "succeeded",
+      "livemode": false,
+      "metadata": {
+        "obligation_reference": "dzn-offer-synthetic:1"
+      }
+    }
+  },
+  "created": 1750000000,
+  "livemode": false,
+  "pending_webhooks": 0
+}

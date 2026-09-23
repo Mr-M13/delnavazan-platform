@@ -1,0 +1,5 @@
+# Local state and secrets — never committed.
+.env
+wordpress/
+*.log
+.dzn-*.gate.*

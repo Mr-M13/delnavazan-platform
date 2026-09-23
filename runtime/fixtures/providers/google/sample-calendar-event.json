@@ -1,0 +1,10 @@
+{
+  "kind": "calendar#event",
+  "id": "synthetic_event_0000000000000000",
+  "status": "confirmed",
+  "summary": "Synthetic Delnavazan lesson",
+  "start": { "dateTime": "2026-09-30T09:00:00+10:00", "timeZone": "Australia/Brisbane" },
+  "end":   { "dateTime": "2026-09-30T09:30:00+10:00", "timeZone": "Australia/Brisbane" },
+  "organizer": { "email": "synthetic@example.invalid" },
+  "hangoutLink": "https://meet.google.com/synthetic-not-real"
+}

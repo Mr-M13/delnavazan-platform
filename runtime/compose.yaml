@@ -1,0 +1,98 @@
+name: ${COMPOSE_PROJECT_NAME:-dzn-platform-runtime}
+
+services:
+  db:
+    image: ${DZN_DB_IMAGE:-mariadb:11.4}
+    restart: "no"
+    environment:
+      MARIADB_DATABASE: ${DZN_DB_NAME:-wordpress}
+      MARIADB_USER: ${DZN_DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${DZN_DB_PASSWORD:-wordpress}
+      MARIADB_ROOT_PASSWORD: ${DZN_DB_ROOT_PASSWORD:-root}
+      # MySQL 8.4 uses the MYSQL_* names; MariaDB uses MARIADB_*. Both are set so
+      # either image works for credentials. The common mysqladmin healthcheck
+      # below authenticates with the same root password in both cases.
+      MYSQL_DATABASE: ${DZN_DB_NAME:-wordpress}
+      MYSQL_USER: ${DZN_DB_USER:-wordpress}
+      MYSQL_PASSWORD: ${DZN_DB_PASSWORD:-wordpress}
+      MYSQL_ROOT_PASSWORD: ${DZN_DB_ROOT_PASSWORD:-root}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+      - --innodb-flush-log-at-trx-commit=2
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p'${DZN_DB_ROOT_PASSWORD:-root}' --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [dzn]
+
+  wordpress:
+    image: ${DZN_WP_IMAGE:-wordpress:php8.3-apache}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${DZN_DB_NAME:-wordpress}
+      WORDPRESS_DB_USER: ${DZN_DB_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${DZN_DB_PASSWORD:-wordpress}
+      WP_ENVIRONMENT_TYPE: ${DZN_WP_ENVIRONMENT_TYPE:-local}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_ENVIRONMENT_TYPE', '${DZN_WP_ENVIRONMENT_TYPE:-local}');
+        // wp_get_environment_type() reads the process environment, so mirror the
+        // constant into the environment. This makes every container that loads
+        // wp-config.php (including the concurrency worker containers) report a
+        // non-production type even when the env var is not passed explicitly.
+        putenv('WP_ENVIRONMENT_TYPE=${DZN_WP_ENVIRONMENT_TYPE:-local}');
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_LOG', true);
+        define('WP_DEBUG_DISPLAY', false);
+        define('SCRIPT_DEBUG', true);
+        define('DISALLOW_FILE_EDIT', true);
+        define('WP_HOME', '${DZN_WP_URL:-http://localhost:8080}');
+        define('WP_SITEURL', '${DZN_WP_URL:-http://localhost:8080}');
+    volumes:
+      - ${DZN_WP_DIR:-./wordpress}:/var/www/html
+    ports:
+      - "127.0.0.1:${DZN_WP_PORT:-8080}:80"
+    networks: [dzn]
+
+  cli:
+    image: ${DZN_CLI_IMAGE:-wordpress:cli-php8.3}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${DZN_DB_NAME:-wordpress}
+      WORDPRESS_DB_USER: ${DZN_DB_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${DZN_DB_PASSWORD:-wordpress}
+      WP_ENVIRONMENT_TYPE: ${DZN_WP_ENVIRONMENT_TYPE:-local}
+    user: "0:0"
+    volumes:
+      - ${DZN_WP_DIR:-./wordpress}:/var/www/html
+      - ./wp-cli.yml:/var/www/html/wp-cli.yml:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do sleep 3600; done"]
+    networks: [dzn]
+
+  mailpit:
+    image: ${DZN_MAILPIT_IMAGE:-axllent/mailpit:latest}
+    restart: "no"
+    ports:
+      - "127.0.0.1:${DZN_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${DZN_MAILPIT_UI_PORT:-8025}:8025"
+    networks: [dzn]
+
+volumes:
+  db-data:
+
+networks:
+  dzn:
+    name: ${COMPOSE_PROJECT_NAME:-dzn-platform-runtime}_dzn
