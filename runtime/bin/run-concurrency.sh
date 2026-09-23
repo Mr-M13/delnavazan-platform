@@ -22,6 +22,9 @@ echo "=== Phase 2A.2-R1 concurrency suite (isolated DB state per mode) ==="
 fail=0
 for mode in ${MODES}; do
   echo "--- mode: ${mode} ---"
+  echo "Preparing isolated Phase 2A.2-J fixture for ${mode}..."
+  dzn_wp_env "DZN_PHASE_2A2J_RUNTIME_TEST=fixture" -- \
+    eval-file "${DZN_REPO_ROOT}/tests/phase-2a2j-fixture.php" --user=1
   # Invoke through sh as well as retaining the executable bit on the runner. This keeps the
   # suite runnable on hosts/checkouts that normalise file modes, while Git preserves the
   # direct-execution contract used by existing tooling.
