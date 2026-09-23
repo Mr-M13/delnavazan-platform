@@ -777,3 +777,31 @@ Current exact next actions:
 5. Use the Documentation Health view to keep this continuity file and other authoritative docs current as durable automation/project state changes.
 
 **HAMED ACTION REQUIRED:** none unless a publication destination, product-policy decision, or deployment authorization is explicitly requested.
+
+
+### Operational checkpoint — Platform completion becomes critical path — 2026-09-23
+
+Hamed explicitly changed the project priority after reviewing Theme 0.7.0: the Theme has multiple issues but is intentionally parked for now. The critical path returns to the Platform and remains there until the Platform is functionally complete. Theme/component integration resumes only after that Platform-completion checkpoint.
+
+Locked operating decisions:
+- Platform development is authorised to continue beyond R1 as an ordered sequence of bounded phases derived from the existing architecture/product decisions.
+- Do not invent a monolithic rewrite; preserve the established incremental phase-contract, migration, independent-review and additive-correction model.
+- Theme work is parked. Do not spend implementation/review capacity on Theme defects while Platform completion remains active unless Hamed explicitly re-prioritises.
+- Verified Theme/plugin packages are handed to Hamed through the local Control Panel Downloads surface.
+- Theme and plugin installation/update in WordPress is manual by Hamed for direct control. Automation may build, test, review, verify and package; it must not install or deploy those packages without a separate explicit instruction.
+- Production/staging deployment, live payment execution, provider credentials, production traffic, external notifications and cutover remain separately gated even when their code/adapters are implemented.
+
+Authoritative Platform base for the new completion programme:
+- repository: `Mr-M13/delnavazan-platform`
+- main: `993532f1365644589b8a6134990cc0a1306456e9`
+- R1 / Schema 25 is independently passed, merged and closed.
+
+The first new task is `PLATFORM-COMPLETION-ROADMAP-AUDIT`, published at `docs/agent-tasks/platform/PLATFORM-COMPLETION-ROADMAP-AUDIT.md`. It is a read-only audit against exact Platform main, routed through the local planner/orchestrator with DeepSeek implementation and independent review. Its purpose is to derive the ordered post-R1 completion phases, parallelisation boundaries, stale-document corrections and the exact first implementation contract without mutating product code.
+
+Current planner state:
+- the five earlier closeout/package tasks are done;
+- `PLATFORM-COMPLETION-ROADMAP-AUDIT` is running;
+- no Theme task is active;
+- no deployment is authorised.
+
+**HAMED ACTION REQUIRED:** none. CD should review the roadmap output, seed the ordered Platform queue, and start the first safe implementation phase automatically unless the audit identifies a genuine unresolved product decision.
