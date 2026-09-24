@@ -261,7 +261,21 @@ The following failures are historical regressions on the exact base, not 2A.2-D 
 
 ## 4. Next Platform action
 
-**No next Platform slice is authorised.** Phase 2A.2-Q is merged and closed at Schema 24; the next bounded slice requires an explicit product/architecture decision from the owner before reconnaissance, a branch or implementation begins. Phase Q merged only the post-intro continuation decision and a bounded pre-payment hold; it does not activate a production continuation workflow, create a payment/Term/Lesson consequence or implement provider/Portal integration.
+**No next Platform slice is authorised.** Phase 2A.2-R1 is merged and closed at Schema 25; the
+Phase 2A.2-R2 candidate below is **awaiting independent review** and is not a next action. A further
+bounded slice requires an explicit product/architecture decision from the owner before
+reconnaissance, a branch or implementation begins.
+
+The R2 candidate is bounded by `docs/PHASE-2A-2R2-IMPLEMENTATION-CONTRACT.md` (the authoritative
+preflight contract). Its four deferred product decisions
+(refund academic consequences, automatic-renewal opt-in/lead time, recovery/lapse thresholds and the
+provider-specific confirmation adapter) remain owner decisions and were **not** invented.
+
+Two pre-existing adjacent failures were repaired so the pure regression suite can be quoted green:
+`tests/phase-2a2r1-contract.php` now accepts the monotonic `phase2a2r*` package build identity and
+locates the 025 required-migration entry instead of requiring it to be last, and
+`tests/phase-2a2a-capability-lifecycle.php` now reads the reconciliation marker from the
+`Migrator` authority and covers the current protected capability set.
 
 This record does not authorise a continuation or delivery/attendance cutover, provider integration, Google/Meet/OAuth/webhook/credential work, Amelia/calendar work, payment/Stripe/Finance work, Term or Lesson materialisation, notification authority, Teacher Portal, Student Portal integration, a public route or any later phase.
 
@@ -483,6 +497,117 @@ downstream workstream. **Known follow-up (pre-existing, unrelated to R1):** the 
 suite cannot run green on a freshly built disposable runtime and fails identically on untouched
 `1b9d7aae` (`assignment_changed`), so it must be repaired before it can be quoted as regression
 evidence.
+
+## Phase 2A.2-R2 candidate — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (unmerged)
+
+**CANDIDATE / INDEPENDENT REVIEW PENDING.** Authoritative base is post-R1 `main` at
+`f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25 / R1 merged). Schema 26 / migration
+`026_renewal_recurring_enrolment_authority` / build
+`phase2a2r2-renewal-next-term-collection-recovery-20260923.1`. **Not merged, not deployed, no
+production access**, and no Stripe/notification/Theme/Amelia surface was acquired.
+
+R2 is an orchestration and cross-Term authority layer above R1 and preserves every R1 invariant: money
+stays integer minor units with an explicit currency, the Platform-issued offer remains the only
+whole-Term price snapshot, funding is derived only from accepted obligations, Phase L remains the sole
+Term authority, Phase M owns Lessons, Phase N owns schedules and Phase Q owns the pre-payment hold. It
+never reimplements R1 pricing, acceptance, funding derivation, protected claims or Term binding:
+next-Term creation delegates to `CommercialTermFundingService` → Phase-L, and protected-capacity
+release delegates to `CommercialCapacityService`.
+
+It owns six aggregates with append-only events, digest-only commands, version-guarded transitions and
+capability-protected PII-minimised read seams: `recurring_enrolments`, `renewal_cycles`,
+`collection_intents`, `recovery_cases`, `refund_review_cases` and `recurring_protections`.
+
+Locked representative decisions and boundaries:
+
+- The next-Term boundary is **progression-derived** from the current Term's applicable schedule
+  versions and the R1 Regular recurring-pattern occurrences resolved through the Phase-Q wall-clock
+  rule. It is never `intro + 7 days`, never wall-clock guessing and never provider-inferred; an
+  unavailable fact fails closed with `boundary_facts_required`.
+- The manual same-slot guarantee is the locked `n = 4` weeks window resolved in the pattern timezone
+  and recorded at boundary derivation.
+- Every R2 mutation serialises on the **R1 commercial account root** for the owning beneficiary
+  Student, so the fixed R1 lock order is never inverted and unrelated Students never contend. R2 owns
+  no independent serialisation device.
+- R2 never nests a transaction inside a delegating R1 command. The R1 binding and the R1 capacity
+  release commit as their own units; R2 then verifies the durable R1 outcome inside its own serialised
+  transaction and records it, so a retry adopts the durable fact instead of duplicating a Term,
+  funding plan, entitlement or release.
+- Notification intents are provider-neutral **intent names only**, published through the existing
+  `platform_outbox` seam with a keyed digest identity. No template, no recipient and no delivery
+  record exists; delivery belongs to Phase S and the charge adapter to Phase T.
+- The four deferred product decisions stay behind safe unset/deferred seams: `academic_consequence` is
+  never written (reads report `unresolved`, no funded-session clawback or reversal), no advance
+  automatic-charge instant exists while `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` is unset, nothing lapses
+  automatically while `PAYMENT_RECOVERY_POLICY` is unset (capacity stays protected), and provider
+  confirmation arrives only as R1 `commercial_payment_evidence`.
+
+**Correction round 1 (derived-fact ownership and terminal-cycle integrity).** The candidate now
+proves the source-Term authority of every boundary derivation (a Term the recurring enrolment does not
+own fails closed with `canonical_source_term_required`), proves that a collection intent names the
+exact cycle obligation (same R1 beneficiary Student and Course, cycle currency) with
+`collection_obligation_ownership_conflict` otherwise, collects a cycle only from its authoritative
+first non-cancelled obligation, refuses to make a cycle terminal while it still owns an active
+continuous protection (`recurring_protection_release_required`, so R1 capacity is never released as a
+silent side effect and no live claim is orphaned behind a lapsed cycle), and blocks closing a
+recurring enrolment while a refund/reversal review of its own canonical Enrolment is still open. The
+Schema 26 verifier additionally rejects storage smuggled in beside the phase tables. No product
+decision, provider column, lock, Term/Lesson/schedule writer or delivery path was added.
+
+**Correction round 2 (successor-Term position, cross-commitment ownership and accepted evidence).**
+`bind_next_term` now forwards the Phase-L aggregate position it replaces — the latest non-archived
+canonical Term of the cycle's own Enrolment and its `closed`/`cancelled` state — proved from stored
+facts before delegation, because Phase L refuses to create a successor Term without that proof and a
+real renewal always has a current Term. The command fails closed with
+`renewal_aggregate_position_required`/`renewal_aggregate_position_mismatch` and never closes,
+cancels or guesses a Term itself. In the same family it now proves the next-Term entitlement belongs
+to the cycle's own beneficiary Student/Course/currency before delegating
+(`renewal_entitlement_ownership_conflict`) and that the created Term's funding plan sits in that same
+chain afterwards (`renewal_term_binding_conflict`); continuous protection re-proves its adopted claim
+inside the serialised transaction and refuses a foreign or already-linked claim
+(`recurring_protection_claim_conflict`); a collection intent and a cycle may only be confirmed by
+*accepted* R1 payment evidence for the exact obligation (`accepted_payment_evidence_required`); and a
+refund/reversal review must record its own purchase, obligation and accepted evidence
+(`refund_review_evidence_conflict`). The Schema 26 verifier now also rejects a raw key or raw
+reference column on append-only phase storage, and the shared fixture now gives the funded Term its
+authoritative occupancy (activated Term, Teacher Assignment, one standard Lesson and its first
+schedule version) so the boundary derivation is exercised against real schedule facts.
+
+**Correction round 3 (contract §13 pre-implementation prerequisites).** Three prerequisites that the
+contract lists as gating R2 execution are closed, each additively to the authority rather than by
+changing it. (a) Every `tests/*-concurrency-runner.sh` is now committed as mode `100755`: the
+host-run disposable-runtime validation of `f9df3bf` failed all nine R1 concurrency modes with
+`/tests/phase-2a2r1-concurrency-runner.sh: Permission denied`, which is a file-mode defect, not an
+authority defect. (b) The shared `tests/phase-2a2r1-fixture.php` no longer derives every scenario's
+authorised first regular slot from the same fixed interval: because the disposable runtime keeps one
+database per suite and the fixture uses one Teacher throughout, an earlier suite's legitimately
+scheduled applicable canonical Lesson at that exact interval made the *next* suite's Phase-Q hold fail
+with `teacher_slot_conflict` (fixture order, not authority). The helper now authorises the first
+whole-week candidate free of applicable canonical Lesson schedules, effective Phase-Q holds and
+active protected R1 capacity intervals, and fails loudly when none exists; the slot is still an
+explicitly administrator-authorised record. (c) The stale-documentation debt is closed: README,
+continuity, architecture, module boundaries, migration strategy, policy registry, the Phase-R1 phase
+document, data model and changelog now record R1 merged/closed at Schema 25 on `main` with the Schema
+26 R2 candidate above it. Product sign-off on the four deferred decisions remains an owner decision
+and was not invented.
+
+**Correction round 4 (recovery-state enforcement, §5.4).** Independent review of the round-3
+candidate failed on one finding: the Recovery Case authority recorded the representation of a
+recovery without enforcing the two states the contract fixes for it. Both are now proved from stored
+facts inside the serialised transaction, after the owning Student's R1 commercial account root is
+held. A recovery case may only be opened on a **failed** collection intent of a still-live cycle — a
+pending, submitted, confirmed, recovered or cancelled intent, or a cycle that already reached a
+terminal state, fails closed with `collection_intent_not_failed` / `invalid_renewal_cycle_state` — and
+`recovered` records the **accepted R1 evidence that settled the obligation** through the same shared
+settlement seam the collection commands consume (`obligation_not_settled` when nothing settled,
+`accepted_payment_evidence_required` when the settlement rests on evidence R1 never accepted). R2
+writes no settlement, reversal or clawback, and a recovery may be recorded from `open` or
+`recovering`. No product policy, provider column, lock, Term/Lesson/schedule writer or delivery path
+was added.
+
+Detailed contract, seams, test matrix and evidence status:
+[PHASE-2A-2R2-RENEWAL-NEXT-TERM-COLLECTION-RECOVERY-AUTHORITY.md](PHASE-2A-2R2-RENEWAL-NEXT-TERM-COLLECTION-RECOVERY-AUTHORITY.md).
+State: `CANDIDATE — AWAITING INDEPENDENT REVIEW` (not passed, not merged, not deployed).
 
 ## 5. Persistent architectural boundaries
 

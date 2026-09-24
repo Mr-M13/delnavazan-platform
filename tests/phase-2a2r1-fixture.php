@@ -28,13 +28,30 @@ function dzn_r1_fix_scenario(array $source,string $label,int $sequence):array{
     global $wpdb;$p=$wpdb->prefix.'dzn_';
     $continuation=new CanonicalContinuationService();
     $lessonId=(int)(new LessonService())->create(array('student_id'=>(int)$source['student_id'],'teacher_id'=>(int)$source['teacher_id'],'course_id'=>(int)$source['course_id'],'lesson_type'=>'introductory','status'=>'draft'));
-    // Distinct scenarios must never share a Teacher interval: each occupies a 45-minute window, so
-    // consecutive scenarios start two hours apart.
     // Fixed mid-day past anchor with a distinct per-scenario offset: derived intervals stay clear of
     // the daily availability window boundary regardless of the time of day the suite runs at.
     $wall=gmdate('Y-m-d H:i:s',strtotime(gmdate('Y-m-d',strtotime('-4 days')).' 12:00:00 UTC')-($sequence*3600));
     (new LessonScheduleService())->initial($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($wall,0,10),'local_wall_time'=>substr($wall,11,8),'reason'=>$label));
-    $slotWall=gmdate('Y-m-d H:i:s',strtotime($wall)+7*86400);
+    // The disposable runtime shares one database across suites and concurrency modes, so a fixture must
+    // never assume a pristine Teacher calendar: an earlier suite legitimately schedules or holds the
+    // same Teacher at its own computed slot, and a fixed interval would then collide with it
+    // (`teacher_slot_conflict`) purely because of fixture order. Authorise the first whole-week
+    // candidate whose interval is free of applicable canonical Lesson schedules, effective Phase-Q
+    // holds and active protected R1 capacity intervals, so the fixture is order-independent while the
+    // slot remains an explicitly administrator-authorised record.
+    $course=$wpdb->get_row($wpdb->prepare("SELECT default_duration_minutes,default_buffer_minutes FROM {$p}courses WHERE id=%d",(int)$source['course_id']));
+    $duration=(int)($course->default_duration_minutes??30);$buffer=(int)($course->default_buffer_minutes??15);
+    $teacherId=(int)$source['teacher_id'];$now=gmdate('Y-m-d H:i:s');$slotWall=null;
+    for($week=0;$week<=52;$week++){
+        $candidate=gmdate('Y-m-d H:i:s',strtotime($wall)+7*86400+($week*7*86400));
+        $resolved=\Delnavazan\Platform\Core\Application\CanonicalContinuationRule::resolveWallClock('UTC',substr($candidate,0,10),substr($candidate,11,8),$duration,$buffer);
+        $starts=(string)$resolved['starts_at_utc'];$occupied=(string)$resolved['occupied_ends_at_utc'];
+        $scheduled=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE teacher_id=%d AND applicable_slot=1 AND starts_at_utc<%s AND occupied_ends_at_utc>%s",$teacherId,$occupied,$starts));
+        $held=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_continuation_reservations WHERE teacher_id=%d AND state='active' AND expires_at>%s AND starts_at_utc<%s AND occupied_ends_at_utc>%s",$teacherId,$now,$occupied,$starts));
+        $protected=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals interval_row INNER JOIN {$p}commercial_capacity_claims claim ON claim.id=interval_row.claim_id WHERE interval_row.teacher_id=%d AND interval_row.state='protected' AND claim.state='active' AND interval_row.starts_at_utc<%s AND interval_row.occupied_ends_at_utc>%s",$teacherId,$occupied,$starts));
+        if($scheduled===0&&$held===0&&$protected===0){$slotWall=$candidate;break;}
+    }
+    dzn_r1_fix_assert($slotWall!==null,'no free authorised first regular slot is available for this Teacher');
     $slot=$continuation->recordFirstRegularSlot($lessonId,array('schedule_timezone'=>'UTC','local_wall_date'=>substr($slotWall,0,10),'local_wall_time'=>substr($slotWall,11,8),'authority_basis'=>'administrator_attestation','reason_code'=>'agreed_regular_slot','evidence_channel'=>'staff_record','evidence_reference'=>'slot-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r1_fix_key('slot-'.$label));
     $principal=(int)$wpdb->get_var($wpdb->prepare("SELECT wordpress_user_id FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND active_slot=1 LIMIT 1",(int)$source['student_id']));
     dzn_r1_fix_assert($principal>0,'Phase-J principal fixture required');

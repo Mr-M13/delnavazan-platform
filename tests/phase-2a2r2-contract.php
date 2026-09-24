@@ -1,0 +1,154 @@
+<?php
+/** Phase 2A.2-R2 renewal, next-Term, recurring collection, recovery, lapse & refund authority source contract. */
+$root=dirname(__DIR__);
+$plugin=file_get_contents($root.'/delnavazan-platform.php');
+$migration=file_get_contents($root.'/src/Core/Infrastructure/Migration/Migrator.php');
+$rule=file_get_contents($root.'/src/Core/Application/RecurringRule.php');
+$support=file_get_contents($root.'/src/Core/Application/RecurringSupport.php');
+$idempotency=file_get_contents($root.'/src/Core/Application/RecurringIdempotency.php');
+$enrol=file_get_contents($root.'/src/Core/Application/RecurringEnrolmentService.php');
+$cycle=file_get_contents($root.'/src/Core/Application/RenewalCycleService.php');
+$collection=file_get_contents($root.'/src/Core/Application/CollectionIntentService.php');
+$recovery=file_get_contents($root.'/src/Core/Application/RecoveryService.php');
+$refund=file_get_contents($root.'/src/Core/Application/RefundReviewService.php');
+$protection=file_get_contents($root.'/src/Core/Application/RecurringProtectionService.php');
+$read=file_get_contents($root.'/src/Core/Application/RecurringEnrolmentReadService.php').file_get_contents($root.'/src/Core/Application/RenewalCycleReadService.php').file_get_contents($root.'/src/Core/Application/CollectionReadService.php').file_get_contents($root.'/src/Core/Application/RecoveryReadService.php').file_get_contents($root.'/src/Core/Application/RefundReviewReadService.php').file_get_contents($root.'/src/Core/Application/RecurringProtectionReadService.php');
+$outbox=file_get_contents($root.'/src/Core/Infrastructure/Repository/RecurringOutboxRepository.php');
+$concurrency=file_get_contents($root.'/tests/phase-2a2r2-concurrency-runner.sh').file_get_contents($root.'/tests/phase-2a2r2-concurrency-setup.php').file_get_contents($root.'/tests/phase-2a2r2-concurrency-worker.php').file_get_contents($root.'/tests/phase-2a2r2-concurrency-verify.php');
+$phaseR2=$rule.$support.$idempotency.$enrol.$cycle.$collection.$recovery.$refund.$protection.$read;
+
+if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<26)throw new RuntimeException('Missing Phase R2 schema identity');
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r2-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R2 build identity');
+
+// Migration, storage, verifier wiring and capabilities.
+foreach(array(
+    '026_renewal_recurring_enrolment_authority','install_renewal_recurring_enrolment_authority','verify_renewal_recurring_enrolment_schema',
+    'recurring_enrolments','recurring_enrolment_events','recurring_enrolment_commands',
+    'renewal_cycles','renewal_cycle_events','renewal_cycle_commands',
+    'collection_intents','collection_intent_events','collection_intent_commands',
+    'recovery_cases','recovery_case_events','recovery_case_commands',
+    'refund_review_cases','refund_review_events','refund_review_commands',
+    'recurring_protections','recurring_protection_events','recurring_protection_commands',
+    'dzn_manage_recurring_enrolments','dzn_manage_renewal_cycles','dzn_manage_collection_intents',
+    'dzn_manage_recovery','dzn_manage_refund_reviews','dzn_manage_recurring_protection','dzn_view_recurring_authority',
+) as $needle) if(!str_contains($migration.$plugin,$needle))throw new RuntimeException('Missing Phase R2 migration contract: '.$needle);
+if(!str_contains($migration,"if(\$id==='026_renewal_recurring_enrolment_authority')self::verify_renewal_recurring_enrolment_schema();"))throw new RuntimeException('Migration 026 must invoke the Phase R2 schema verifier before it is recorded');
+if(substr_count($migration,'self::verify_renewal_recurring_enrolment_schema();')<3)throw new RuntimeException('Phase R2 verifier must run after migration 026, on current-schema verification and before schema activation');
+if(!str_contains($migration,"in_array( '026_renewal_recurring_enrolment_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-026 pre-activation verification is missing');
+if(!str_contains($migration,"'026_renewal_recurring_enrolment_authority' )"))throw new RuntimeException('Phase R2 migration must be listed as required');
+$install=substr($migration,strpos($migration,'private static function install_renewal_recurring_enrolment_authority'),strpos($migration,'private static function verify_renewal_recurring_enrolment_schema')-strpos($migration,'private static function install_renewal_recurring_enrolment_authority'));
+if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO'))throw new RuntimeException('Phase R2 migration must be additive only');
+if(stripos($install,'stripe')!==false||stripos($install,'google')!==false||stripos($install,'webhook')!==false)throw new RuntimeException('Phase R2 storage must stay provider-neutral');
+// The phase creates exactly its own storage: no Lesson, Term, schedule or notification table may be
+// smuggled into the migration, and no declared R2 table may be missing from it.
+preg_match_all('/CREATE TABLE \{\$p\}([a-z_]+)/',$install,$created);
+$declaredTables=array('recurring_enrolments','recurring_enrolment_events','recurring_enrolment_commands','renewal_cycles','renewal_cycle_events','renewal_cycle_commands','collection_intents','collection_intent_events','collection_intent_commands','recovery_cases','recovery_case_events','recovery_case_commands','refund_review_cases','refund_review_events','refund_review_commands','recurring_protections','recurring_protection_events','recurring_protection_commands');
+$createdTables=$created[1];sort($createdTables);sort($declaredTables);
+if($createdTables!==$declaredTables)throw new RuntimeException('Migration 026 must create exactly the eighteen declared Phase R2 tables');
+if(count(array_unique($createdTables))!==18)throw new RuntimeException('Migration 026 must declare each Phase R2 table exactly once');
+if(str_contains($migration,'CAPABILITY_OPTION_R2')===false||str_contains($migration,'dzn_platform_capability_version_2a2r2')===false)throw new RuntimeException('Phase R2 capability marker is missing');
+if(!str_contains($migration,'$phaseR2Grants')||!str_contains($migration,'$teacherR2Role'))throw new RuntimeException('Phase R2 capability repair must ensure every grant and deny the Teacher role');
+
+// Locked R2 state vocabularies and safe defaults.
+foreach(array(
+    "RECURRING_STATES=array('active','suspended','closed')","COLLECTION_MODES=array('manual','automatic')",
+    "CYCLE_STATES=array('pending','guarantee_protected','payment_required','collected','term_bound','closed','lapsed','cancelled')",
+    "COLLECTION_INTENT_STATES=array('pending','submitted','confirmed','failed','recovered','cancelled')",
+    "COLLECTION_KINDS=array('manual_payment_required','automatic_charge')",
+    "RECOVERY_STATES=array('open','recovering','recovered','lapsed')",
+    "REFUND_REVIEW_STATES=array('open','review_required','resolved','dismissed')",
+    "REFUND_REVIEW_KINDS=array('refund','reversal')","PROTECTION_STATES=array('active','released','lapsed')",
+    "MANUAL_RENEWAL_SLOT_GUARANTEE_WEEKS=4",
+) as $constant) if(!str_contains($rule,$constant))throw new RuntimeException('Missing locked Phase R2 rule constant: '.$constant);
+foreach(array('AUTOMATIC_RENEWAL_UPCOMING','AUTOMATIC_RENEWAL_CHARGED','AUTOMATIC_RENEWAL_FAILED','MANUAL_RENEWAL_PAYMENT_REQUIRED','GUARANTEE_DEADLINE_APPROACHING','GUARANTEE_EXPIRED','PAYMENT_FAILED','PAYMENT_RECOVERED','TERM_LAPSED','REFUND_REVIEW_REQUIRED','REFUND_RESOLVED') as $intent) if(!str_contains($rule,$intent))throw new RuntimeException('Missing channel-neutral notification intent: '.$intent);
+
+// The four unresolved product decisions stay behind safe unset/deferred seams.
+if(!str_contains($migration,"academic_consequence varchar(32) NULL")||!str_contains($refund,"'academic_consequence'=>null"))throw new RuntimeException('Refund academic consequence must stay nullable/unresolved');
+if(!str_contains($refund,'academic_consequence'))throw new RuntimeException('Refund authority must preserve the unresolved academic-consequence seam');
+if(!str_contains($recovery,'recovery_policy_unset')||!str_contains($recovery,"PAYMENT_RECOVERY_POLICY"))throw new RuntimeException('Recovery lapse must fail closed while the recovery policy is unset');
+if(!str_contains($collection,"'charge_at'")||!str_contains($collection,'automatic_charge'))throw new RuntimeException('Automatic charge must stay provider-neutral and lead-time unset by default');
+
+// Provider neutrality, integer money and no raw SQL or scheduling in the application layer.
+foreach(array('stripe','Stripe','wp_remote_','wp_mail','curl_','webhook','floatval','doubleval','round(',"number_format") as $forbidden) if(str_contains($phaseR2,$forbidden))throw new RuntimeException('Phase R2 must not acquire this authority: '.$forbidden);
+foreach(array('INSERT INTO','UPDATE ','DELETE FROM') as $sql) if(str_contains($phaseR2,$sql))throw new RuntimeException('Phase R2 application services must not write storage with raw SQL');
+foreach(array('cron','wp_schedule_event','wp_schedule_single_event') as $forbidden) if(str_contains($phaseR2,$forbidden))throw new RuntimeException('Phase R2 must not become time-authoritative through scheduling');
+
+// R2 orchestrates R1/Phase-L without reimplementing it.
+foreach(array('CommercialTermFundingService','bindEntitlementToTerm','CommercialCapacityService','releaseClaim','CommercialPolicyService') as $delegation) if(!str_contains($cycle.$protection.$recovery,$delegation))throw new RuntimeException('Phase R2 must delegate '.$delegation.' to the existing authority');
+if(!str_contains($enrol,'funding_plan_required'))throw new RuntimeException('A recurring enrolment must fail closed without an R1 funding plan');
+foreach(array('insertTerm','insertLesson','insertVersion','insertFundingPlan','insertClaim') as $forbidden) if(str_contains($phaseR2,$forbidden))throw new RuntimeException('Phase R2 must not become a parallel academic/commercial writer: '.$forbidden);
+
+// Digest-only, append-only and capability-protected authority.
+foreach(array('command_key_digest','command_payload_digest','evidence_reference_digest') as $digest) if(!str_contains($migration,$digest)||!str_contains($phaseR2,$digest))throw new RuntimeException('Phase R2 evidence must be digest-only: '.$digest);
+foreach(array('dzn_manage_recurring_enrolments','dzn_manage_renewal_cycles','dzn_manage_collection_intents','dzn_manage_recovery','dzn_manage_refund_reviews','dzn_manage_recurring_protection','dzn_view_recurring_authority') as $cap) if(!str_contains($phaseR2,$cap))throw new RuntimeException('Phase R2 capability is missing: '.$cap);
+if(!str_contains($idempotency,'hash_hmac')||!str_contains($idempotency,'wp_salt'))throw new RuntimeException('Phase R2 digests must be keyed');
+
+// The R1 serialization root is the only R2 serialization device; R2 owns no lock of its own.
+if(!str_contains($support,'public static function lockAccountRoot')||!str_contains($support,'CommercialAuthorityRepository'))throw new RuntimeException('Phase R2 must serialise on the R1 commercial account root');
+if(!str_contains($support,'public static function guardAggregate')||!str_contains($support,'public static function aggregateStudent'))throw new RuntimeException('Phase R2 must resolve and lock aggregate ownership through one shared seam');
+if(!str_contains($migration,'commercial_account_roots'))throw new RuntimeException('The R1 commercial serialization root must remain the documented lock root');
+foreach(array('recurring_enrolment','renewal_cycle','collection_intent','recovery_case','refund_review','recurring_protection') as $aggregate) if(!str_contains($support,"case '".$aggregate."'"))throw new RuntimeException('Every R2 aggregate must resolve its owning Student: '.$aggregate);
+foreach(array('recurring_enrolment','renewal_cycle','collection_intent','recovery_case','refund_review','recurring_protection') as $aggregate) if(!str_contains($enrol.$cycle.$collection.$recovery.$refund.$protection,"'{$aggregate}',"))throw new RuntimeException('Every R2 mutation must guard its aggregate before writing: '.$aggregate);
+
+// The channel-neutral notification intents ride the existing outbox seam: intent names only.
+if(!str_contains($support,'public static function publishIntent')||!str_contains($outbox,'platform_outbox'))throw new RuntimeException('Phase R2 must publish intents through the existing platform_outbox seam');
+if(!str_contains($outbox,'wp_salt')||!str_contains($outbox,'idempotency_key'))throw new RuntimeException('An intent identity must be a keyed digest, not a raw key');
+foreach(array('wp_mail','curl_','wp_remote_','notification_template','delivery_attempt') as $forbidden) if(str_contains($outbox,$forbidden))throw new RuntimeException('Phase R2 must never carry a template or deliver an intent: '.$forbidden);
+if(!str_contains($rule,'public static function notificationIntent'))throw new RuntimeException('The finalised intent set must be enforced at the publish boundary');
+
+// R2 orchestrates R1 without nesting a transaction inside a delegating R1 command.
+foreach(array($cycle,$protection) as $delegating){
+    $delegation=strpos($delegating,'new CommercialTermFundingService())->bindEntitlementToTerm');
+    if($delegation===false)$delegation=strpos($delegating,'new CommercialCapacityService())->releaseClaim');
+    if($delegation===false)throw new RuntimeException('A delegating R2 command must call the existing authority');
+}
+$bindSource=substr($cycle,strpos($cycle,'public function bindNextTerm'));
+$bindSource=substr($bindSource,0,strpos($bindSource,'public function lapse'));
+if(strpos($bindSource,'bindEntitlementToTerm')>strpos($bindSource,'$this->repository->begin();'))throw new RuntimeException('The delegated R1 binding must own its transaction: R2 must not nest one inside it');
+if(!str_contains($bindSource,'assertEntitlementBoundToTerm'))throw new RuntimeException('The delegated binding must be verified before R2 records it');
+$releaseSource=substr($protection,strpos($protection,'public function releaseProtection'));
+$releaseSource=substr($releaseSource,0,strpos($releaseSource,'private function replay'));
+if(strpos($releaseSource,'releaseClaim')>strpos($releaseSource,'$this->repository->begin();'))throw new RuntimeException('The delegated capacity release must own its transaction: R2 must not nest one inside it');
+if(!str_contains($releaseSource,'claimReleased'))throw new RuntimeException('The delegated release must be verified before R2 records it');
+
+// The boundary derivation is progression-derived, never `intro + 7 days`.
+foreach(array('CommercialPatternService','CanonicalContinuationRule::resolveWallClock','commercial_recurring_patterns','boundary_facts_required','guarantee_deadline_at','AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('The next-Term boundary must be derived from the authorised R1 pattern facts: '.$needle);
+if(str_contains($cycle,'intro_lesson_id')||str_contains($cycle,'anchor_starts_at_utc +7')||str_contains($cycle,"strtotime((string)\$cycle->boundary_derived_at"))throw new RuntimeException('The next-Term boundary must never be inferred from the introductory occurrence');
+
+// The seven required concurrency modes exist as first-class scenarios.
+foreach(array('renewal_vs_schedule','guarantee_vs_close','recovery_vs_satisfaction','release_vs_succession','mode_change_vs_cycle','refund_vs_settlement','unrelated_recurring_enrolments') as $race) if(!str_contains($concurrency,$race))throw new RuntimeException('Missing Phase R2 concurrency mode: '.$race);
+if(!str_contains($concurrency,'gate')||!str_contains($concurrency,"'.result'")||!str_contains($concurrency,'release')||!str_contains($concurrency,'DZN_PHASE_2A2R2_RUNTIME_TEST'))throw new RuntimeException('The Phase R2 concurrency harness must gate and verify both workers');
+foreach(array('dzn_phase_2a2r2_after_recurring_command_insert','dzn_phase_2a2r2_after_cycle_event_insert','dzn_phase_2a2r2_after_collection_intent_event_insert','dzn_phase_2a2r2_after_recovery_case_event_insert','dzn_phase_2a2r2_after_refund_review_event_insert','dzn_phase_2a2r2_after_protection_event_insert') as $hook) if(!str_contains($enrol.$cycle.$collection.$recovery.$refund.$protection.$support,$hook))throw new RuntimeException('Missing Phase R2 write-boundary seam: '.$hook);
+
+// Correction round 1: derived-fact ownership, terminal-cycle protection and closure guards.
+foreach(array('canonical_source_term_required',"record_model??'')!=='canonical_enrolment_term_v1'",'archived_at!==null') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('The next-Term boundary must only accept a canonical Term of the recurring enrolment own Enrolment: '.$needle);
+if(!str_contains($cycle,"(int)\$term->enrolment_id!==\$enrolmentId")||!str_contains($cycle,"array('authorised','current','closed')"))throw new RuntimeException('The source-Term guard must prove Enrolment ownership and a non-cancelled canonical Term');
+if(!str_contains($collection,'collection_obligation_ownership_conflict')||!str_contains($collection,'assertObligationOwnership'))throw new RuntimeException('A collection intent must prove the exact cycle obligation ownership');
+foreach(array('beneficiary_student_id','course_id','currency') as $needle) if(!str_contains($collection,$needle))throw new RuntimeException('Obligation ownership must be proven against the R1 offer: '.$needle);
+if(!str_contains($cycle,"state<>'cancelled' ORDER BY id ASC"))throw new RuntimeException('A cycle must be collected by its authoritative first non-cancelled obligation');
+foreach(array('recurring_protection_release_required','activeProtectionId') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('A terminal cycle may never leave an active protection behind: '.$needle);
+if(!str_contains($enrol,'hasOpenBlockingCase')||!str_contains($enrol,'refund_review_cases'))throw new RuntimeException('Closing a recurring enrolment must be blocked by an open refund/recovery case');
+if(!str_contains($migration,'unexpected renewal storage'))throw new RuntimeException('The Phase R2 verifier must reject storage smuggled in beside the phase tables');
+
+// Correction round 2: cross-commitment ownership, accepted-evidence settlement and digest-only storage.
+foreach(array('raw_key','idempotency_key','evidence_reference','reference_code') as $rawColumn) if(!str_contains($migration,$rawColumn))throw new RuntimeException('The Phase R2 verifier must reject a raw key or reference column on append-only storage: '.$rawColumn);
+if(!str_contains($migration,'renewal evidence must stay digest-only'))throw new RuntimeException('The Phase R2 verifier must reject raw-key/reference columns on append-only tables');
+foreach(array('settlementReason','accepted_payment_evidence_required','commercial_obligation_settlements') as $needle) if(!str_contains($support,$needle))throw new RuntimeException('A settlement must be re-proven from accepted R1 evidence: '.$needle);
+foreach(array($collection,$cycle) as $consumer) if(!str_contains($consumer,'RecurringSupport::settlementReason'))throw new RuntimeException('Collection confirmation and cycle collection must both consume the accepted-evidence settlement rule');
+foreach(array('renewal_entitlement_ownership_conflict','assertEntitlementOwnership') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('A next-Term binding must prove the entitlement belongs to this cycle commitment: '.$needle);
+foreach(array('renewal_term_binding_conflict','plan.enrolment_id') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('The delegated binding must prove the created Term sits in the cycle own Student/Course chain: '.$needle);
+foreach(array('recurring_protection_claim_conflict','assertClaimOwnership','forClaim') as $needle) if(!str_contains($protection,$needle))throw new RuntimeException('Continuous protection must adopt only the cycle own active claim: '.$needle);
+foreach(array('refund_review_evidence_conflict','assertEvidenceOwnership') as $needle) if(!str_contains($refund,$needle))throw new RuntimeException('A refund review must record its own purchase/obligation evidence: '.$needle);
+foreach(array('renewal_entitlement_ownership_conflict','recurring_protection_claim_conflict','refund_review_evidence_conflict','accepted_payment_evidence_required') as $probe) if(!str_contains(file_get_contents($root.'/tests/phase-2a2r2-runtime.php'),$probe))throw new RuntimeException('The runtime proof must exercise the cross-commitment guard: '.$probe);
+if(!str_contains(file_get_contents($root.'/tests/phase-2a2r2-migration-runtime.php'),'raw_key'))throw new RuntimeException('The migration runtime must prove the verifier rejects raw-key storage');
+
+// Correction round 4: recovery-state enforcement. A recovery case records a *failed* collection
+// intent of a live cycle, and `recovered` records the accepted R1 evidence that settled the obligation.
+foreach(array('collection_intent_not_failed','assertRecoverable','assertRecoverySettled','RecurringSupport::settlementReason') as $needle) if(!str_contains($recovery,$needle))throw new RuntimeException('The Recovery Case authority must enforce its own recorded source and settlement state: '.$needle);
+if(!str_contains($recovery,"(string)\$intent->state!=='failed'")||!str_contains($recovery,'RecurringRule::CYCLE_LIVE_STATES'))throw new RuntimeException('A recovery case may only be opened on a failed collection intent of a live renewal cycle');
+if(!str_contains($recovery,"array('open','recovering'),'recovered'"))throw new RuntimeException('A recovery may only be recorded from an open or recovering case');
+if(!str_contains($rule,"CYCLE_LIVE_STATES=array('pending','guarantee_protected','payment_required','collected','term_bound')"))throw new RuntimeException('The live-cycle vocabulary must be a single locked constant');
+if(!str_contains($protection,'RecurringRule::CYCLE_LIVE_STATES'))throw new RuntimeException('Protection and recovery must share one live-cycle vocabulary');
+foreach(array('collection_intent_not_failed','obligation_not_settled','accepted_payment_evidence_required','invalid_renewal_cycle_state') as $probe) if(!str_contains(file_get_contents($root.'/tests/phase-2a2r2-runtime.php'),$probe))throw new RuntimeException('The runtime proof must exercise the recovery-state enforcement: '.$probe);
+
+echo "Phase 2A.2-R2 contract static test passed\n";

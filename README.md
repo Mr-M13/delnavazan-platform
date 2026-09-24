@@ -8,13 +8,13 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Authoritative main | Phase 2A.2-Q implementation merge at `815a301679fdebc5d058646749e5a206ab492629` (fast-forward of the independently approved Phase-Q candidate); the docs-only closeout commit that follows is recorded in continuity |
-| Platform / schema | 0.1.0 / **24 authoritative on `main`** |
-| Migrations | 001–024 authoritative; latest `024_post_intro_continuation_slot_reservation_authority` |
-| Latest merged slice | Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority (Schema 24; complete / independently reviewed after correction rounds 1–2 / merged / closed) |
-| Previous merged slice | Phase 2A.2-P — Canonical Attendance Intake & Review Authority (Schema 23) |
-| Active Platform candidate | None |
-| Next boundary | **No next slice is authorised.** Payment/Stripe, Term and Lesson materialisation, notifications, Google/provider integration, Teacher/Student Portal work, production continuation/attendance cutover and deployment require separate explicit authorisation |
+| Authoritative main | Phase 2A.2-R1 implementation merge at `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25 / R1 complete) |
+| Platform / schema | 0.1.0 / **26 candidate** |
+| Migrations | 001–026 candidate; latest `026_renewal_recurring_enrolment_authority` |
+| Latest merged slice | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority (Schema 25; merged / closed) |
+| Previous merged slice | Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority (Schema 24) |
+| Active Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; candidate awaiting independent review, correction rounds 1–4 applied, contract §13 pre-implementation prerequisites closed) |
+| Next boundary | **R2 candidate awaiting independent review.** No Stripe, notification delivery, Theme, deployment or production access is authorised |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

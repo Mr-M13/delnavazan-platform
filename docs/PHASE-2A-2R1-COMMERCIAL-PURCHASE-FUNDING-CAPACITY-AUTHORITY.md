@@ -1,18 +1,24 @@
 # Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority
 
-**Status:** implementation candidate on branch `phase-2a2r1-commercial-purchase-funding-authority`,
-from authoritative base `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`. **Not merged, not deployed, no
-production cutover.** Schema 25 / migration `025_commercial_purchase_funding_authority` / build
-`phase2a2r1-commercial-purchase-funding-authority-20260920.1`. The immutable candidate commit and
-tree SHAs are recorded in the task closeout, because a commit cannot embed its own hash.
+**Status:** **merged and closed on `main`.** Authoritative `main` is
+`f9df3bfb0fda79fba7dee916c4687464ee67d480`: the Phase-R1 commercial purchase, funding and
+current-Term capacity authority as reviewed through correction round 6 plus the subsequent
+fresh-install capability-bootstrap ordering correction. Schema 25 / migration
+`025_commercial_purchase_funding_authority` / build
+`phase2a2r1-commercial-purchase-funding-authority-20260920.1`. **Not deployed, and no production
+cutover has occurred** — source completion never authorises deployment, and Stripe, notifications,
+portals, Theme, refunds, payouts and deployment remain outside Phase R1.
 
-Correction round 6 is the current candidate: additive descendants of the reviewed correction-round-5
-commit `2af26260d1ba711a18f9fc73c15923531cab69cd`, closing the one finding the correction-round-5
-independent re-review returned (`C6-MAJOR-001` complete operation-specific `commercial_commands`
-selector shape — §0f). The independent re-reviews of correction rounds 1–5 each FAILED on their
-then-open findings while passing everything else, and remain historical review evidence. Independent
-re-review of correction round 6 has **not** occurred, so this state is `CORRECTION ROUND 6 CANDIDATE —
-AWAITING INDEPENDENT RE-REVIEW`: not passed, not merged, not deployed.
+Correction round 6 was the reviewed candidate: additive descendants of the reviewed
+correction-round-5 commit `2af26260d1ba711a18f9fc73c15923531cab69cd`, closing the one finding the
+correction-round-5 independent re-review returned (`C6-MAJOR-001` complete operation-specific
+`commercial_commands` selector shape — §0f). The independent re-reviews of correction rounds 1–5
+each FAILED on their then-open findings while passing everything else, and remain historical review
+evidence. Correction round 6 passed independent re-review and was merged as a fast-forward; the
+following fresh-install capability-bootstrap correction is also on `main`. §0–§0f below are retained
+as that review history. Phase 2A.2-R2 / Schema 26 renewal, next-Term, recurring collection, recovery,
+lapse and refund-review authority is the active successor **candidate**; it adds an orchestration
+layer above this authority and changes none of it.
 
 ## 0. Independent review correction round 1
 

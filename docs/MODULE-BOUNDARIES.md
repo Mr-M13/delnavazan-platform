@@ -1,12 +1,23 @@
 # Delnavazan Platform Module Boundaries
 
-> **Unmerged Phase 2A.2-R1 candidate boundary:** the commercial authority proposed by the unmerged R1
-> candidate owns purchase offers, pricing snapshots, promotions, account adjustments, obligations,
-> provider-neutral payment evidence, funding derivation, bounded entitlements, Term funding plans,
-> the Regular recurring pattern and current-Term protected capacity. It owns no Term, Lesson,
-> schedule, delivery, attendance or provider storage: Term creation stays with Phase L, Lesson
-> issuance with Phase M, scheduling with Phase N, and payment providers remain evidence sources only.
-> Nothing in that candidate is authoritative until it is independently reviewed and merged.
+> **Phase 2A.2-R1 boundary (Schema 25, merged and closed):** the commercial authority owns purchase
+> offers, pricing snapshots, promotions, account adjustments, obligations, provider-neutral payment
+> evidence, funding derivation, bounded entitlements, Term funding plans, the Regular recurring
+> pattern and current-Term protected capacity. It owns no Term, Lesson, schedule, delivery,
+> attendance or provider storage: Term creation stays with Phase L, Lesson issuance with Phase M,
+> scheduling with Phase N, and payment providers remain evidence sources only.
+
+> **Phase 2A.2-R2 candidate boundary (Schema 26, not authoritative until independently reviewed and
+> merged):** the recurring layer owns exactly the cross-Term orchestration aggregates — recurring
+> enrolment, renewal cycle, collection intent, recovery case, refund/reversal review case and
+> continuous cross-Term protection — plus their append-only events and digest-only command evidence
+> and capability-protected reads. It owns no price, offer, obligation, settlement, entitlement,
+> funding plan, protected claim, Term, Lesson, schedule or delivery storage: every next-Term purchase
+> is delegated through the existing `CommercialOfferService → CommercialPaymentService →
+> CommercialCapacityService → CommercialTermFundingService →` Phase-L chain, capacity release is
+> delegated to the R1 capacity authority under the same per-Teacher scheduling root, and provider
+> confirmation arrives only as R1 `commercial_payment_evidence`. Notification intents are names
+> published to the existing `platform_outbox` seam; delivery belongs to Phase S.
 
 ## 1. Boundary rule
 

@@ -35,7 +35,9 @@ $phaseR1=$rule.$money.$validator.$lineage.$commitment.$commandShape.$offer.$paym
 $phaseR1Application=$rule.$money.$validator.$lineage.$commitment.$commandShape.$offer.$payment.$funding.$capacity.$capacityAuthority.$pattern.$policy.$catalogue.$promotion.$adjustment.$exceptions.$read.$support.$idempotency;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<25)throw new RuntimeException('Missing Phase R1 schema identity');
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r1-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
+// The package build identity is monotonic: R1's identity must still be recognisable in the
+// bootstrap while any additive descendant phase (for example R2) may stamp a later one.
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r[0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
 
 // Migration, storage, verifier wiring and capabilities.
 foreach(array(
@@ -54,7 +56,9 @@ foreach(array(
 if(!str_contains($migration,"if(\$id==='025_commercial_purchase_funding_authority')self::verify_commercial_purchase_schema();"))throw new RuntimeException('Migration 025 must invoke the Phase R1 schema verifier before it is recorded');
 if(substr_count($migration,'self::verify_commercial_purchase_schema();')<3)throw new RuntimeException('Phase R1 verifier must run after migration 025, on current-schema verification and before schema activation');
 if(!str_contains($migration,"in_array( '025_commercial_purchase_funding_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-025 pre-activation verification is missing');
-if(!str_contains($migration,"'025_commercial_purchase_funding_authority' )"))throw new RuntimeException('Phase R1 migration must be listed as required');
+// The required-migration ledger must still name 025; a later additive phase appends its own entry,
+// so the assertion locates the entry instead of requiring it to be the final element.
+if(!preg_match("/'025_commercial_purchase_funding_authority'\s*[,)]/",$migration))throw new RuntimeException('Phase R1 migration must be listed as required');
 $install=substr($migration,strpos($migration,'private static function install_commercial_purchase_authority'),strpos($migration,'private static function verify_commercial_purchase_schema')-strpos($migration,'private static function install_commercial_purchase_authority'));
 if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO'))throw new RuntimeException('Phase R1 migration must be additive only: no backfill, no inference, no settlement import');
 if(stripos($install,'stripe')!==false||stripos($install,'google')!==false||stripos($install,'provider_intent')!==false)throw new RuntimeException('Phase R1 storage must stay provider-neutral');

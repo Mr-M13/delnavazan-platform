@@ -1,6 +1,8 @@
 # Delnavazan Commercial Policy Registry
 
-**Status:** introduced with the unmerged Phase 2A.2-R1 candidate (Schema 25).
+**Status:** introduced with the Phase 2A.2-R1 commercial authority (Schema 25, merged and closed on
+`main`) and extended by the Phase 2A.2-R2 renewal/collection candidate (Schema 26, not authoritative
+until independently reviewed and merged).
 **Purpose:** keep `COMMERCIAL POLICY ↔ PLATFORM AUTHORITY ↔ PORTAL UX ↔ NOTIFICATION WORDING ↔ TERMS & CONDITIONS`
 aligned without duplicating any rule. This document is a registry and an assertion, never a second
 configurable authority: it contains no rule that Platform code does not already enforce.
@@ -21,8 +23,8 @@ configurable authority: it contains no rule that Platform code does not already 
 | `INSTALMENT_TRANCHE_STRUCTURE` | two ordered contiguous tranches, sessions 1–6 then 7–12 | `CommercialRule::INSTALMENT_TRANCHES` / `TRANCHE_*` | Offer and obligation decomposition; the obligations are recorded immutably per offer |
 | `TRANCHE_PREREQUISITE_ORDER` | obligation *n* is academically effective only when every lower-sequence obligation is settled | `CommercialTermFundingService::obligationStatus()` | Funding derivation; the canonical Lesson funding guard fails closed with `standard_funding_exhausted` |
 | `CAPACITY_SUCCESSION` | an existing capacity authority is never released until its successor is durable under the same per-Teacher scheduling root | `CommercialCapacityService::handoffFromEntitlement()` | Phase-Q hold → R1 protected claim → Phase-N schedule; a failed handoff leaves the predecessor hold active |
-| `AUTOMATIC_RENEWAL_SLOT_PROTECTION` | continuous protection while the automatic relationship is valid or in recovery | deferred to Phase R2 (behaviour is locked; no R1 storage) | R2 |
-| `MANUAL_GUARANTEE_EXPRESSION` | the guarantee is the instant *n* weekly intervals before next-Term start, resolved in the pattern timezone | deferred to Phase R2; the value of *n* is class B | R2 |
+| `AUTOMATIC_RENEWAL_SLOT_PROTECTION` | continuous protection while the automatic relationship is valid or in recovery | Phase R2 `dzn_recurring_protections` (one active protection per renewal cycle and per R1 claim) linked to an active R1 protected-capacity claim | R2 protection records; release is delegated to the R1 capacity authority under the same per-Teacher scheduling root and is never a silent side effect of lapse/cancel |
+| `MANUAL_GUARANTEE_EXPRESSION` | the guarantee is the whole-week interval *n* before the next-Term boundary, resolved in the pattern timezone | Phase R2 `RecurringRule::MANUAL_RENEWAL_SLOT_GUARANTEE_WEEKS` (= 4), recorded as `dzn_renewal_cycles.guarantee_deadline_at` | R2 `activate_manual_guarantee`; the value of *n* remains class B (`MANUAL_RENEWAL_SLOT_GUARANTEE_WEEKS`) |
 | Provider neutrality, no fake Lessons, no fake entitlement, payer ≠ beneficiary, Phase-M/O allowance separation | — | existing Platform authorities (Phases M/O/Q and this phase) | Contract tests assert them |
 
 ## 3. Class B — runtime configurable policies
@@ -30,12 +32,12 @@ configurable authority: it contains no rule that Platform code does not already 
 Only these five keys may exist in `dzn_commercial_policies`. Each row is immutable and versioned;
 a new value is a new version, and an unset policy is recorded explicitly with a null value.
 
-| Policy identifier | Current value in R1 | Owner / enforcing seam | Notification intent it will drive | T&C subject |
+| Policy identifier | Current value | Owner / enforcing seam | Notification intent it will drive | T&C subject |
 |---|---|---|---|---|
 | `INTRO_BOOKING_HORIZON` | 4 weeks (registered; not enforced in R1/R2) | Future booking-request intake policy; `CommercialPolicyService` owns the value | Introductory booking availability | Free introductory lesson and its booking horizon |
 | `MANUAL_RENEWAL_SLOT_GUARANTEE_WEEKS` | 4 | Phase R2 renewal guarantee; `CommercialPolicyService` owns the value | `MANUAL_RENEWAL_PAYMENT_REQUIRED`, `GUARANTEE_DEADLINE_APPROACHING`, `GUARANTEE_EXPIRED` | Manual renewal and the same-slot guarantee deadline |
-| `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` | **unset** | Phase R2 automatic charge scheduling; unset means no advance charge date exists | `UPCOMING_AUTOMATIC_PAYMENT` | Advance notice before an automatic charge |
-| `PAYMENT_RECOVERY_POLICY` | **unset** | Phase R2 recovery/lapse; unset means no automatic lapse and capacity stays protected | `PAYMENT_FAILED`, `PAYMENT_RECOVERED` | Failed-payment recovery |
+| `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` | **unset** | Phase R2 automatic charge scheduling: while unset `RecurringRule::automaticChargeAt()` returns null and no advance charge instant exists | `AUTOMATIC_RENEWAL_UPCOMING` | Advance notice before an automatic charge |
+| `PAYMENT_RECOVERY_POLICY` | **unset** | Phase R2 recovery/lapse: while unset `RecoveryService::markLapsed()` refuses and capacity stays protected; only an explicit recorded administrator command may lapse | `PAYMENT_FAILED`, `PAYMENT_RECOVERED`, `TERM_LAPSED` | Failed-payment recovery |
 | `INSTALMENT_DUE_DATE_POLICY` | **unset** | Phase R1 offer issuance reads an explicit authorised due instant when one is supplied; the policy value is deliberately not interpreted yet | `INSTALMENT_PAYMENT_REQUIRED`, `UPCOMING_INSTALMENT` | Two-instalment payment and the second instalment deadline |
 
 **Never configurable here:** the Term session count, the Term change allowance, the tranche
@@ -47,7 +49,9 @@ consequences, gift-card/stored-value rules and the automatic-renewal slot-protec
 1. `CommercialRule::POLICY_KEYS` is the only allowlist, and it contains class-B keys only; a
    structural key is refused with `Structural invariants are not configurable commercial policies`.
 2. The Phase-R1 contract test asserts the allowlist, the structural constants, the recorded-Term
-   reads and the absence of any competing literal.
+   reads and the absence of any competing literal; the Phase-R2 contract test asserts that the three
+   renewal/collection keys above are the only ones R2 reads, that `MANUAL_RENEWAL_SLOT_GUARANTEE_WEEKS`
+   resolves to the locked 4-week value, and that no unset policy is silently defaulted.
 3. Every offer snapshot records the class-B policy versions it applied, so a later policy change
    can never rewrite what a Student was charged or promised.
 4. This document is asserted from source by the contract test (`COMMERCIAL-POLICY-REGISTRY.md` must

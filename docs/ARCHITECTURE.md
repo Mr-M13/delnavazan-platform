@@ -1,22 +1,30 @@
 # Delnavazan Platform Architecture
 
-> **Unmerged Phase 2A.2-R1 candidate (2026-09-20) — not authoritative:** branch
-> `phase-2a2r1-commercial-purchase-funding-authority` (base
-> `1b9d7aaef0ca21fdb861ccc9da1d15634cb5d843`) proposes Schema 25 commercial purchase, funding and
-> current-Term capacity authority: an immutable Platform-issued purchase offer and pricing snapshot,
-> ordered payment obligations, provider-neutral evidence, derived academic funding, bounded
-> entitlements bound to Terms through the existing Phase-L authority, the canonical Regular
-> recurring pattern and protected capacity with mandatory Phase-Q → R1 → Phase-N succession. It is
-> not merged, not deployed and not authoritative; Stripe, notifications, portals, Theme, refunds,
-> payouts and deployment remain outside it.
+> **Phase 2A.2-R1 merged and closed (Schema 25 authoritative on `main`); Phase 2A.2-R2 candidate
+> (Schema 26) — not authoritative:** Phase 2A.2-R1 commercial purchase, funding and current-Term
+> capacity authority is merged and closed on `main` at
+> `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25, migration
+> `025_commercial_purchase_funding_authority`): an immutable Platform-issued purchase offer and
+> pricing snapshot, ordered payment obligations, provider-neutral evidence, derived academic funding,
+> bounded entitlements bound to Terms through the existing Phase-L authority, the canonical Regular
+> recurring pattern and protected capacity with mandatory Phase-Q → R1 → Phase-N succession. The
+> active candidate adds Phase 2A.2-R2 / Schema 26 renewal, next-Term, recurring
+> enrolment/collection, recovery, lapse and refund-review authority strictly **above** that layer: a
+> recurring-enrolment aggregate, progression-derived renewal cycles, provider-neutral recorded
+> collection modes and collection intents, recovery/lapse representation, a provider-neutral
+> refund/reversal review trajectory and continuous cross-Term protection. R2 reimplements no R1
+> pricing, acceptance, funding derivation, protected claim or Term binding, makes no provider call,
+> delivers no notification and decides none of the four deferred product questions. Neither state is
+> deployed; Stripe, notification delivery, portals, Theme, refund academic consequences, automatic
+> charging, recovery automation, payouts and deployment remain outside Platform authority.
 
 ## 1. Status and scope
 
 This document preserves the canonical Phase 0 architectural direction, ownership and migration constraints. It is not authority for a big-bang Amelia replacement, deployment or unbounded implementation.
 
-> **Current-state override (2026-09-20):** Platform 0.1.0 `main` is authoritative at Schema 24 after the Phase 2A.2-Q post-intro continuation & slot reservation authority merge and closeout. Phases 2A.2-A through Q are complete, independently reviewed where consequential, merged and closed; canonical authority therefore covers Lesson identity/lifecycle, canonical scheduling and Teacher capacity (Phase N), provider-neutral exceptional delivery/attendance outcomes with a distinct academy-obligation debt authority (Phase O), and Phase-P intake/evidence/assessment/review authority. Phase 2A.2-Q (Schema 24, merged and closed) adds only the post-introductory continuation decision, an explicit administrator-authorised first regular slot record, a bounded pre-payment hold bound to that record, and the delayed convergence of an already-recorded continuing decision into that hold, integrated into the single canonical Teacher-capacity arbitration seam; it creates no payment, Term, Lesson, notification or provider authority and stops before payment. Production continuation and attendance cutover, Google/Meet and calendar evidence, OAuth/webhooks/credentials, Amelia, payment/Finance, renewal, notification, payroll, Teacher Portal and Student Portal integration remain outside Platform authority. **No next slice is authorised.** Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
+> **Current-state override (2026-09-24):** Platform 0.1.0 `main` is authoritative at Schema 25 after the Phase 2A.2-R1 commercial purchase, funding and current-Term capacity merge and closeout; Phase 2A.2-R2 (Schema 26) is the active, unmerged candidate. Phases 2A.2-A through Q are complete, independently reviewed where consequential, merged and closed; canonical authority therefore covers Lesson identity/lifecycle, canonical scheduling and Teacher capacity (Phase N), provider-neutral exceptional delivery/attendance outcomes with a distinct academy-obligation debt authority (Phase O), Phase-P intake/evidence/assessment/review authority, and the Phase-Q post-intro continuation decision, explicit administrator-authorised first regular slot record and bounded pre-payment hold, integrated into the single canonical Teacher-capacity arbitration seam. Phase 2A.2-R1 (Schema 25, merged and closed) adds only the provider-neutral commercial purchase, offer/pricing snapshot, ordered obligation, funding, Regular recurring pattern and current-Term protected-capacity authority, and still creates no Term, Lesson, schedule, notification or provider authority. Phase 2A.2-R2 (Schema 26, candidate) adds only the cross-Term recurring-enrolment, renewal-cycle, collection-intent, recovery, refund-review and continuous-protection authority above R1; it stops before charge execution, notification delivery, refund academic consequences and provider adapters. Production continuation and attendance cutover, Google/Meet and calendar evidence, OAuth/webhooks/credentials, Amelia, payment execution, notification delivery, payroll, Teacher Portal and Student Portal integration remain outside Platform authority. **No next slice is authorised.** Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
-> Historical note: this override previously recorded the Phase 2A.2-L / Schema 18, Phase 2A.2-M / Schema 20 and Phase 2A.2-N / Schema 21 states, and later unmerged Schema-22 Phase-O and Schema-23 Phase-P candidates. Those states are historical provenance; the current authoritative state is Schema 23 on `main`.
+> Historical note: this override previously recorded the Phase 2A.2-L / Schema 18, Phase 2A.2-M / Schema 20, Phase 2A.2-N / Schema 21, Phase 2A.2-O / Schema 22, Phase 2A.2-P / Schema 23 and Phase 2A.2-Q / Schema 24 states, and later the unmerged Schema-25 Phase-R1 candidate. Those states are historical provenance; the current authoritative state is Schema 25 on `main`, with Schema 26 the active Phase-R2 candidate.
 
 ### Phase 2A.2-J architectural seam
 

@@ -1,14 +1,27 @@
 # Delnavazan Platform Migration Strategy
 
-`025_commercial_purchase_funding_authority` (Phase 2A.2-R1 candidate, **unmerged**) is additive only:
-it creates the commercial purchase, offer, obligation, funding, pattern, protected-capacity and
-exception storage, performs no backfill, infers no purchase, settles no obligation, creates no
-Term/Lesson/schedule row and makes no external call. It creates no provider-specific column, no
-notification table and no cross-Term recurring-enrolment storage. Its verifier runs after migration
-025, on current-schema verification and unconditionally before Schema 25 activation (including the
-retained-025/stale-version path), and rejects provider-specific columns, mutable columns on
-append-only evidence/history/command tables, non-InnoDB tables, malformed digest columns and any
-academic or notification table smuggled into the phase.
+`025_commercial_purchase_funding_authority` (Phase 2A.2-R1, **merged and closed on `main`**) is
+additive only: it creates the commercial purchase, offer, obligation, funding, pattern,
+protected-capacity and exception storage, performs no backfill, infers no purchase, settles no
+obligation, creates no Term/Lesson/schedule row and makes no external call. It creates no
+provider-specific column, no notification table and no cross-Term recurring-enrolment storage. Its
+verifier runs after migration 025, on current-schema verification and unconditionally before Schema
+25 activation (including the retained-025/stale-version path), and rejects provider-specific
+columns, mutable columns on append-only evidence/history/command tables, non-InnoDB tables,
+malformed digest columns and any academic or notification table smuggled into the phase.
+
+`026_renewal_recurring_enrolment_authority` (Phase 2A.2-R2 **candidate**) is additive only: it
+creates the cross-Term recurring-enrolment, renewal-cycle, collection-intent, recovery-case,
+refund-review and continuous-protection storage with their append-only events and digest-only
+commands, performs no backfill, infers no renewal, settles no obligation, creates no Term, Lesson,
+schedule, notification or provider row and makes no external call. Schema 25 → 26 is repeat-safe and
+leaves every R1 row unchanged. Its verifier
+(`verify_renewal_recurring_enrolment_schema()`) runs after migration 026, on current-schema
+verification and unconditionally before Schema 26 activation (including the
+retained-026/stale-version path), and rejects provider-specific columns, a mutable column on any
+append-only event/command table, a raw key/reference column beside the keyed digests, non-InnoDB
+tables, malformed `char(64)` digests, a non-nullable refund `academic_consequence`, and any
+Lesson/Term/schedule/notification table smuggled into the phase.
 
 ## 1. Objective
 
@@ -34,7 +47,15 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration — Schema 24 (authoritative on `main`)
+## Current authoritative migration — Schema 25 (authoritative on `main`)
+
+### Schema 26 — renewal, next-Term, recurring collection, recovery, lapse & refund review authority (Phase 2A.2-R2 **candidate**)
+
+`026_renewal_recurring_enrolment_authority` is additive only: it creates the Phase-R2 recurring-enrolment aggregate with append-only events and digest-only commands, the renewal-cycle aggregate and its `boundary_derived_at`/`guarantee_deadline_at`/`collection_mode`/frozen whole-Term `amount_minor` snapshot, provider-neutral collection intents, recovery cases, refund/reversal review cases (with `academic_consequence` deliberately nullable and never written) and continuous cross-Term protections. It performs no backfill, infers no renewal, computes no provider charge, creates no Term/Lesson/schedule/notification row and makes no external call. Schema 25 → 26 is repeat-safe and leaves every R1 row unchanged; `dzn_recurring_enrolments.enrolment_id`, `dzn_renewal_cycles.cycle_sequence`, `dzn_collection_intents.cycle_obligation`, `dzn_recovery_cases.intent_case`, `dzn_refund_review_cases.evidence_case` and `dzn_recurring_protections.cycle_protection`/`claim_protection` are the named unique indexes that arbitrate duplicate creation. Its verifier runs after migration 026, on current-schema verification and unconditionally before Schema 26 activation (including the retained-026/stale-version path). Only the six aggregate roots are mutable (state/version, mode, guarantee deadline, charge/failure facts, resolution note); every event and command table stays append-only and digest-only.
+
+### Schema 25 — commercial purchase, funding & current-Term capacity authority (Phase 2A.2-R1, merged and closed)
+
+`025_commercial_purchase_funding_authority` is additive only: it creates the versioned runtime commercial policy registry (class-B keys only), product/price, promotions and immutable redemptions, account adjustments with append-only events, immutable purchase offers with their pricing snapshot, applied adjustments, applied policy versions and ordered payment obligations, purchases, bounded entitlements, Term funding plans, provider-neutral payment evidence/facts/settlements, the canonical Regular recurring pattern, current-Term protected-capacity claims with per-interval state, the commercial exception registry and digest-only commercial command evidence. Money is an exact integer number of minor units with an explicit currency. It performs no backfill, infers no purchase, settles no obligation, creates no Term/Lesson/schedule row and makes no external call. Its verifier runs after migration 025, on current-schema verification and unconditionally before Schema 25 activation (including the retained-025/stale-version path).
 
 ### Schema 24 — post-intro continuation & slot reservation authority (Phase 2A.2-Q, merged and closed)
 
