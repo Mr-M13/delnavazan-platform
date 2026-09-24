@@ -32,6 +32,13 @@ $funded=dzn_r2_fix_funded_enrolment($fixture['sources'][0],'corruption-a',1);
 $establishKey='corruption-establish-key';
 $establishInput=array('enrolment_id'=>$funded['enrolment_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'corruption-establish','evidence_at'=>gmdate('Y-m-d H:i:s'));
 $recurringId=(int)(new RecurringEnrolmentService())->establish($establishInput,$establishKey)['recurring_enrolment_id'];
+// §5.1: `collection_mode` is a mutable *audited* attribute, so the corruption fixture records a real
+// mode change (and back) through the append-only event seam. The aggregate therefore owns a coherent
+// multi-event mode history that the probes below rewrite, instead of a single opening event whose mode
+// could not distinguish "recorded" from "rewritten".
+$enrolmentService=new RecurringEnrolmentService();
+$enrolmentService->setCollectionMode($recurringId,array('collection_mode'=>'automatic','evidence_channel'=>'staff_record','evidence_reference'=>'corruption-mode-auto','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('corruption-mode-auto'));
+$enrolmentService->setCollectionMode($recurringId,array('collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'corruption-mode-manual','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('corruption-mode-manual'));
 $cycle=dzn_r2_fix_cycle($recurringId,$funded['term_id'],'corruption-a');
 $cycleId=(int)$cycle['cycle_id'];
 (new RenewalCycleService())->activateManualGuarantee($cycleId,dzn_r2_fix_evidence('g'),dzn_r2_fix_key('g'));
@@ -46,6 +53,9 @@ $purchaseId=(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}comm
 $refundEvidence=dzn_r2_fix_refund_evidence((int)$funded['offer_id'],(int)$funded['obligation_id'],'corruption-a',25000,'AUD');
 $refundId=(int)(new RefundReviewService())->recordRefundEvidence(array('purchase_id'=>$purchaseId,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$refundEvidence,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'rf','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('rf'))['refund_review_id'];
 $protectionId=(int)(new RecurringProtectionService())->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('p'),dzn_r2_fix_key('p'))['recurring_protection_id'];
+// A version-neutral `extended` event gives the protection history its second, state-preserving entry, so
+// the event-type proof below is exercised against a same-state append as well as against the opening one.
+(new RecurringProtectionService())->extendProtection($protectionId,dzn_r2_fix_evidence('p-extended'),dzn_r2_fix_key('p-extended'));
 
 /** A corrupted aggregate must be refused, must not be repaired, and must converge once restored. */
 $probe=static function(string $table,int $id,string $column,mixed $corrupt,mixed $restore,string $reason,callable $read,string $message) use($wpdb,$p):void{
@@ -62,14 +72,29 @@ $probe('recurring_enrolments',$recurringId,'currency','ZZZ','AUD','recurring_enr
 $probe('recurring_enrolments',$recurringId,'collection_mode','bogus','manual','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a corrupted collection mode');
 $probe('recurring_enrolments',$recurringId,'state','bogus','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a corrupted recurring state');
 $probe('recurring_enrolments',$recurringId,'rule_version','other_v9','recurring_enrolment_v1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'an unknown rule version');
-$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','0','1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a zero aggregate version');
-$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','7','1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a version its history does not support');
+$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','0','3','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a zero aggregate version');
+$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','7','3','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a version its history does not support');
 // §7.3: the current row must agree with its own append-only history — a state the history never reached,
 // or a history that was rewritten, is malformed rather than authority.
 $probe('recurring_enrolments',$recurringId,'state','closed','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a current state its history never reached');
 $recurringEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_enrolment_events WHERE recurring_enrolment_id=%d AND event_sequence=1",$recurringId));
 dzn_r2_fix_assert($recurringEvent>0,'the recurring history row is required');
 $probe('recurring_enrolment_events',$recurringEvent,'to_state','closed','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'an opening event rewritten to a state it never opened');
+// §5.1/§7.3: the audited collection mode is proved the same way the state is. A current row rewritten to
+// the *other* valid mode, an opening event whose mode the next event does not continue, an event whose
+// valid type does not record the transition it claims, and a `collection_mode_changed` event rewritten
+// to change nothing must each fail closed instead of presenting a mode history that never existed.
+$recurringModeEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_enrolment_events WHERE recurring_enrolment_id=%d AND event_sequence=2",$recurringId));
+$recurringModeEventBack=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_enrolment_events WHERE recurring_enrolment_id=%d AND event_sequence=3",$recurringId));
+dzn_r2_fix_assert($recurringModeEvent>0&&$recurringModeEventBack>0,'the audited mode history rows are required');
+$probe('recurring_enrolments',$recurringId,'collection_mode','automatic','manual','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a current mode the audited history never recorded');
+$probe('recurring_enrolment_events',$recurringEvent,'to_collection_mode','automatic','manual','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'an opening mode the following event does not continue');
+$probe('recurring_enrolment_events',$recurringModeEvent,'event_type','resumed','collection_mode_changed','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a valid event type that does not record the transition it claims');
+$probe('recurring_enrolment_events',$recurringModeEventBack,'to_collection_mode','automatic','manual','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a mode change that changes nothing');
+// §7.3: the public history read is the same seam. It must prove the aggregate before it shapes a single
+// event, so a malformed aggregate can never leak the raw history `one()` would have refused.
+$probe('recurring_enrolments',$recurringId,'state','closed','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->events($recurringId),'a recurring-enrolment history read of a malformed aggregate');
+dzn_r2_fix_assert(count((new RecurringEnrolmentReadService())->events($recurringId))===3&&(new RecurringEnrolmentReadService())->events($recurringId)[2]['to_collection_mode']==='manual','the restored audited mode history must be readable and ordered');
 
 // 2. Renewal Cycle: frozen mode, price snapshot, derived boundary and guarantee window.
 $probe('renewal_cycles',$cycleId,'currency','ZZZ','AUD','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a corrupted cycle currency');
@@ -118,6 +143,14 @@ $probe('recurring_protections',$protectionId,'claim_id','0',(string)$funded['cla
 $probe('recurring_protections',$protectionId,'renewal_cycle_id','0',(string)$cycleId,'recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection detached from its cycle');
 $probe('commercial_capacity_claims',(int)$funded['claim_id'],'term_id','0',(string)$funded['term_id'],'recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection whose claim no longer binds the cycle own source Term');
 $probe('recurring_protections',$protectionId,'recurring_protection_version','3','1','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection version its history does not support');
+// §7.3: the event type must record the transition it claims — a valid vocabulary member attached to a
+// transition the protection never recorded is a rewritten history.
+$protectionEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_protection_events WHERE recurring_protection_id=%d AND event_sequence=1",$protectionId));
+$protectionExtendedEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_protection_events WHERE recurring_protection_id=%d AND event_sequence=2",$protectionId));
+dzn_r2_fix_assert($protectionEvent>0&&$protectionExtendedEvent>0,'the protection history rows are required');
+$probe('recurring_protection_events',$protectionEvent,'event_type','released','established','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'an opening protection event given a type that records no opening');
+$probe('recurring_protection_events',$protectionExtendedEvent,'event_type','released','extended','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'an extension rewritten to a release the protection never recorded');
+dzn_r2_fix_assert(count((new RecurringProtectionReadService())->events($protectionId))===2,'the version-neutral extension must stay readable and must not advance the protection version');
 
 // 7. Digest-only command rows: an altered payload digest, operation or recorded result must fail every
 //    replay closed, and the unchanged key must converge again once the row is restored exactly.
@@ -155,10 +188,21 @@ dzn_r2_fix_rejected($replayEstablish,'Contaminated recurring enrolment command',
 dzn_r2_fix_corrupt('recurring_enrolment_commands',$commandId,'command_domain','recurring_v1');
 dzn_r2_fix_assert($replayEstablish()['idempotent']===true,'the restored domain must converge on replay');
 
-// 8. No aggregate read may write: history and command counts are unchanged after every refused read.
-dzn_r2_fix_assert(dzn_r2_fix_count('recurring_enrolment_events','recurring_enrolment_id',$recurringId)===1,'a refused read or replay must never append recurring history');
+// 8. §7.3: every public history read is the same fail-closed seam as `one()`. Each one proves its own
+//    aggregate — the row *and* the append-only history, ownership facts included — before it shapes a
+//    single event, so no malformed or orphaned aggregate can leak its raw history.
+$probe('renewal_cycles',$cycleId,'state','closed','payment_required','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->events($cycleId),'a renewal-cycle history read of a malformed aggregate');
+$probe('collection_intents',$intentId,'kind','bogus','manual_payment_required','collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->events($intentId),'a collection-intent history read of a malformed aggregate');
+$probe('recovery_cases',$recoveryId,'state','bogus','open','recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->events($recoveryId),'a recovery-case history read of a malformed aggregate');
+$probe('recovery_cases',$recoveryId,'renewal_cycle_id','0',(string)$cycleId,'recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->events($recoveryId),'a recovery history read of an orphaned aggregate');
+$probe('refund_review_cases',$refundId,'state','bogus','open','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->events($refundId),'a refund-review history read of a malformed aggregate');
+$probe('recurring_protections',$protectionId,'state','bogus','active','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->events($protectionId),'a protection history read of a malformed aggregate');
+dzn_r2_fix_assert(count((new RenewalCycleReadService())->events($cycleId))===3&&(new RecoveryReadService())->events($recoveryId)[0]['event_type']==='opened','every restored aggregate history must stay readable through the public seam');
+
+// 9. No aggregate read may write: history and command counts are unchanged after every refused read.
+dzn_r2_fix_assert(dzn_r2_fix_count('recurring_enrolment_events','recurring_enrolment_id',$recurringId)===3,'a refused read or replay must never append recurring history');
 dzn_r2_fix_assert(dzn_r2_fix_count('renewal_cycle_events','renewal_cycle_id',$cycleId)===3,'a refused read must never append cycle history');
-dzn_r2_fix_assert(dzn_r2_fix_count('recurring_enrolment_commands','recurring_enrolment_id',$recurringId)===1,'a refused replay must never append a command');
+dzn_r2_fix_assert(dzn_r2_fix_count('recurring_enrolment_commands','recurring_enrolment_id',$recurringId)===3,'a refused replay must never append a command');
 foreach(array('recurring_enrolments','renewal_cycles','collection_intents','recovery_cases','refund_review_cases','recurring_protections') as $table)dzn_r2_fix_assert(dzn_r2_fix_count($table)>0,'the disposable aggregate must exist: '.$table);
 
 echo "Phase 2A.2-R2 corruption runtime passed\n";

@@ -277,6 +277,58 @@ evidence for `refund_vs_settlement`, and requires payment before a collection in
 `mode_change_vs_cycle` now proves the cycle inherits the *committed* recorded mode rather than a
 caller-supplied one.
 
+## Correction round 6 — per-aggregate event-type proof, audited mode continuity and fail-closed history reads
+
+The independent review of the correction candidate (host correction round 3 of this task chain; failed
+candidate `54a4ce29ea3d6dab9ea39475a2f6072057b94965`, tree
+`d12c3f0584873fe73c386f6cbf4ac979193bd348`) returned **FAIL — CORRECTION REQUIRED** on two blocking
+findings. Both are closed additively, without adding product policy, a provider column, a lock, a
+Term/Lesson/schedule writer or a delivery path.
+
+1. **The event type is proved against the transition it records (§5.1, §7.3).** The previous proof
+   accepted any event type named in the aggregate's declared vocabulary, and it ignored
+   `from_collection_mode`/`to_collection_mode` entirely for recurring-enrolment events. A
+   valid-but-forged event type therefore passed the state and version checks while auditing a fact the
+   aggregate never recorded, and a current mode rewritten from `manual` to `automatic` — a *valid*
+   value — was returned as authority although no coherent audited mode history recorded it.
+   `RecurringRule::AGGREGATE_EVENT_TRANSITIONS` is now the per-aggregate event-type/transition map: one
+   entry per legal transition of the locked `AGGREGATE_TRANSITIONS` table, naming the single event type
+   that may record it. `RecurringIntegrity` refuses a pairing the map does not carry, so a `resumed`
+   event that does not resume, a `guarantee_protected` event that protects nothing, or an `extended`
+   event rewritten to `released` is a refused read rather than an alternative spelling of the audited
+   history. `tests/phase-2a2r2-contract.php` proves the map is *exactly* the locked transition table —
+   no legal transition left unrecorded and no transition invented — by comparing the two locked
+   constants directly.
+2. **The recurring-enrolment collection mode is proved as an audited history (§5.1).** The mode is a
+   mutable audited attribute, so it is proved exactly the way the state is: the opening event must carry
+   one controlled mode, every later event must continue the mode its predecessor recorded, only a
+   `collection_mode_changed` event may change it (and such an event must actually change it), every
+   other event must leave it unchanged, and the final event's mode must equal the row's recorded
+   `collection_mode`. A row rewritten to the *other* valid mode, an opening event the following event
+   does not continue, and a mode change rewritten to change nothing all fail closed with the
+   aggregate's own `recurring_enrolment_integrity_conflict` reason.
+3. **A repeated recovery attempt stays legal and readable (§5.4).** The contract keeps attempts as
+   append-only events precisely because there is no mutable attempt counter, so
+   `record_recovery_attempt` on a case that is already `recovering` records a same-state
+   `recovering|recovering` event. That step is now in the locked transition table and the event-type map
+   records it as `attempt_recorded`, so a legitimately written second attempt is no longer
+   indistinguishable from corruption; the runtime proves the repeat stays readable.
+4. **Every public history read is the same fail-closed seam (§7.3).** `events()` previously returned the
+   raw history table, so a malformed or orphaned aggregate handed out its events even though `one()`
+   refused the aggregate. Each of the six read services now shares one private validated loader — the
+   capability check, the linked-ownership facts and the `RecurringIntegrity` proof of the row *and* the
+   append-only history — and both `one()` and `events()` call it, so `events()` can only ever shape the
+   events of an aggregate that has already been proved.
+
+`tests/phase-2a2r2-corruption-runtime.php` records its audited mode history through the real
+`set_collection_mode` command and adds: a current row rewritten to the valid alternate mode, an opening
+mode the following event does not continue, a mode change rewritten to change nothing, a
+valid-but-forged event type on the recurring-enrolment and protection histories, and a fail-closed
+history read for each of the six public seams (including an orphaned recovery history).
+`tests/phase-2a2r2-runtime.php` proves the repeated recovery attempt stays readable and append-only, and
+`tests/phase-2a2r2-contract.php` asserts the new rule table, the exact map↔table equality, the shared
+validated loader and every new probe.
+
 ## Delegation is convergent, never nested
 
 R2 never opens a transaction around a delegating R1 command. `bind_next_term` and

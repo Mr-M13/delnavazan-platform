@@ -13,7 +13,7 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 | Migrations | 001–026 candidate; latest `026_renewal_recurring_enrolment_authority` |
 | Latest merged slice | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority (Schema 25; merged / closed) |
 | Previous merged slice | Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority (Schema 24) |
-| Active Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; candidate awaiting independent review, correction rounds 1–4 applied, contract §13 pre-implementation prerequisites closed) |
+| Active Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; candidate awaiting independent review, correction rounds 1–6 applied, contract §13 pre-implementation prerequisites closed) |
 | Next boundary | **R2 candidate awaiting independent review.** No Stripe, notification delivery, Theme, deployment or production access is authorised |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.

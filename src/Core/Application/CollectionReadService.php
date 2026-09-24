@@ -5,6 +5,19 @@ namespace Delnavazan\Platform\Core\Application;
 final class CollectionReadService {
     private const CAPABILITY='dzn_view_recurring_authority';
     public function one(int $id):array{
+        $validated=$this->validated($id);
+        $row=$validated[0];
+        return array('collection_intent_id'=>(int)$row->id,'renewal_cycle_id'=>(int)$row->renewal_cycle_id,'obligation_id'=>(int)$row->obligation_id,'kind'=>(string)$row->kind,'state'=>(string)$row->state,'charge_at'=>$row->charge_at===null?null:(string)$row->charge_at,'failure_reason_code'=>$row->failure_reason_code===null?null:(string)$row->failure_reason_code);
+    }
+    public function events(int $id):array{
+        // §7.3: the public history read proves the same aggregate — current row *and* append-only
+        // history — before shaping a single event, so a malformed or orphaned history is refused here
+        // exactly as `one()` refuses it.
+        $validated=$this->validated($id);
+        return array_map(static fn($e)=>array('event_sequence'=>(int)$e->event_sequence,'event_type'=>(string)$e->event_type,'from_state'=>$e->from_state===null?null:(string)$e->from_state,'to_state'=>(string)$e->to_state,'occurred_at'=>(string)$e->occurred_at),$validated[1]);
+    }
+    /** The proved aggregate as `array($row,$events)`, shared by both public read seams. */
+    private function validated(int $id):array{
         RecurringSupport::requireCapability(self::CAPABILITY);
         global $wpdb;$p=$wpdb->prefix.'dzn_';
         $row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}collection_intents WHERE id=%d",$id));
@@ -32,12 +45,9 @@ final class CollectionReadService {
             &&((string)$row->kind!=='manual_payment_required'||$row->charge_at===null),
             'collection_intent_integrity_conflict'
         );
-        RecurringIntegrity::aggregate('collection_intent',$row,$this->history($id),'collection_intent_integrity_conflict');
-        return array('collection_intent_id'=>(int)$row->id,'renewal_cycle_id'=>(int)$row->renewal_cycle_id,'obligation_id'=>(int)$row->obligation_id,'kind'=>(string)$row->kind,'state'=>(string)$row->state,'charge_at'=>$row->charge_at===null?null:(string)$row->charge_at,'failure_reason_code'=>$row->failure_reason_code===null?null:(string)$row->failure_reason_code);
-    }
-    public function events(int $id):array{
-        RecurringSupport::requireCapability(self::CAPABILITY);
-        return array_map(static fn($e)=>array('event_sequence'=>(int)$e->event_sequence,'event_type'=>(string)$e->event_type,'from_state'=>$e->from_state===null?null:(string)$e->from_state,'to_state'=>(string)$e->to_state,'occurred_at'=>(string)$e->occurred_at),$this->history($id));
+        $events=$this->history($id);
+        RecurringIntegrity::aggregate('collection_intent',$row,$events,'collection_intent_integrity_conflict');
+        return array($row,$events);
     }
     /** The stored append-only history of the aggregate, in event order. */
     private function history(int $id):array{

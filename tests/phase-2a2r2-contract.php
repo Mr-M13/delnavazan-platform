@@ -189,4 +189,33 @@ foreach(array('dzn_r2_fix_refund_evidence','refundEvidence') as $needle) if(!str
 if(!str_contains($failure,'releaseProtection')||!str_contains($concurrency,'bindNextTerm')||!str_contains($concurrency,"==='term_bound'"))throw new RuntimeException('The delegated release must be exercised by the failure and concurrency proofs');
 if(!str_contains($concurrency,"collection_mode==='automatic','the cycle must snapshot the recorded mode"))throw new RuntimeException('The mode race must prove the cycle snapshots the recorded enrolment mode');
 
+// Correction round 6 (host round 3): the per-aggregate event-type/transition proof, the audited
+// collection-mode continuity of §5.1, and the fail-closed public history reads of §7.3.
+foreach(array('AGGREGATE_EVENT_TRANSITIONS','eventTransitions','recordsTransition') as $needle) if(!str_contains($rule,$needle))throw new RuntimeException('The locked R2 event-type/transition map is missing: '.$needle);
+foreach(array('MODE_AUDITED_AGGREGATE','MODE_CHANGE_EVENT_TYPE','recordsTransition','from_collection_mode','to_collection_mode','previousMode') as $needle) if(!str_contains($integrity,$needle))throw new RuntimeException('The aggregate proof must pair each transition with its event type and audit the collection mode: '.$needle);
+if(!str_contains($rule,"'collection_mode_changed'=>array('active|active','suspended|suspended')"))throw new RuntimeException('The audited collection mode may only change through its own append-only event type');
+// The event-type map may neither leave a legal transition unrecorded nor invent one the locked table
+// does not carry, and the recovered/attempt vocabulary must stay append-only-readable.
+if(!class_exists('Delnavazan\\Platform\\Core\\Application\\RecurringRule'))require_once $root.'/src/Core/Application/RecurringRule.php';
+$mappedEventTypes=Delnavazan\Platform\Core\Application\RecurringRule::AGGREGATE_EVENT_TRANSITIONS;
+foreach(Delnavazan\Platform\Core\Application\RecurringRule::AGGREGATE_TRANSITIONS as $aggregate=>$transitions){
+    $recorded=array();
+    foreach($mappedEventTypes[$aggregate]??array() as $eventType=>$patterns) foreach($patterns as $pattern) $recorded[$pattern]=$eventType;
+    foreach($transitions as $pattern) if(!isset($recorded[$pattern]))throw new RuntimeException('Every legal transition must be recorded by exactly one event type: '.$aggregate.' '.$pattern);
+    foreach(array_keys($recorded) as $pattern) if(!in_array($pattern,$transitions,true))throw new RuntimeException('The event-type map must not record a transition the locked table does not carry: '.$aggregate.' '.$pattern);
+}
+if(!str_contains($rule,"'attempt_recorded'=>array('open|recovering','recovering|recovering')"))throw new RuntimeException('A repeated recovery attempt must stay a legal append-only event');
+// Both public read seams of every read model share one validated loader: the history read can never
+// bypass the proof that `one()` applies.
+foreach(array('RecurringEnrolmentReadService','RenewalCycleReadService','CollectionReadService','RecoveryReadService','RefundReviewReadService','RecurringProtectionReadService') as $service){
+    $model=file_get_contents($root.'/src/Core/Application/'.$service.'.php');
+    if(substr_count($model,'$this->validated($id)')!==2)throw new RuntimeException('Both public read seams must share one validated loader: '.$service);
+    if(!preg_match('/public function events\(int \$id\):array\{[^}]*\$this->validated\(\$id\)[^}]*\}/',$model))throw new RuntimeException('The public history read must prove its aggregate before shaping an event: '.$service);
+    if(preg_match('/public function events\(int \$id\):array\{[^}]*\$this->history\(/',$model))throw new RuntimeException('The public history read must never read its raw history table directly: '.$service);
+}
+foreach(array("'collection_mode','automatic','manual'","'to_collection_mode','automatic','manual'","'event_type','resumed','collection_mode_changed'","'event_type','released','extended'") as $probe) if(!str_contains($corruption,$probe))throw new RuntimeException('The corruption proof must re-write a valid alternate mode and a valid-but-forged event type: '.$probe);
+// Every one of the six public history seams is proved fail-closed by the corruption runtime.
+foreach(array('RecurringEnrolmentReadService','RenewalCycleReadService','CollectionReadService','RecoveryReadService','RefundReviewReadService','RecurringProtectionReadService') as $service) if(!str_contains($corruption,'(new '.$service.'())->events('))throw new RuntimeException('The corruption proof must read the public history seam fail-closed: '.$service);
+if(!str_contains($runtime,'the mode history must be append-only and ordered')||!str_contains($runtime,"'attempt-b-again'")||!str_contains($runtime,'a repeated recovery attempt must stay readable as an audited same-state append'))throw new RuntimeException('The runtime proof must exercise the audited mode history and a repeated recovery attempt');
+
 echo "Phase 2A.2-R2 contract static test passed\n";

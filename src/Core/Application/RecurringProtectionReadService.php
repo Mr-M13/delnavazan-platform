@@ -5,6 +5,19 @@ namespace Delnavazan\Platform\Core\Application;
 final class RecurringProtectionReadService {
     private const CAPABILITY='dzn_view_recurring_authority';
     public function one(int $id):array{
+        $validated=$this->validated($id);
+        $row=$validated[0];
+        return array('recurring_protection_id'=>(int)$row->id,'renewal_cycle_id'=>(int)$row->renewal_cycle_id,'claim_id'=>(int)$row->claim_id,'state'=>(string)$row->state);
+    }
+    public function events(int $id):array{
+        // §7.3: the public history read proves the same aggregate — current row *and* append-only
+        // history — before shaping a single event, so a malformed or orphaned history is refused here
+        // exactly as `one()` refuses it.
+        $validated=$this->validated($id);
+        return array_map(static fn($e)=>array('event_sequence'=>(int)$e->event_sequence,'event_type'=>(string)$e->event_type,'from_state'=>$e->from_state===null?null:(string)$e->from_state,'to_state'=>(string)$e->to_state,'occurred_at'=>(string)$e->occurred_at),$validated[1]);
+    }
+    /** The proved aggregate as `array($row,$events)`, shared by both public read seams. */
+    private function validated(int $id):array{
         RecurringSupport::requireCapability(self::CAPABILITY);
         global $wpdb;$p=$wpdb->prefix.'dzn_';
         $row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}recurring_protections WHERE id=%d",$id));
@@ -25,12 +38,9 @@ final class RecurringProtectionReadService {
             &&(int)$claim->course_id===(int)$cycle->course_id,
             'recurring_protection_integrity_conflict'
         );
-        RecurringIntegrity::aggregate('recurring_protection',$row,$this->history($id),'recurring_protection_integrity_conflict');
-        return array('recurring_protection_id'=>(int)$row->id,'renewal_cycle_id'=>(int)$row->renewal_cycle_id,'claim_id'=>(int)$row->claim_id,'state'=>(string)$row->state);
-    }
-    public function events(int $id):array{
-        RecurringSupport::requireCapability(self::CAPABILITY);
-        return array_map(static fn($e)=>array('event_sequence'=>(int)$e->event_sequence,'event_type'=>(string)$e->event_type,'from_state'=>$e->from_state===null?null:(string)$e->from_state,'to_state'=>(string)$e->to_state,'occurred_at'=>(string)$e->occurred_at),$this->history($id));
+        $events=$this->history($id);
+        RecurringIntegrity::aggregate('recurring_protection',$row,$events,'recurring_protection_integrity_conflict');
+        return array($row,$events);
     }
     /** The stored append-only history of the aggregate, in event order. */
     private function history(int $id):array{

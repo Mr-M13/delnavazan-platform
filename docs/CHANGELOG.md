@@ -210,6 +210,55 @@ pre-state now builds a durable successor for `release_vs_succession` and a real 
   reference resolution, forbidden-surface scan, `git diff --check`, `sh -n`, and the runner
   executable bits.
 
+### Correction round 6 (independent review of the host-materialized correction candidate failed on two findings)
+
+The independent review of the correction candidate (host correction round 3 of this task chain; failed
+candidate `54a4ce29ea3d6dab9ea39475a2f6072057b94965`, tree
+`d12c3f0584873fe73c386f6cbf4ac979193bd348`) returned **FAIL — CORRECTION REQUIRED** on two blocking
+findings. Both are closed additively, with no product policy, provider column, lock,
+Term/Lesson/schedule writer or delivery path added.
+
+- **The event type is proved against the transition it records (§5.1, §7.3).** The read proof accepted
+  *any* event type from the aggregate's declared vocabulary, so a valid-but-forged type — or a
+  `collection_mode_changed` event rewritten to `resumed` — passed the state and version checks while
+  auditing a fact the aggregate never recorded. `RecurringRule::AGGREGATE_EVENT_TRANSITIONS` now maps
+  every legal transition of every aggregate to the single event type that may record it, and
+  `RecurringIntegrity` refuses any other pairing. The static contract test also proves the map is
+  exactly the locked transition table: no legal transition unrecorded, none invented.
+- **The recurring-enrolment `collection_mode` is proved as an audited history (§5.1).** The mode is a
+  mutable audited attribute, so it is now proved the way the state is: the opening event must carry a
+  controlled mode, every later event must continue the mode its predecessor recorded, only a
+  `collection_mode_changed` event may change it (and must change it), every other event must leave it
+  unchanged, and the final event's mode must equal the row's. A current row rewritten from `manual` to
+  `automatic` — a *valid* mode that previously passed every structural check — is therefore refused
+  instead of returned as false authority, as is an opening event the following event does not continue.
+- **A repeated recovery attempt stays legal and readable (§5.4).** Attempts are append-only events with
+  no mutable counter, so `record_recovery_attempt` on a case that is already `recovering` records a
+  same-state `recovering|recovering` event. The locked transition table now carries that step and the
+  event-type map records it as `attempt_recorded`, so a legitimately written second attempt is no longer
+  indistinguishable from corruption.
+- **The public history reads are the same fail-closed seam (§7.3).** `events()` previously returned the
+  raw history table, so a malformed or orphaned aggregate leaked its events even though `one()` refused
+  the aggregate. Each of the six read services now shares one private validated loader: `one()` and
+  `events()` both load the row and the append-only history, re-prove the linked ownership facts and run
+  the `RecurringIntegrity` proof, and only then does `events()` shape the proved events.
+
+`tests/phase-2a2r2-corruption-runtime.php` adds the valid-alternate-mode, mode-continuity,
+valid-but-forged-event-type and fail-closed-history-read probes for all six aggregates (its audited
+mode history is now recorded through the real `set_collection_mode` command, and each of the six
+history seams is proved refused on a malformed aggregate), `tests/phase-2a2r2-runtime.php` proves the
+repeated recovery attempt, and `tests/phase-2a2r2-contract.php` asserts the new rule table, the exact
+map↔transition-table equality, the shared validated loader and every new probe.
+
+- State: `CANDIDATE — AWAITING INDEPENDENT REVIEW`. No provider call, credential, notification
+  delivery, Theme change, merge or deployment occurred. Structural evidence only: a brace/paren
+  balance check over the touched PHP files, the extended static contract test cross-checked by hand
+  against the locked rule table, `git diff --check`, and the reference-resolution and forbidden-surface
+  scans. **No static contract, migration, authority, corruption, failure-injection or concurrency suite
+  has been executed against this candidate** — the authoring sandbox has no PHP, no MySQL/MariaDB and no
+  reachable Docker daemon, so all of them must still be run on the disposable local runtime (exact
+  commands in `PHASE-2A-2R2-RENEWAL-NEXT-TERM-COLLECTION-RECOVERY-AUTHORITY.md`).
+
 ## Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority — merged and closed — 2026-09-20
 
 Merged to `main` as a fast-forward of the independently re-reviewed correction-round-6 candidate;

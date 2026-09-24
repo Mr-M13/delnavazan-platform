@@ -223,6 +223,11 @@ $recoveries=new RecoveryService();
 $recoveryId=(int)$recoveries->openRecovery($automaticIntentId,dzn_r2_fix_evidence('recovery-b'),dzn_r2_fix_key('recovery-b'))['recovery_case_id'];
 $recoveries->recordRecoveryAttempt($recoveryId,dzn_r2_fix_evidence('attempt-b'),dzn_r2_fix_key('attempt-b'));
 dzn_r2_fix_assert((new RecoveryReadService())->one($recoveryId)['state']==='recovering','a recovery attempt must be recorded as an append-only event');
+// §5.4: attempts stay append-only events with no mutable counter, so a second attempt on a case that is
+// already recovering is a legal same-state append — it must append one event and stay readable.
+$recoveries->recordRecoveryAttempt($recoveryId,dzn_r2_fix_evidence('attempt-b-again'),dzn_r2_fix_key('attempt-b-again'));
+dzn_r2_fix_assert((new RecoveryReadService())->one($recoveryId)['state']==='recovering','a repeated recovery attempt must stay readable as an audited same-state append');
+dzn_r2_fix_assert(count((new RecoveryReadService())->events($recoveryId))===3,'a repeated recovery attempt must append exactly one audited event');
 // While PAYMENT_RECOVERY_POLICY is unset nothing may lapse automatically.
 dzn_r2_fix_rejected(fn()=>$recoveries->markLapsed($recoveryId,dzn_r2_fix_evidence('lapse-b'),dzn_r2_fix_key('lapse-b')),'recovery_policy_unset','an automatic lapse while the recovery policy is unset');
 dzn_r2_fix_assert((string)dzn_r2_fix_column('commercial_capacity_claims',(int)$recoveryFunding['claim_id'],'state')==='active','an unset recovery policy must leave capacity protected');

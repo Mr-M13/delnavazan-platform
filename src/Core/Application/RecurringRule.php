@@ -97,12 +97,72 @@ final class RecurringRule {
             'failed|recovered','pending|cancelled','failed|cancelled',
         ),
         'recovery_case'=>array(
-            '|open','open|recovering','open|recovered','recovering|recovered','open|lapsed','recovering|lapsed',
+            '|open','open|recovering','recovering|recovering','open|recovered','recovering|recovered',
+            'open|lapsed','recovering|lapsed',
         ),
         'refund_review'=>array(
             '|open','open|review_required','review_required|resolved','open|dismissed','review_required|dismissed',
         ),
         'recurring_protection'=>array('|active','active|active','active|released','active|lapsed'),
+    );
+
+    /**
+     * The event type that may record each legal transition of each R2 aggregate.
+     *
+     * An append-only event audits *which fact happened*, not only that some state changed, so a read
+     * model proves the event type against the transition it claims as well as the transition against
+     * the locked table. A valid vocabulary member attached to a transition it never recorded — a
+     * `resumed` event that does not resume, a `guarantee_protected` event that protects nothing — is a
+     * rewrite of the audited history rather than an alternative spelling of it, and is refused.
+     *
+     * `recovering|recovering` records a repeated recovery attempt: §5.4 keeps attempts as append-only
+     * events precisely because there is no mutable attempt counter, so a second attempt on a case that
+     * is already recovering is a legal same-state append and stays readable.
+     */
+    public const AGGREGATE_EVENT_TRANSITIONS=array(
+        'recurring_enrolment'=>array(
+            'established'=>array('|active'),
+            'collection_mode_changed'=>array('active|active','suspended|suspended'),
+            'suspended'=>array('active|suspended'),
+            'resumed'=>array('suspended|active'),
+            'closed'=>array('active|closed','suspended|closed'),
+        ),
+        'renewal_cycle'=>array(
+            'opened'=>array('|pending'),
+            'guarantee_protected'=>array('pending|guarantee_protected'),
+            'payment_required'=>array('pending|payment_required','guarantee_protected|payment_required'),
+            'collected'=>array('payment_required|collected'),
+            'term_bound'=>array('collected|term_bound'),
+            'closed'=>array('term_bound|closed'),
+            'lapsed'=>array('pending|lapsed','guarantee_protected|lapsed','payment_required|lapsed','collected|lapsed'),
+            'cancelled'=>array('pending|cancelled','guarantee_protected|cancelled','payment_required|cancelled','collected|cancelled'),
+        ),
+        'collection_intent'=>array(
+            'opened'=>array('|pending'),
+            'submitted'=>array('pending|submitted'),
+            'confirmed'=>array('submitted|confirmed'),
+            'failed'=>array('submitted|failed'),
+            'recovered'=>array('failed|recovered'),
+            'cancelled'=>array('pending|cancelled','failed|cancelled'),
+        ),
+        'recovery_case'=>array(
+            'opened'=>array('|open'),
+            'attempt_recorded'=>array('open|recovering','recovering|recovering'),
+            'recovered'=>array('open|recovered','recovering|recovered'),
+            'lapsed'=>array('open|lapsed','recovering|lapsed'),
+        ),
+        'refund_review'=>array(
+            'opened'=>array('|open'),
+            'review_required'=>array('open|review_required'),
+            'resolved'=>array('review_required|resolved'),
+            'dismissed'=>array('open|dismissed','review_required|dismissed'),
+        ),
+        'recurring_protection'=>array(
+            'established'=>array('|active'),
+            'extended'=>array('active|active'),
+            'released'=>array('active|released'),
+            'lapsed'=>array('active|lapsed'),
+        ),
     );
 
     /** The states, legal transitions and event types of one R2 aggregate. */
@@ -132,6 +192,16 @@ final class RecurringRule {
         $table=self::AGGREGATE_TRANSITIONS[$aggregate]??null;
         if($table===null)throw new \InvalidArgumentException('Controlled recurring aggregate required');
         return in_array(($from??'').'|'.$to,$table,true);
+    }
+    /** The `from|to` transitions one event type is allowed to record for one aggregate. */
+    public static function eventTransitions(string $aggregate,string $eventType):array{
+        $table=self::AGGREGATE_EVENT_TRANSITIONS[$aggregate]??null;
+        if($table===null)throw new \InvalidArgumentException('Controlled recurring aggregate required');
+        return $table[$eventType]??array();
+    }
+    /** Whether one event type records exactly this transition. */
+    public static function recordsTransition(string $aggregate,string $eventType,?string $from,string $to):bool{
+        return in_array(($from??'').'|'.$to,self::eventTransitions($aggregate,$eventType),true);
     }
     public static function intentKindForMode(string $mode):?string{return self::MODE_INTENT_KINDS[$mode]??null;}
     public static function reviewEvidenceKind(string $kind):bool{return in_array($kind,self::REVIEW_EVIDENCE_KINDS,true);}
