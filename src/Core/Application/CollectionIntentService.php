@@ -17,17 +17,29 @@ final class CollectionIntentService {
         $actor=RecurringSupport::actor();
         $evidence=RecurringSupport::evidence($input);
         $obligationId=RecurringSupport::positiveInt($input['obligation_id']??null,'Valid R1 obligation required');
-        // Automatic charge lead time is unresolved policy: unset means no advance charge date is computed.
-        $chargeAt=null;
-        if($kind==='automatic_charge'&&!empty($input['charge_at']))$chargeAt=RecurringSupport::utc($input['charge_at'],'Valid UTC charge time required');
+        // Automatic charge lead time is unresolved policy: the charge instant is derived from the
+        // recorded policy and the cycle's own boundary, never asserted by a caller. An input that tries
+        // to name one is refused rather than silently ignored, so no command can record a charge date
+        // the policy does not authorise.
+        if(trim((string)($input['charge_at']??''))!=='')throw new \InvalidArgumentException('collection_charge_time_not_authoritative');
         $digest=RecurringSupport::keyString($key);
-        $payload=RecurringIdempotency::payload(array('domain'=>RecurringRule::DOMAIN,'operation'=>'open_collection_intent','renewal_cycle_id'=>$cycleId,'obligation_id'=>$obligationId,'kind'=>$kind,'charge_at'=>$chargeAt,'evidence_reference_digest'=>$evidence['digest']));
+        $payload='';
         $this->repository->begin();
         try{
             RecurringSupport::guardAggregate('renewal_cycle',$cycleId,$actor);
+            // §5.3: a collection intent opens only on a live `payment_required` cycle, only for an
+            // obligation of that cycle's own commitment, and only in the kind its frozen mode authorises.
+            $cycle=$this->assertCycleCollection($cycleId,$kind,$obligationId);
+            // The charge instant follows the cycle's own frozen mode, so a manual cycle can never carry
+            // one however it is asked, and an automatic one only gets the instant its policy authorises.
+            $chargeAt=RenewalCycleService::automaticChargeAt((string)$cycle['collection_mode'],(string)$cycle['boundary_derived_at']);
+            $payload=RecurringIdempotency::payload(array('domain'=>RecurringRule::DOMAIN,'operation'=>'open_collection_intent','renewal_cycle_id'=>$cycleId,'obligation_id'=>$obligationId,'kind'=>$kind,'charge_at'=>$chargeAt,'evidence_reference_digest'=>$evidence['digest']));
             if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload);$this->repository->commit();return $result;}
+            // Only a live, payment-required cycle opens a *new* collection intent; an unchanged command
+            // still converges on its recorded result above.
+            if((string)$cycle['state']!=='payment_required')throw new \InvalidArgumentException('invalid_renewal_cycle_state');
+            if(RecurringRule::intentKindForMode((string)$cycle['collection_mode'])!==$kind)throw new \InvalidArgumentException('collection_intent_kind_conflict');
             if($this->repository->forCycleObligation($cycleId,$obligationId))throw new \InvalidArgumentException('collection_intent_already_exists');
-            $this->assertObligationOwnership($cycleId,$obligationId);
             $now=RecurringSupport::now();
             $id=$this->repository->insertIntent(array(
                 'uid'=>Identifier::uid(),'renewal_cycle_id'=>$cycleId,'obligation_id'=>$obligationId,'kind'=>$kind,
@@ -46,7 +58,7 @@ final class CollectionIntentService {
             ));
             RecurringSupport::hook('dzn_phase_2a2r2_after_collection_intent_event_insert','open_collection_intent',$id);
             $this->repository->commit();
-            return array('collection_intent_id'=>$id,'kind'=>$kind,'state'=>'pending','created'=>true);
+            return array('collection_intent_id'=>$id,'kind'=>$kind,'state'=>'pending','charge_at'=>$chargeAt,'created'=>true);
         }catch(\Throwable $e){
             $this->repository->rollback();
             if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload);
@@ -177,18 +189,23 @@ final class CollectionIntentService {
      * beneficiary Student and Course, in the cycle's frozen currency.
      *
      * R2 records a provider-neutral collection state; it never re-implements R1 pricing or acceptance.
-     * What it must still prove is ownership, so a collection intent — and the confirmation that follows
-     * it — can never be attached to another Student's, another Course's or another currency's settled
-     * obligation and be presented as this cycle's collection.
+     * What it must still prove is ownership — so a collection intent, and the confirmation that follows
+     * it, can never be attached to another Student's, another Course's or another currency's settled
+     * obligation and be presented as this cycle's collection. The cycle's lifecycle position is proven
+     * separately by the caller, because an unchanged command still converges on its recorded result.
      */
-    private function assertObligationOwnership(int $cycleId,int $obligationId):void{
+    private function assertCycleCollection(int $cycleId,string $kind,int $obligationId):array{
         global $wpdb;$p=$wpdb->prefix.'dzn_';
-        $cycle=$wpdb->get_row($wpdb->prepare("SELECT c.currency AS currency,r.student_id AS student_id,r.course_id AS course_id FROM {$p}renewal_cycles c JOIN {$p}recurring_enrolments r ON r.id=c.recurring_enrolment_id WHERE c.id=%d",$cycleId));
+        $cycle=$wpdb->get_row($wpdb->prepare("SELECT c.currency AS currency,c.state AS state,c.collection_mode AS collection_mode,c.boundary_derived_at AS boundary_derived_at,r.student_id AS student_id,r.course_id AS course_id FROM {$p}renewal_cycles c JOIN {$p}recurring_enrolments r ON r.id=c.recurring_enrolment_id WHERE c.id=%d",$cycleId));
         if(!$cycle)throw new \InvalidArgumentException('renewal_cycle_required');
+        // Ownership of the referenced R1 obligation is proven first: another Student's, Course's or
+        // currency's obligation can never be presented as this cycle's collection, whatever the cycle's
+        // lifecycle state happens to be.
         $obligation=$wpdb->get_row($wpdb->prepare("SELECT f.currency AS currency,f.beneficiary_student_id AS student_id,f.course_id AS course_id FROM {$p}commercial_offer_obligations o JOIN {$p}commercial_offers f ON f.id=o.offer_id WHERE o.id=%d",$obligationId));
         if(!$obligation
             ||(int)$obligation->student_id!==(int)$cycle->student_id
             ||(int)$obligation->course_id!==(int)$cycle->course_id
             ||(string)$obligation->currency!==(string)$cycle->currency)throw new \InvalidArgumentException('collection_obligation_ownership_conflict');
+        return array('state'=>(string)$cycle->state,'collection_mode'=>(string)$cycle->collection_mode,'boundary_derived_at'=>(string)$cycle->boundary_derived_at,'currency'=>(string)$cycle->currency);
     }
 }

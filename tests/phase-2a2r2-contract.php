@@ -13,9 +13,14 @@ $recovery=file_get_contents($root.'/src/Core/Application/RecoveryService.php');
 $refund=file_get_contents($root.'/src/Core/Application/RefundReviewService.php');
 $protection=file_get_contents($root.'/src/Core/Application/RecurringProtectionService.php');
 $read=file_get_contents($root.'/src/Core/Application/RecurringEnrolmentReadService.php').file_get_contents($root.'/src/Core/Application/RenewalCycleReadService.php').file_get_contents($root.'/src/Core/Application/CollectionReadService.php').file_get_contents($root.'/src/Core/Application/RecoveryReadService.php').file_get_contents($root.'/src/Core/Application/RefundReviewReadService.php').file_get_contents($root.'/src/Core/Application/RecurringProtectionReadService.php');
+$integrity=file_get_contents($root.'/src/Core/Application/RecurringIntegrity.php');
 $outbox=file_get_contents($root.'/src/Core/Infrastructure/Repository/RecurringOutboxRepository.php');
+$runtime=file_get_contents($root.'/tests/phase-2a2r2-runtime.php');
+$corruption=file_get_contents($root.'/tests/phase-2a2r2-corruption-runtime.php');
+$failure=file_get_contents($root.'/tests/phase-2a2r2-failure-runtime.php');
+$fixture=file_get_contents($root.'/tests/phase-2a2r2-fixture.php');
 $concurrency=file_get_contents($root.'/tests/phase-2a2r2-concurrency-runner.sh').file_get_contents($root.'/tests/phase-2a2r2-concurrency-setup.php').file_get_contents($root.'/tests/phase-2a2r2-concurrency-worker.php').file_get_contents($root.'/tests/phase-2a2r2-concurrency-verify.php');
-$phaseR2=$rule.$support.$idempotency.$enrol.$cycle.$collection.$recovery.$refund.$protection.$read;
+$phaseR2=$rule.$support.$idempotency.$enrol.$cycle.$collection.$recovery.$refund.$protection.$read.$integrity;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<26)throw new RuntimeException('Missing Phase R2 schema identity');
 if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r2-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R2 build identity');
@@ -123,7 +128,7 @@ foreach(array('dzn_phase_2a2r2_after_recurring_command_insert','dzn_phase_2a2r2_
 // Correction round 1: derived-fact ownership, terminal-cycle protection and closure guards.
 foreach(array('canonical_source_term_required',"record_model??'')!=='canonical_enrolment_term_v1'",'archived_at!==null') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('The next-Term boundary must only accept a canonical Term of the recurring enrolment own Enrolment: '.$needle);
 if(!str_contains($cycle,"(int)\$term->enrolment_id!==\$enrolmentId")||!str_contains($cycle,"array('authorised','current','closed')"))throw new RuntimeException('The source-Term guard must prove Enrolment ownership and a non-cancelled canonical Term');
-if(!str_contains($collection,'collection_obligation_ownership_conflict')||!str_contains($collection,'assertObligationOwnership'))throw new RuntimeException('A collection intent must prove the exact cycle obligation ownership');
+if(!str_contains($collection,'collection_obligation_ownership_conflict')||!str_contains($collection,'assertCycleCollection'))throw new RuntimeException('A collection intent must prove the exact cycle obligation ownership');
 foreach(array('beneficiary_student_id','course_id','currency') as $needle) if(!str_contains($collection,$needle))throw new RuntimeException('Obligation ownership must be proven against the R1 offer: '.$needle);
 if(!str_contains($cycle,"state<>'cancelled' ORDER BY id ASC"))throw new RuntimeException('A cycle must be collected by its authoritative first non-cancelled obligation');
 foreach(array('recurring_protection_release_required','activeProtectionId') as $needle) if(!str_contains($cycle,$needle))throw new RuntimeException('A terminal cycle may never leave an active protection behind: '.$needle);
@@ -150,5 +155,38 @@ if(!str_contains($recovery,"array('open','recovering'),'recovered'"))throw new R
 if(!str_contains($rule,"CYCLE_LIVE_STATES=array('pending','guarantee_protected','payment_required','collected','term_bound')"))throw new RuntimeException('The live-cycle vocabulary must be a single locked constant');
 if(!str_contains($protection,'RecurringRule::CYCLE_LIVE_STATES'))throw new RuntimeException('Protection and recovery must share one live-cycle vocabulary');
 foreach(array('collection_intent_not_failed','obligation_not_settled','accepted_payment_evidence_required','invalid_renewal_cycle_state') as $probe) if(!str_contains(file_get_contents($root.'/tests/phase-2a2r2-runtime.php'),$probe))throw new RuntimeException('The runtime proof must exercise the recovery-state enforcement: '.$probe);
+
+// Correction round 5 (host round 2): derived cycle mode and charge instant, refund-evidence provenance,
+// current-Term protection ownership with an authorised release, and fail-closed aggregate reads.
+foreach(array('AGGREGATE_TRANSITIONS','SAME_STATE_EVENT_TYPES','VERSION_NEUTRAL_EVENT_TYPES','MODE_INTENT_KINDS','REVIEW_EVIDENCE_KINDS') as $needle) if(!str_contains($rule,$needle))throw new RuntimeException('The locked R2 rule table is missing: '.$needle);
+foreach(array('legalTransition','aggregateStates','aggregateEventTypes','intentKindForMode','reviewEvidenceKind','sameStateEventType','versionNeutralEventType') as $needle) if(!str_contains($rule,$needle))throw new RuntimeException('The locked R2 rule accessor is missing: '.$needle);
+foreach(array('aggregate','VERSION_COLUMNS','event_sequence','to_state','advancing') as $needle) if(!str_contains($integrity,$needle))throw new RuntimeException('The fail-closed aggregate read proof is missing: '.$needle);
+// The declared append-only event vocabulary must be the one the services actually write.
+if(!str_contains($recovery,"?'attempt_recorded':\$to"))throw new RuntimeException('A recovery attempt must be recorded with its declared attempt_recorded event type');
+// Every read model proves its aggregate against its own append-only history before returning it.
+if(substr_count($read,'RecurringIntegrity::aggregate')!==6)throw new RuntimeException('Every R2 read model must validate its aggregate history before returning authority');
+foreach(array('recurring_enrolment','renewal_cycle','collection_intent','recovery_case','refund_review','recurring_protection') as $aggregate) if(!str_contains($read,"RecurringIntegrity::aggregate('".$aggregate."'"))throw new RuntimeException('The read model must validate its aggregate history: '.$aggregate);
+// §5.2/§5.3: the cycle mode and the charge instant are derived, never caller-supplied.
+if(!str_contains($cycle,'resolveCycleMode')||!str_contains($cycle,'recurring_collection_mode_conflict'))throw new RuntimeException('A renewal cycle must snapshot the locked recurring-enrolment collection mode and refuse a conflicting input');
+if(!str_contains($cycle,'enrolment($recurringEnrolmentId,true)'))throw new RuntimeException('The cycle mode must be derived from the locked recurring enrolment');
+if(!str_contains($cycle,'public static function automaticChargeAt'))throw new RuntimeException('The charge instant must have one shared derivation seam');
+foreach(array('collection_charge_time_not_authoritative','collection_intent_kind_conflict','assertCycleCollection','RenewalCycleService::automaticChargeAt') as $needle) if(!str_contains($collection,$needle))throw new RuntimeException('The collection intent authority must derive its kind and charge instant: '.$needle);
+if(!str_contains($collection,"!=='payment_required'")||!str_contains($collection,'invalid_renewal_cycle_state'))throw new RuntimeException('A collection intent may only open on a live payment-required cycle');
+// §5.5: a review records matching authoritative refund evidence, and never an unrepresented reversal.
+foreach(array('reversal_evidence_not_supported','refund_review_amount_conflict','evidence_kind','processing_state') as $needle) if(!str_contains($refund,$needle))throw new RuntimeException('A refund review must prove the authoritative evidence provenance: '.$needle);
+if(!str_contains($refund,'$evidence->amount_minor===null||(string)$evidence->currency!==$currency'))throw new RuntimeException('A refund review must adopt the exact amount and currency of its evidence');
+// §5.6: protection binds the current-Term claim, and a release needs a durable successor or a terminal path.
+foreach(array('releaseRefusal','successorDurable','terminalLapseRecorded','renewal_successor_not_durable','cycle_term_id') as $needle) if(!str_contains($protection,$needle))throw new RuntimeException('Continuous protection must prove current-Term ownership and its release authority: '.$needle);
+if(!str_contains($protection,'(int)$claim->term_id!==(int)$claim->cycle_term_id'))throw new RuntimeException('Protection must bind the claim to the cycle own source Term');
+if(!str_contains($protection,'in_array((string)$claim->cycle_state,RecurringRule::CYCLE_LIVE_STATES,true)'))throw new RuntimeException('Protection must revalidate the live cycle state under serialization');
+if(!str_contains($protection,'if($this->claimReleased($claimId))return null;'))throw new RuntimeException('An R1-resolved claim must let R2 record the terminal protection instead of leaving it live');
+if(!str_contains($runtime,'dzn_r1_fix_release_claim'))throw new RuntimeException('The runtime proof must exercise the R1-resolution terminal path');
+// The new guards are exercised by the runtime, corruption and concurrency proofs.
+foreach(array('reversal_evidence_not_supported','refund_review_amount_conflict','refund_review_evidence_conflict','recurring_collection_mode_conflict','collection_intent_kind_conflict','collection_charge_time_not_authoritative','renewal_successor_not_durable','recurring_protection_claim_conflict') as $probe) if(!str_contains($runtime,$probe))throw new RuntimeException('The runtime proof must exercise the new authority guard: '.$probe);
+foreach(array('recurring_enrolment_integrity_conflict','renewal_cycle_integrity_conflict','collection_intent_integrity_conflict','recovery_case_integrity_conflict','refund_review_integrity_conflict','recurring_protection_integrity_conflict') as $probe) if(!str_contains($corruption,$probe))throw new RuntimeException('The corruption proof must exercise the aggregate read guard: '.$probe);
+if(!str_contains($corruption,"'to_state','closed','active'")||!str_contains($corruption,"'to_state','collected','guarantee_protected'"))throw new RuntimeException('The corruption proof must re-write stored history and prove the read fails closed');
+foreach(array('dzn_r2_fix_refund_evidence','refundEvidence') as $needle) if(!str_contains($fixture.$runtime.$corruption.$failure.$concurrency,$needle))throw new RuntimeException('The fixtures must record authoritative refund evidence: '.$needle);
+if(!str_contains($failure,'releaseProtection')||!str_contains($concurrency,'bindNextTerm')||!str_contains($concurrency,"==='term_bound'"))throw new RuntimeException('The delegated release must be exercised by the failure and concurrency proofs');
+if(!str_contains($concurrency,"collection_mode==='automatic','the cycle must snapshot the recorded mode"))throw new RuntimeException('The mode race must prove the cycle snapshots the recorded enrolment mode');
 
 echo "Phase 2A.2-R2 contract static test passed\n";

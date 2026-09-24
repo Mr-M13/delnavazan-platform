@@ -7,6 +7,10 @@
  * every read closed. A corrupted digest-only command row must fail every replay closed. Nothing is
  * ever silently repaired: the stored corruption survives the refused read, and restoring the exact
  * value converges again.
+ *
+ * Correction round 5 adds the §7.3 aggregate proofs: a rewritten current row, a rewritten history row,
+ * an unsupported aggregate version and a review sum the authoritative evidence never carried must each
+ * fail the read closed with the aggregate's own controlled reason.
  */
 if(getenv('DZN_PHASE_2A2R2_RUNTIME_TEST')!=='corruption'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-R2 corruption runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2r1-fixture.php';
@@ -37,8 +41,10 @@ $intentId=(int)(new CollectionIntentService())->openManualPaymentRequired($cycle
 (new CollectionIntentService())->recordFailure($intentId,array('failure_reason_code'=>'declined','evidence_channel'=>'staff_record','evidence_reference'=>'f','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('f'));
 $recoveryId=(int)(new RecoveryService())->openRecovery($intentId,dzn_r2_fix_evidence('rc'),dzn_r2_fix_key('rc'))['recovery_case_id'];
 $purchaseId=(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}commercial_entitlements WHERE id=%d",(int)$funded['entitlement_id']));
-$evidenceId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE obligation_id=%d ORDER BY id LIMIT 1",$funded['obligation_id']));
-$refundId=(int)(new RefundReviewService())->recordRefundEvidence(array('purchase_id'=>$purchaseId,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$evidenceId,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'rf','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('rf'))['refund_review_id'];
+// §5.5: the review's subject is the commitment's own authoritative *refund* evidence, so the fixture
+// records one through R1 instead of reusing the ordinary successful payment.
+$refundEvidence=dzn_r2_fix_refund_evidence((int)$funded['offer_id'],(int)$funded['obligation_id'],'corruption-a',25000,'AUD');
+$refundId=(int)(new RefundReviewService())->recordRefundEvidence(array('purchase_id'=>$purchaseId,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$refundEvidence,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'rf','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('rf'))['refund_review_id'];
 $protectionId=(int)(new RecurringProtectionService())->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('p'),dzn_r2_fix_key('p'))['recurring_protection_id'];
 
 /** A corrupted aggregate must be refused, must not be repaired, and must converge once restored. */
@@ -56,7 +62,14 @@ $probe('recurring_enrolments',$recurringId,'currency','ZZZ','AUD','recurring_enr
 $probe('recurring_enrolments',$recurringId,'collection_mode','bogus','manual','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a corrupted collection mode');
 $probe('recurring_enrolments',$recurringId,'state','bogus','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a corrupted recurring state');
 $probe('recurring_enrolments',$recurringId,'rule_version','other_v9','recurring_enrolment_v1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'an unknown rule version');
-$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','0','2','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a zero aggregate version');
+$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','0','1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a zero aggregate version');
+$probe('recurring_enrolments',$recurringId,'recurring_enrolment_version','7','1','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a version its history does not support');
+// §7.3: the current row must agree with its own append-only history — a state the history never reached,
+// or a history that was rewritten, is malformed rather than authority.
+$probe('recurring_enrolments',$recurringId,'state','closed','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'a current state its history never reached');
+$recurringEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}recurring_enrolment_events WHERE recurring_enrolment_id=%d AND event_sequence=1",$recurringId));
+dzn_r2_fix_assert($recurringEvent>0,'the recurring history row is required');
+$probe('recurring_enrolment_events',$recurringEvent,'to_state','closed','active','recurring_enrolment_integrity_conflict',fn()=>(new RecurringEnrolmentReadService())->one($recurringId),'an opening event rewritten to a state it never opened');
 
 // 2. Renewal Cycle: frozen mode, price snapshot, derived boundary and guarantee window.
 $probe('renewal_cycles',$cycleId,'currency','ZZZ','AUD','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a corrupted cycle currency');
@@ -67,22 +80,34 @@ $probe('renewal_cycles',$cycleId,'boundary_derived_at','bogus','2026-01-01 00:00
 $probe('renewal_cycles',$cycleId,'guarantee_deadline_at','bogus',null,'renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a corrupted guarantee window');
 $probe('renewal_cycles',$cycleId,'state','bogus','payment_required','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a corrupted cycle state');
 $probe('renewal_cycles',$cycleId,'source_term_id','0',(string)$funded['term_id'],'renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a missing source Term');
+$probe('renewal_cycles',$cycleId,'state','collected','payment_required','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a cycle state its history never reached');
+$probe('renewal_cycles',$cycleId,'renewal_cycle_version','9','3','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a cycle version its history does not support');
+$cycleEvent=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}renewal_cycle_events WHERE renewal_cycle_id=%d AND event_sequence=2",$cycleId));
+dzn_r2_fix_assert($cycleEvent>0,'the cycle history row is required');
+$probe('renewal_cycle_events',$cycleEvent,'to_state','collected','guarantee_protected','renewal_cycle_integrity_conflict',fn()=>(new RenewalCycleReadService())->one($cycleId),'a rewritten cycle-history transition');
 
 // 3. Collection Intent: provider-neutral kind, null-state and controlled failure reason.
 $probe('collection_intents',$intentId,'kind','bogus','manual_payment_required','collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'a corrupted collection kind');
 $probe('collection_intents',$intentId,'state','bogus','failed','collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'a corrupted collection state');
 $probe('collection_intents',$intentId,'charge_at','bogus',null,'collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'a corrupted charge instant');
 $probe('collection_intents',$intentId,'failure_reason_code','Not A Reason',null,'collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'an uncontrolled failure reason');
+$probe('collection_intents',$intentId,'collection_intent_version','9','3','collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'an intent version its history does not support');
+$probe('collection_intents',$intentId,'state','pending','failed','collection_intent_integrity_conflict',fn()=>(new CollectionReadService())->one($intentId),'an intent state its history never reached');
 
 // 4. Recovery Case representation and ownership.
 $probe('recovery_cases',$recoveryId,'state','bogus','open','recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->one($recoveryId),'a corrupted recovery state');
 $probe('recovery_cases',$recoveryId,'renewal_cycle_id','0',(string)$cycleId,'recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->one($recoveryId),'a recovery case detached from its cycle');
 $probe('recovery_cases',$recoveryId,'collection_intent_id','0',(string)$intentId,'recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->one($recoveryId),'a recovery case detached from its collection intent');
+$probe('recovery_cases',$recoveryId,'recovery_case_version','5','1','recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->one($recoveryId),'a recovery version its history does not support');
+$probe('recovery_cases',$recoveryId,'state','recovering','open','recovery_case_integrity_conflict',fn()=>(new RecoveryReadService())->one($recoveryId),'a recovery state its history never reached');
 
 // 5. Refund/reversal evidence and the unresolved academic-consequence seam.
 $probe('refund_review_cases',$refundId,'kind','bogus','refund','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a corrupted refund kind');
 $probe('refund_review_cases',$refundId,'state','bogus','open','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a corrupted refund state');
 $probe('refund_review_cases',$refundId,'currency','ZZZ','AUD','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a corrupted refund currency');
+$probe('refund_review_cases',$refundId,'state','resolved','open','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a refund state its history never reached');
+$probe('refund_review_cases',$refundId,'refund_review_version','4','1','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a refund version its history does not support');
+$probe('refund_review_cases',$refundId,'amount_minor','99999','25000','refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'a refund sum the authoritative evidence never carried');
 // R2 never records an academic consequence: a stored value is corruption, and it still reports unresolved.
 $probe('refund_review_cases',$refundId,'academic_consequence','clawback',null,'refund_review_integrity_conflict',fn()=>(new RefundReviewReadService())->one($refundId),'an invented academic consequence');
 dzn_r2_fix_assert((new RefundReviewReadService())->one($refundId)['academic_consequence_state']==='unresolved','the restored refund review must report the unresolved academic consequence');
@@ -91,6 +116,8 @@ dzn_r2_fix_assert((new RefundReviewReadService())->one($refundId)['academic_cons
 $probe('recurring_protections',$protectionId,'state','bogus','active','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a corrupted protection state');
 $probe('recurring_protections',$protectionId,'claim_id','0',(string)$funded['claim_id'],'recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection detached from its R1 claim');
 $probe('recurring_protections',$protectionId,'renewal_cycle_id','0',(string)$cycleId,'recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection detached from its cycle');
+$probe('commercial_capacity_claims',(int)$funded['claim_id'],'term_id','0',(string)$funded['term_id'],'recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection whose claim no longer binds the cycle own source Term');
+$probe('recurring_protections',$protectionId,'recurring_protection_version','3','1','recurring_protection_integrity_conflict',fn()=>(new RecurringProtectionReadService())->one($protectionId),'a protection version its history does not support');
 
 // 7. Digest-only command rows: an altered payload digest, operation or recorded result must fail every
 //    replay closed, and the unchanged key must converge again once the row is restored exactly.

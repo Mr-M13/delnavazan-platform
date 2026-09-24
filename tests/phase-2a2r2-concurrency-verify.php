@@ -70,27 +70,34 @@ if($mode==='renewal_vs_schedule'){
     // No automatic lapse machinery exists: capacity stays owned by the R1 claim.
     dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}recovery_cases WHERE id=%d AND state='lapsed'",$recoveryId))===0,'a recovered case must never lapse');
 }elseif($mode==='release_vs_succession'){
-    // A predecessor protection may only be released once, and a competing succession must lose to the
-    // owning-cycle uniqueness rather than create a second protection for the same cycle.
+    // A predecessor protection may only be released once its successor Term is durable, and a competing
+    // succession must lose to the owning-cycle uniqueness rather than create a second protection for
+    // the same cycle.
     dzn_r2_fix_assert($w1Ok,'the releasing worker must record the release');
     dzn_r2_fix_assert($w2Ok===false,'a competing protection for the same cycle must lose');
     dzn_r2_fix_assert(in_array($w2Reason,array('recurring_protection_already_exists','invalid_recurring_cycle_state','commercial_capacity_claim_not_active'),true),'the competing protection must fail with a controlled reason: '.$w2Reason);
     $protectionId=(int)$state['protection_id'];
+    // The release was only authorised because the successor Term and its capacity claim are durable.
+    dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$state['cycle']['cycle_id']))==='term_bound','the cycle must have bound its successor Term before the predecessor release');
+    dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE term_id=%d AND enrolment_id=%d",(int)$state['next']['term_id'],(int)$state['funded']['enrolment_id']))===1,'the successor Term must carry its own R1 funding plan');
+    dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT term_id FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$state['next']['claim_id']))===(string)(int)$state['next']['term_id'],'the successor capacity claim must be durable on the successor Term');
     dzn_r2_fix_assert($count('recurring_protections','renewal_cycle_id',(int)$state['cycle']['cycle_id'])===1,'exactly one protection may exist per renewal cycle');
     dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}recurring_protections WHERE id=%d",$protectionId))==='released','the released protection must stay released');
     dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$state['funded']['claim_id']))===0,'no protected interval may survive the release');
     $contiguous('recurring_protection_events','recurring_protection_id',$protectionId);
     $paired('recurring_protection_events','recurring_protection_commands','recurring_protection_id',$protectionId);
 }elseif($mode==='mode_change_vs_cycle'){
-    // The cycle freezes the collection mode recorded at its own creation; a concurrent mode change
-    // must never rewrite a cycle that already exists.
+    // A cycle snapshots the mode *recorded on its recurring enrolment*, so the serialised mode change
+    // commits first and the cycle that opens afterwards inherits `automatic` rather than any
+    // caller-supplied mode. A mode change must never rewrite a cycle that already exists.
     dzn_r2_fix_assert($w1Ok&&$w2Ok,'both serialised transitions must commit');
     $recurring=(int)$state['recurring'];
     $contiguous('recurring_enrolment_events','recurring_enrolment_id',$recurring);
     $paired('recurring_enrolment_events','recurring_enrolment_commands','recurring_enrolment_id',$recurring);
     $cycle=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}renewal_cycles WHERE recurring_enrolment_id=%d",$recurring));
     dzn_r2_fix_assert($cycle!==null&&in_array((string)$cycle->collection_mode,array('manual','automatic'),true),'the cycle must carry a valid frozen collection mode');
-    dzn_r2_fix_assert((string)$cycle->collection_mode==='manual','the cycle must freeze the mode recorded at its own creation');
+    dzn_r2_fix_assert((string)$cycle->collection_mode==='automatic','the cycle must snapshot the recorded mode of its recurring enrolment');
+    dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT collection_mode FROM {$p}recurring_enrolments WHERE id=%d",$recurring))==='automatic','the serialised mode change must be the recorded mode');
     $contiguous('renewal_cycle_events','renewal_cycle_id',(int)$cycle->id);
 }elseif($mode==='refund_vs_settlement'){
     // A concurrent settlement attempt must never be rewritten, duplicated or reversed by the refund
@@ -99,6 +106,8 @@ if($mode==='renewal_vs_schedule'){
     dzn_r2_fix_assert($w2Ok||str_contains($w2Reason,'conflict')||str_contains($w2Reason,'already'),'the competing settlement must commit or be reported as a controlled conflict: '.$w2Reason);
     $review=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}refund_review_cases WHERE purchase_id=%d",(int)$state['purchase_id']));
     dzn_r2_fix_assert($review!==null,'the refund review must exist');
+    dzn_r2_fix_assert((int)$review->evidence_id===(int)$state['evidence_id']&&(string)$review->kind==='refund','the review must record its own authoritative refund evidence');
+    dzn_r2_fix_assert((int)$review->amount_minor===(int)$wpdb->get_var($wpdb->prepare("SELECT amount_minor FROM {$p}commercial_payment_evidence WHERE id=%d",(int)$review->evidence_id)),'the review sum must be the exact sum carried by the authoritative refund evidence');
     dzn_r2_fix_assert($review->academic_consequence===null,'the refund review must keep the academic consequence unresolved');
     dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$state['funded']['obligation_id']))===1,'exactly one settlement may exist for the obligation');
     dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_entitlements WHERE id=%d",(int)$state['funded']['entitlement_id']))==='term_bound','a refund review must never reverse or rewrite the bound entitlement');

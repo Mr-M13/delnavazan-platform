@@ -20,15 +20,25 @@ final class RenewalCycleService {
         $actor=RecurringSupport::actor();
         $evidence=RecurringSupport::evidence($input);
         $sourceTermId=RecurringSupport::positiveInt($input['source_term_id']??null,'Valid source Term required');
-        $mode=RecurringSupport::collectionMode($input);
         $facts=$this->boundaryAndPrice($recurringEnrolmentId,$sourceTermId);
         $digest=RecurringSupport::keyString($key);
-        $payload=RecurringIdempotency::payload(array('domain'=>RecurringRule::DOMAIN,'operation'=>'open_cycle','recurring_enrolment_id'=>$recurringEnrolmentId,'source_term_id'=>$sourceTermId,'collection_mode'=>$mode,'boundary_derived_at'=>$facts['boundary_derived_at'],'evidence_reference_digest'=>$evidence['digest']));
+        $payload='';
         $this->repository->begin();
         try{
             RecurringSupport::guardAggregate('recurring_enrolment',$recurringEnrolmentId,$actor);
+            // §5.1/§5.2: a cycle snapshots the *recorded* collection mode of its recurring enrolment,
+            // read from the locked row. The mode is an audited attribute of the enrolment and the cycle
+            // must never be opened in a mode the enrolment does not carry, so the derivation is the only
+            // source of truth and a caller-supplied mode may only restate it.
+            $recurring=$this->repository->enrolment($recurringEnrolmentId,true);
+            if(!$recurring)throw new \InvalidArgumentException('recurring_enrolment_required');
+            $mode=$this->resolveCycleMode($recurring,$input);
+            $chargeAt=self::automaticChargeAt($mode,(string)$facts['boundary_derived_at']);
+            $payload=RecurringIdempotency::payload(array('domain'=>RecurringRule::DOMAIN,'operation'=>'open_cycle','recurring_enrolment_id'=>$recurringEnrolmentId,'source_term_id'=>$sourceTermId,'collection_mode'=>$mode,'boundary_derived_at'=>$facts['boundary_derived_at'],'evidence_reference_digest'=>$evidence['digest']));
             if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload);$this->repository->commit();return $result;}
-            $this->ensureRecurringOperational($recurringEnrolmentId);
+            // Only an *operational* recurring enrolment opens a new cycle; an unchanged command still
+            // converges on its recorded result above.
+            if((string)$recurring->state!=='active')throw new \InvalidArgumentException('recurring_enrolment_not_operational');
             $sequence=$this->nextCycleSequence($recurringEnrolmentId);
             $now=RecurringSupport::now();
             $id=$this->repository->insertCycle(array(
@@ -50,15 +60,30 @@ final class RenewalCycleService {
             ));
             // An automatic-renewal notice is an advance notice: with the charge lead time unset there
             // is no advance instant to announce, so the intent stays unrecorded (safe default).
-            if($facts['charge_at']!==null)RecurringSupport::publishIntent('renewal_cycle',$id,'AUTOMATIC_RENEWAL_UPCOMING',$actor);
+            if($chargeAt!==null)RecurringSupport::publishIntent('renewal_cycle',$id,'AUTOMATIC_RENEWAL_UPCOMING',$actor);
             RecurringSupport::hook('dzn_phase_2a2r2_after_cycle_event_insert','open_cycle',$id);
             $this->repository->commit();
-            return array('renewal_cycle_id'=>$id,'sequence'=>$sequence,'state'=>'pending','boundary_derived_at'=>$facts['boundary_derived_at'],'guarantee_deadline_at'=>$facts['guarantee_deadline_at'],'created'=>true);
+            return array('renewal_cycle_id'=>$id,'sequence'=>$sequence,'state'=>'pending','collection_mode'=>$mode,'charge_at'=>$chargeAt,'boundary_derived_at'=>$facts['boundary_derived_at'],'guarantee_deadline_at'=>$facts['guarantee_deadline_at'],'created'=>true);
         }catch(\Throwable $e){
             $this->repository->rollback();
             if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload);
             throw $e;
         }
+    }
+
+    /**
+     * The cycle's collection mode is the locked recurring enrolment's recorded mode.
+     *
+     * `manual` and `automatic` name the recorded provider-neutral collection states only: no default
+     * opt-in/out is invented here, and a caller that supplies the mode must supply the recorded one.
+     * A conflicting input fails closed instead of silently opening a cycle the enrolment did not record.
+     */
+    private function resolveCycleMode(object $recurring,array $input):string{
+        $mode=RecurringRule::collectionMode((string)$recurring->collection_mode);
+        if($mode===null)throw new \InvalidArgumentException('recurring_enrolment_collection_mode_required');
+        $supplied=trim((string)($input['collection_mode']??''));
+        if($supplied!==''&&$supplied!==$mode)throw new \InvalidArgumentException('recurring_collection_mode_conflict');
+        return $mode;
     }
 
     public function activateManualGuarantee(int $cycleId,array $input,string $key):array{
@@ -245,11 +270,6 @@ final class RenewalCycleService {
         return array('renewal_cycle_id'=>(int)$cycle->id,'state'=>(string)$cycle->state,'next_term_id'=>$cycle->next_term_id===null?null:(int)$cycle->next_term_id,'created'=>false,'idempotent'=>true);
     }
 
-    private function ensureRecurringOperational(int $recurringId):void{
-        global $wpdb;$p=$wpdb->prefix.'dzn_';
-        $row=$wpdb->get_row($wpdb->prepare("SELECT state FROM {$p}recurring_enrolments WHERE id=%d",$recurringId));
-        if(!$row||(string)$row->state!=='active')throw new \InvalidArgumentException('recurring_enrolment_not_operational');
-    }
     private function nextCycleSequence(int $recurringId):int{global $wpdb;$p=$wpdb->prefix.'dzn_';return (int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sequence),0)+1 FROM {$p}renewal_cycles WHERE recurring_enrolment_id=%d",$recurringId));}
 
     private function intentForTransition(string $operation,string $mode):?string{
@@ -293,7 +313,6 @@ final class RenewalCycleService {
         return array(
             'boundary_derived_at'=>(string)$boundary['starts_at_utc'],
             'guarantee_deadline_at'=>$deadline,
-            'charge_at'=>$this->automaticChargeAt((string)$recurring->collection_mode,(string)$boundary['starts_at_utc']),
             'currency'=>(string)$offer->currency,'amount_minor'=>(int)$offer->amount_due_minor,
         );
     }
@@ -343,8 +362,12 @@ final class RenewalCycleService {
     /**
      * `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` is an unresolved product decision: while it is unset no
      * advance charge instant exists and the automatic-charge date stays NULL.
+     *
+     * This is the single derivation seam for an automatic charge instant: both the renewal cycle and
+     * the collection intent read it, so no caller can assert a charge time of its own while the
+     * lead-time policy is unset (or record one that disagrees with the analysed boundary).
      */
-    private function automaticChargeAt(string $mode,string $boundary):?string{
+    public static function automaticChargeAt(string $mode,string $boundary):?string{
         if($mode!=='automatic')return null;
         $policy=(new CommercialPolicyService())->current('AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME');
         if(!$policy['set'])return null;

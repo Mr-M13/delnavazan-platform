@@ -79,7 +79,9 @@ try{
             $result['outcome']=(new RecurringEnrolmentService())->setCollectionMode((int)$state['recurring'],array('collection_mode'=>'automatic','evidence_channel'=>'staff_record','evidence_reference'=>'race-mode','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-mode'));
         }else{
             $result['action']='open_renewal_cycle';
-            $result['outcome']=(new RenewalCycleService())->openCycle((int)$state['recurring'],array('source_term_id'=>(int)$state['funded']['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'race-cycle','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-cycle'));
+            // No `collection_mode` is supplied: the cycle derives it from the locked recurring
+            // enrolment, which the serialised mode change has already rewritten to `automatic`.
+            $result['outcome']=(new RenewalCycleService())->openCycle((int)$state['recurring'],array('source_term_id'=>(int)$state['funded']['term_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'race-cycle','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-cycle'));
         }
         $result['ok']=true;
     }elseif($mode==='refund_vs_settlement'){

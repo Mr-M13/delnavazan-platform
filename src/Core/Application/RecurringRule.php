@@ -46,6 +46,99 @@ final class RecurringRule {
     public const PROTECTION_EVENT_TYPES=array('established','extended','released','lapsed');
 
     /**
+     * The collection intent kind a cycle's *frozen* collection mode authorises.
+     *
+     * A cycle snapshots the mode of its recurring enrolment and never rewrites it, so the kind of the
+     * intent that collects it is derived from that frozen mode rather than accepted from a caller.
+     */
+    public const MODE_INTENT_KINDS=array('manual'=>'manual_payment_required','automatic'=>'automatic_charge');
+
+    /**
+     * The R1 payment-evidence kinds that can authorise a refund/reversal review case.
+     *
+     * R1 records exactly one attributable non-settlement kind today (`refund`); a *reversal* has no
+     * authoritative R1 representation, so R2 refuses to represent one until R1 provides it instead of
+     * recording a caller-asserted reversal over ordinary payment evidence.
+     */
+    public const REVIEW_EVIDENCE_KINDS=array('refund');
+
+    /** The event types that legitimately record an append-only event without changing state. */
+    public const SAME_STATE_EVENT_TYPES=array('collection_mode_changed','extended','attempt_recorded');
+
+    /**
+     * The event types that record an append-only fact *without* advancing the aggregate version.
+     *
+     * `extended` is the only such event: it re-affirms a continuous protection and appends history, but
+     * it changes neither the protection's state nor its recorded version. Every other event in the phase
+     * advances the owning aggregate's version exactly once, which is what lets a read model prove the
+     * version against the history instead of trusting a mutable counter.
+     */
+    public const VERSION_NEUTRAL_EVENT_TYPES=array('extended');
+
+    /**
+     * The locked legal-transition table of every R2 aggregate: one `from|to` entry per legal step, with
+     * a null `from_state` spelled as the empty string. A read model proves a stored aggregate against
+     * this table (plus contiguity, the final event and the recorded version), so a row rewritten without
+     * its history — or a history rewritten without its row — is never returned as authority.
+     */
+    public const AGGREGATE_TRANSITIONS=array(
+        'recurring_enrolment'=>array(
+            '|active','active|suspended','suspended|active','active|closed','suspended|closed',
+            'active|active','suspended|suspended',
+        ),
+        'renewal_cycle'=>array(
+            '|pending','pending|guarantee_protected','pending|payment_required','guarantee_protected|payment_required',
+            'payment_required|collected','collected|term_bound','term_bound|closed',
+            'pending|lapsed','guarantee_protected|lapsed','payment_required|lapsed','collected|lapsed',
+            'pending|cancelled','guarantee_protected|cancelled','payment_required|cancelled','collected|cancelled',
+        ),
+        'collection_intent'=>array(
+            '|pending','pending|submitted','submitted|confirmed','submitted|failed',
+            'failed|recovered','pending|cancelled','failed|cancelled',
+        ),
+        'recovery_case'=>array(
+            '|open','open|recovering','open|recovered','recovering|recovered','open|lapsed','recovering|lapsed',
+        ),
+        'refund_review'=>array(
+            '|open','open|review_required','review_required|resolved','open|dismissed','review_required|dismissed',
+        ),
+        'recurring_protection'=>array('|active','active|active','active|released','active|lapsed'),
+    );
+
+    /** The states, legal transitions and event types of one R2 aggregate. */
+    public static function aggregateStates(string $aggregate):array{
+        return match($aggregate){
+            'recurring_enrolment'=>self::RECURRING_STATES,
+            'renewal_cycle'=>self::CYCLE_STATES,
+            'collection_intent'=>self::COLLECTION_INTENT_STATES,
+            'recovery_case'=>self::RECOVERY_STATES,
+            'refund_review'=>self::REFUND_REVIEW_STATES,
+            'recurring_protection'=>self::PROTECTION_STATES,
+            default=>throw new \InvalidArgumentException('Controlled recurring aggregate required'),
+        };
+    }
+    public static function aggregateEventTypes(string $aggregate):array{
+        return match($aggregate){
+            'recurring_enrolment'=>self::RECURRING_EVENT_TYPES,
+            'renewal_cycle'=>self::CYCLE_EVENT_TYPES,
+            'collection_intent'=>self::COLLECTION_INTENT_EVENT_TYPES,
+            'recovery_case'=>self::RECOVERY_EVENT_TYPES,
+            'refund_review'=>self::REFUND_REVIEW_EVENT_TYPES,
+            'recurring_protection'=>self::PROTECTION_EVENT_TYPES,
+            default=>throw new \InvalidArgumentException('Controlled recurring aggregate required'),
+        };
+    }
+    public static function legalTransition(string $aggregate,?string $from,string $to):bool{
+        $table=self::AGGREGATE_TRANSITIONS[$aggregate]??null;
+        if($table===null)throw new \InvalidArgumentException('Controlled recurring aggregate required');
+        return in_array(($from??'').'|'.$to,$table,true);
+    }
+    public static function intentKindForMode(string $mode):?string{return self::MODE_INTENT_KINDS[$mode]??null;}
+    public static function reviewEvidenceKind(string $kind):bool{return in_array($kind,self::REVIEW_EVIDENCE_KINDS,true);}
+    public static function sameStateEventType(string $eventType):bool{return in_array($eventType,self::SAME_STATE_EVENT_TYPES,true);}
+    public static function versionNeutralEventType(string $eventType):bool{return in_array($eventType,self::VERSION_NEUTRAL_EVENT_TYPES,true);}
+
+    /**
      * Channel-neutral notification intents consumed by Phase S. These are intent names only,
      * never templates and never delivery records.
      */

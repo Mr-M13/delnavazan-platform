@@ -9,6 +9,10 @@
  * release. The delegated binding carries the caller's authorised Phase-L aggregate position, so the
  * convergent retry converges on the same Term. Structural boundaries (a duplicate event sequence and
  * a conflicting command replay) are covered directly.
+ *
+ * Correction round 5 runs the protection block after the delegated binding: §5.6 authorises releasing a
+ * predecessor claim only once its successor Term is durable (or along an authorised terminal path), and
+ * the R1-half-durable case is what makes the rolled-back retry converge on the existing release.
  */
 if(getenv('DZN_PHASE_2A2R2_RUNTIME_TEST')!=='failure'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-R2 failure runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2r1-fixture.php';
@@ -136,8 +140,9 @@ dzn_r2_fix_assert((string)dzn_r2_fix_column('recovery_cases',$recoveryId,'state'
 
 // 14-16. Refund/reversal review owning mutations.
 $purchaseId=(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}commercial_entitlements WHERE id=%d",(int)$funded['entitlement_id']));
-$evidenceId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE obligation_id=%d ORDER BY id LIMIT 1",$funded['obligation_id']));
-$refundInput=array('purchase_id'=>$purchaseId,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$evidenceId,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'failure-refund','evidence_at'=>gmdate('Y-m-d H:i:s'));
+// §5.5: the review's subject is the commitment's own authoritative refund evidence.
+$refundEvidence=dzn_r2_fix_refund_evidence((int)$funded['offer_id'],(int)$funded['obligation_id'],'failure-a',25000,'AUD');
+$refundInput=array('purchase_id'=>$purchaseId,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$refundEvidence,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'failure-refund','evidence_at'=>gmdate('Y-m-d H:i:s'));
 $rollback('injected failure while recording refund evidence',$refundHook,fn()=>$refunds->recordRefundEvidence($refundInput,dzn_r2_fix_key('failure-refund')),array());
 dzn_r2_fix_assert(dzn_r2_fix_count('refund_review_cases')===0,'a failed refund-record must not create the review row');
 $refundId=(int)$refunds->recordRefundEvidence($refundInput,dzn_r2_fix_key('failure-refund'))['refund_review_id'];
@@ -150,25 +155,7 @@ $refunds->resolve($refundId,array('resolution_note'=>'approved','evidence_channe
 dzn_r2_fix_assert((string)dzn_r2_fix_column('refund_review_cases',$refundId,'state')==='resolved','the retried refund resolution must converge');
 dzn_r2_fix_assert(dzn_r2_fix_column('refund_review_cases',$refundId,'academic_consequence')===null,'a failed or retried refund review must never record an academic consequence');
 
-// 17-19. Continuous protection owning mutations and its delegated release.
-$rollback('an injected failure while establishing protection',$protectionHook,fn()=>$protections->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('failure-protection'),dzn_r2_fix_key('failure-protection')),array());
-dzn_r2_fix_assert(dzn_r2_fix_count('recurring_protections')===0,'a failed protection establishment must not create the row');
-$protectionId=(int)$protections->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('failure-protection'),dzn_r2_fix_key('failure-protection'))['recurring_protection_id'];
-$protectionHistory=array(array('recurring_protection_events','recurring_protection_id',$protectionId),array('recurring_protection_commands','recurring_protection_id',$protectionId));
-$rollback('an injected failure while extending protection',$protectionHook,fn()=>$protections->extendProtection($protectionId,dzn_r2_fix_evidence('failure-extend'),dzn_r2_fix_key('failure-extend')),$protectionHistory);
-$protections->extendProtection($protectionId,dzn_r2_fix_evidence('failure-extend'),dzn_r2_fix_key('failure-extend'));
-dzn_r2_fix_assert(dzn_r2_fix_count('recurring_protection_events','recurring_protection_id',$protectionId)===2,'the retried protection extension must converge');
-// The delegated release: R1 owns its own transaction, so the R1 half is durable while the R2 half
-// rolls back. The retry must adopt the durable R1 release instead of releasing a second time.
-$releaseInput=array('evidence_channel'=>'staff_record','evidence_reference'=>'failure-release','evidence_at'=>gmdate('Y-m-d H:i:s'));
-$rollback('an injected failure after the delegated capacity release',$protectionHook,fn()=>$protections->releaseProtection($protectionId,$releaseInput,dzn_r2_fix_key('failure-release')),$protectionHistory);
-dzn_r2_fix_assert((string)dzn_r2_fix_column('commercial_capacity_claims',(int)$funded['claim_id'],'state')==='released','the delegated R1 release must remain durable after the R2 half rolls back');
-dzn_r2_fix_assert((string)dzn_r2_fix_column('recurring_protections',$protectionId,'state')==='active','the rolled-back R2 half must not claim the release yet');
-$protections->releaseProtection($protectionId,$releaseInput,dzn_r2_fix_key('failure-release'));
-dzn_r2_fix_assert((string)dzn_r2_fix_column('recurring_protections',$protectionId,'state')==='released','the retried protection release must converge on the durable R1 fact');
-dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$funded['claim_id']))===1,'a retried release must never duplicate or re-mint the claim');
-
-// 20. The delegated binding: the R1 next Term is durable, the R2 cycle update rolls back and the
+// 17. The delegated binding: the R1 next Term is durable, the R2 cycle update rolls back and the
 //     retry converges without creating a second Term, funding plan or entitlement binding.
 $nextTerm=dzn_r2_fix_next_term_entitlement($fixture['sources'][0],(int)$funded['product_id'],'failure-next',3);
 $cycles->confirmCollection($cycleId,dzn_r2_fix_evidence('failure-collect'),dzn_r2_fix_key('failure-collect'));
@@ -186,6 +173,26 @@ dzn_r2_fix_assert((string)dzn_r2_fix_column('renewal_cycles',$cycleId,'state')==
 dzn_r2_fix_assert((int)dzn_r2_fix_column('renewal_cycles',$cycleId,'next_term_id')===$boundTermId,'the retry must record the durable R1 Term, not a second one');
 dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_term_funding_plans WHERE entitlement_id=%d",(int)$nextTerm['entitlement_id']))===1,'a retried binding must never create a second funding plan');
 dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}terms WHERE enrolment_id=%d",(int)$funded['enrolment_id']))===2,'a retried binding must never create a second next Term');
+
+// 18-20. Continuous protection owning mutations, its delegated release and the release authority.
+//     §5.6 authorises a predecessor release only once the successor Term is durable, so the protection
+//     block runs after the delegated binding above.
+$rollback('an injected failure while establishing protection',$protectionHook,fn()=>$protections->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('failure-protection'),dzn_r2_fix_key('failure-protection')),array());
+dzn_r2_fix_assert(dzn_r2_fix_count('recurring_protections')===0,'a failed protection establishment must not create the row');
+$protectionId=(int)$protections->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('failure-protection'),dzn_r2_fix_key('failure-protection'))['recurring_protection_id'];
+$protectionHistory=array(array('recurring_protection_events','recurring_protection_id',$protectionId),array('recurring_protection_commands','recurring_protection_id',$protectionId));
+$rollback('an injected failure while extending protection',$protectionHook,fn()=>$protections->extendProtection($protectionId,dzn_r2_fix_evidence('failure-extend'),dzn_r2_fix_key('failure-extend')),$protectionHistory);
+$protections->extendProtection($protectionId,dzn_r2_fix_evidence('failure-extend'),dzn_r2_fix_key('failure-extend'));
+dzn_r2_fix_assert(dzn_r2_fix_count('recurring_protection_events','recurring_protection_id',$protectionId)===2,'the retried protection extension must converge');
+// The delegated release: R1 owns its own transaction, so the R1 half is durable while the R2 half
+// rolls back. The retry must adopt the durable R1 release instead of releasing a second time.
+$releaseInput=array('evidence_channel'=>'staff_record','evidence_reference'=>'failure-release','evidence_at'=>gmdate('Y-m-d H:i:s'));
+$rollback('an injected failure after the delegated capacity release',$protectionHook,fn()=>$protections->releaseProtection($protectionId,$releaseInput,dzn_r2_fix_key('failure-release')),$protectionHistory);
+dzn_r2_fix_assert((string)dzn_r2_fix_column('commercial_capacity_claims',(int)$funded['claim_id'],'state')==='released','the delegated R1 release must remain durable after the R2 half rolls back');
+dzn_r2_fix_assert((string)dzn_r2_fix_column('recurring_protections',$protectionId,'state')==='active','the rolled-back R2 half must not claim the release yet');
+$protections->releaseProtection($protectionId,$releaseInput,dzn_r2_fix_key('failure-release'));
+dzn_r2_fix_assert((string)dzn_r2_fix_column('recurring_protections',$protectionId,'state')==='released','the retried protection release must converge on the durable R1 fact');
+dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$funded['claim_id']))===1,'a retried release must never duplicate or re-mint the claim');
 
 // 21. Structural boundary: a duplicate event sequence must roll the transition back, and the retry
 //     converges once the colliding row is gone.

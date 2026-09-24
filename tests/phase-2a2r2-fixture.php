@@ -59,8 +59,30 @@ function dzn_r2_fix_establish(int $enrolmentId,string $label):int{
     return (int)$result['recurring_enrolment_id'];
 }
 function dzn_r2_fix_cycle(int $recurringId,int $sourceTermId,string $label):array{
-    $result=(new RenewalCycleService())->openCycle($recurringId,array('source_term_id'=>$sourceTermId,'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-'.$label));
+    // No `collection_mode` is supplied: a cycle snapshots the mode recorded on its recurring enrolment.
+    $result=(new RenewalCycleService())->openCycle($recurringId,array('source_term_id'=>$sourceTermId,'evidence_channel'=>'staff_record','evidence_reference'=>'cycle-'.$label,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-'.$label));
     return array('cycle_id'=>(int)$result['renewal_cycle_id'],'boundary_derived_at'=>(string)$result['boundary_derived_at']);
+}
+/**
+ * Record one *authoritative* R1 refund evidence fact for an obligation of an accepted offer.
+ *
+ * §5.5 reviews R1 `refund`/`reversal` evidence, so a review's subject must be a real R1 evidence row of
+ * that kind (with its own exact amount and currency) rather than an ordinary successful payment.
+ */
+function dzn_r2_fix_refund_evidence(int $offerId,int $obligationId,string $reference,int $amount,string $currency):int{
+    global $wpdb;$p=$wpdb->prefix.'dzn_';
+    $sequence=(int)$wpdb->get_var($wpdb->prepare("SELECT obligation_sequence FROM {$p}commercial_offer_obligations WHERE id=%d",$obligationId));
+    $offerUid=(string)$wpdb->get_var($wpdb->prepare("SELECT offer_uid FROM {$p}commercial_offers WHERE id=%d",$offerId));
+    dzn_r2_fix_assert($sequence>0&&$offerUid!=='','the refund evidence must resolve its own obligation');
+    $result=(new CommercialPaymentService())->ingest(array(
+        'provider_key'=>'synthetic_provider','provider_reference'=>'refund-'.$reference,'evidence_kind'=>'refund',
+        'amount_minor'=>(string)$amount,'currency'=>$currency,
+        'obligation_reference'=>$offerUid.':'.$sequence,'provider_occurred_at'=>gmdate('Y-m-d H:i:s'),
+        'evidence_channel'=>'provider_evidence','evidence_reference'=>'refund-evidence-'.$reference,'evidence_at'=>gmdate('Y-m-d H:i:s'),
+    ),dzn_r1_fix_key('refund-evidence-'.$reference));
+    $evidenceId=(int)($result['evidence_id']??0);
+    dzn_r2_fix_assert($evidenceId>0&&(string)($result['processing_state']??'')==='accepted','the authoritative refund evidence must be recorded accepted');
+    return $evidenceId;
 }
 /**
  * Build the next-Term R1 entitlement for the SAME canonical Enrolment: a second authorised

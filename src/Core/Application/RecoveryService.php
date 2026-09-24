@@ -88,7 +88,7 @@ final class RecoveryService {
             $now=RecurringSupport::now();
             $this->repository->updateCase($caseId,(int)$case->recovery_case_version,array('state'=>$to),$now,$actor);
             $this->repository->insertEvent(array(
-                'uid'=>Identifier::uid(),'recovery_case_id'=>$caseId,'event_sequence'=>$this->repository->nextSequence($caseId),'event_type'=>$to,
+                'uid'=>Identifier::uid(),'recovery_case_id'=>$caseId,'event_sequence'=>$this->repository->nextSequence($caseId),'event_type'=>$operation==='record_recovery_attempt'?'attempt_recorded':$to,
                 'from_state'=>(string)$case->state,'to_state'=>$to,'reason_code'=>$operation,'evidence_channel'=>$evidence['channel'],
                 'evidence_reference_digest'=>$evidence['digest'],'evidence_at'=>$evidence['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
             ));

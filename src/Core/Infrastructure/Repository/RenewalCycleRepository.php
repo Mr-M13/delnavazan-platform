@@ -10,6 +10,8 @@ final class RenewalCycleRepository {
     public function rollback():void{global $wpdb;$wpdb->query('ROLLBACK');}
 
     public function find(int $id,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}renewal_cycles WHERE id=%d".($lock?' FOR UPDATE':''),$id);}
+    /** The owning recurring enrolment, whose recorded collection mode a new cycle snapshots. */
+    public function enrolment(int $recurringId,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}recurring_enrolments WHERE id=%d".($lock?' FOR UPDATE':''),$recurringId);}
     public function byRecurringSequence(int $recurringId,int $sequence,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}renewal_cycles WHERE recurring_enrolment_id=%d AND sequence=%d".($lock?' FOR UPDATE':''),$recurringId,$sequence);}
     public function cyclesForRecurring(int $recurringId):array{global $wpdb;return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}renewal_cycles WHERE recurring_enrolment_id=%d ORDER BY sequence",$recurringId))?:array();}
     public function insertCycle(array $data):int{return $this->insert('renewal_cycles',$data,'Renewal cycle persistence failed');}

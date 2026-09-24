@@ -202,6 +202,81 @@ intent, and a failed intent of a cancelled cycle is refused without reopening th
 The failure-injection suite opens the recovery case while its intent is still failed, matching the
 enforced order.
 
+## Correction round 5 — refund provenance, derived mode and charge, protection release, fail-closed reads
+
+The independent review of the host-materialized candidate (host correction round 2 of this task chain;
+failed candidate `98b01601a8005efada67553fc1b5a4bba7d284bc`, tree
+`1d21b3c1963425f962d829bb9633643a584cd03f`) returned **FAIL — CORRECTION REQUIRED** on five blocking
+findings. Each is closed from stored facts, inside the serialised transaction, without adding product
+policy, a provider column, a lock, a Term/Lesson/schedule writer or a delivery path.
+
+1. **Refund/reversal provenance (§5.5).** `record_refund_evidence` no longer accepts *any* accepted
+   payment evidence with a caller-asserted kind and sum. The reviewed evidence must really be that
+   purchase's and obligation's *accepted* evidence **of the reviewed kind**, and its exact amount and
+   currency are adopted as the recorded review sum: an ordinary successful payment fails closed with
+   `refund_review_evidence_conflict`, a caller value that disagrees with the evidence with
+   `refund_review_amount_conflict`, and evidence R1 never accepted with
+   `accepted_payment_evidence_required`. A `reversal` is refused outright with
+   `reversal_evidence_not_supported`, because R1 records no authoritative reversal representation
+   (`CommercialRule::EVIDENCE_KINDS`) and R2 must not invent one; when R1 represents reversals the
+   locked `RecurringRule::REVIEW_EVIDENCE_KINDS` list is the single seam that admits them.
+2. **The cycle mode is snapshotted, never supplied (§5.1/§5.2).** `open_cycle` locks and reads the
+   recurring enrolment and derives the cycle's `collection_mode` from *its* recorded mode; the previous
+   free input is gone, and a caller that restates a different mode fails closed with
+   `recurring_collection_mode_conflict`. A manual cycle can therefore no longer be opened from an
+   automatic enrolment (or the reverse), and the audited
+   `collection_mode_changed` history keeps its meaning.
+3. **The collection intent is lifecycle- and mode-bound, and its charge instant is derived (§4/§5.3).**
+   A collection intent opens only on a live `payment_required` cycle (`invalid_renewal_cycle_state`) —
+   a pending, terminal or already-collected cycle owns no open collection — and only in the kind the
+   cycle's frozen mode authorises (`collection_intent_kind_conflict`). `charge_at` is derived solely
+   through the single `RenewalCycleService::automaticChargeAt()` seam from the recorded
+   `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` policy and the cycle's own derived boundary; a caller-supplied
+   charge instant is refused with `collection_charge_time_not_authoritative` rather than silently
+   ignored, so the unset-policy safe default (no advance charge date, no
+   `AUTOMATIC_RENEWAL_UPCOMING`) cannot be bypassed. Obligation ownership is still proven first, so
+   another Student's settled obligation can never be presented as this cycle's collection.
+4. **Protection binds the current-Term claim, and its release is authorised (§5.6).** The adopted claim
+   must be the *active claim of the cycle's own recorded `source_term_id`* for the cycle's own Student
+   and Course: another active claim of the same Student — including the successor-Term claim the
+   renewal itself creates — fails closed with `recurring_protection_claim_conflict`, and the live cycle
+   state is re-proved inside the serialised transaction rather than trusted from the provisional read.
+   `release_protection` now requires either a **durable successor** (the cycle's next Term recorded and
+   carrying its own R1 funding plan *and* its capacity claim) or an **authorised terminal path**: the
+   underlying claim is already released in R1 (the capacity has returned to the Teacher through R1's own
+   authority — recording that durable fact is the only way a release whose R1 half committed before an
+   R2 write-boundary failure can converge, and it never releases anything new), the cycle itself already
+   reached `lapsed`/`cancelled`, or an explicit, evidenced terminal recovery lapse of that very cycle.
+   Anything else — notably the ordinary "release the guaranteed slot early" shape — fails closed with
+   `renewal_successor_not_durable` *before* the delegated R1 capacity release is invoked, so a
+   predecessor claim can never be dropped while a successor is still missing, and no silent release
+   becomes possible.
+5. **Every read model fails closed on a malformed aggregate (§7.3).** `RecurringIntegrity` proves each
+   stored aggregate against its own append-only history before any read returns it: gap-free contiguous
+   `event_sequence`, a leading null `from_state`, a chain in which every event continues from its
+   predecessor, only the locked legal transitions and event types, same-state events only for the
+   declared bookkeeping types (`collection_mode_changed`, `extended`, `attempt_recorded`), the final
+   event agreeing with the recorded current state, and the recorded aggregate version equal to the
+   number of events that advanced it (every event except the version-neutral `extended`, which appends
+   history without changing state or version). The six read services additionally re-prove the linked
+   ownership facts — the canonical Enrolment, the cycle's own source Term and currency, the cycle's own
+   obligation, the recovery case's own cycle and intent, the reviewed purchase/obligation/evidence, and
+   the protection's claim Term. The recovery case also records its attempt with the declared
+   `attempt_recorded` event type rather than the state name, so the locked event vocabulary is the one
+   the services write. The review's example (a row rewritten to `closed` while its history still ends at
+   `established`) is now a refused read, and
+   `tests/phase-2a2r2-corruption-runtime.php` proves both directions: a rewritten row and a rewritten
+   history row.
+
+The proofs were extended accordingly: `tests/phase-2a2r2-runtime.php` exercises every new guard, the
+successor-Term claim refusal and the terminal-lapse release path; the corruption suite adds the
+version/row/history probes and the exact refund-evidence provenance; the failure-injection suite moves
+its protection block behind the delegated binding so the release it exercises is authorised; the
+concurrency pre-state builds a durable successor Term for `release_vs_succession`, records real refund
+evidence for `refund_vs_settlement`, and requires payment before a collection intent; and
+`mode_change_vs_cycle` now proves the cycle inherits the *committed* recorded mode rather than a
+caller-supplied one.
+
 ## Delegation is convergent, never nested
 
 R2 never opens a transaction around a delegating R1 command. `bind_next_term` and
@@ -241,10 +316,10 @@ Theme, deployment and production access.
 
 | Suite | Required proof |
 | --- | --- |
-| `tests/phase-2a2r2-contract.php` | Schema 26 identity, build shape, migration/verifier call sites, rule constants, intent set, capability boundaries, no provider column, no FK/CHECK, immutable and digest-only append-only storage, exactly-eighteen-table installer set, the R1 serialization root, the outbox seam, delegation is not nested, the forwardable Phase-L aggregate position, the correction-round-2 ownership guards, and the seven concurrency modes |
+| `tests/phase-2a2r2-contract.php` | Schema 26 identity, build shape, migration/verifier call sites, rule constants, intent set, capability boundaries, no provider column, no FK/CHECK, immutable and digest-only append-only storage, exactly-eighteen-table installer set, the R1 serialization root, the outbox seam, delegation is not nested, the forwardable Phase-L aggregate position, the correction-round-2 ownership guards, the correction-round-5 derived-mode/charge, refund-provenance, protection-release and read-integrity guards, and the seven concurrency modes |
 | `tests/phase-2a2r2-migration-runtime.php` | Fresh Schema 26; additive 25→26 ledger proof; no backfill/inferred renewal; repeat safety against a retained R1 sentinel; provider/mutable/digest/index/academic/raw-key/raw-reference malformed-storage rejection with exact restoration; a smuggled-table probe; retained-026 stale-version fail-closed; partial capability repair |
-| `tests/phase-2a2r2-runtime.php` | `funding_plan_required`; establishment and digest-only replay; audited collection-mode change; derived boundary and price snapshot; manual guarantee; intent lifecycle; the forwarded aggregate position and its fail-closed refusals; next-Term R1 offer/acceptance/binding orchestration; continuous protection and its delegated release; refund review trajectory; recovery/lapse with the policy unset and with explicit evidence; the §5.4 recovery-state enforcement (failed source intent, live cycle, accepted R1 settlement); terminal lifecycle constraints; accepted-evidence settlement; cross-commitment ownership refusals; intent-set conformance |
-| `tests/phase-2a2r2-corruption-runtime.php` | Frozen currency/mode, boundary/guarantee, price snapshot, recovery/lapse, cross-Term protection ownership, refund evidence and digest-only command-row corruption all fail closed, are never silently repaired, and converge after exact restoration |
+| `tests/phase-2a2r2-runtime.php` | `funding_plan_required`; establishment and digest-only replay; audited collection-mode change; the cycle snapshotting the recorded enrolment mode and refusing a conflicting input; derived boundary and price snapshot; manual guarantee; the payment-required lifecycle of a collection intent, its mode-bound kind, its derived (never caller-asserted) charge instant and obligation ownership; the forwarded aggregate position and its fail-closed refusals; next-Term R1 offer/acceptance/binding orchestration; continuous protection, its current-Term claim binding, its delegated release and the authorised terminal-lapse path; refund review trajectory with authoritative refund evidence and the refused reversal; recovery/lapse with the policy unset and with explicit evidence; the §5.4 recovery-state enforcement (failed source intent, live cycle, accepted R1 settlement); terminal lifecycle constraints; accepted-evidence settlement; cross-commitment ownership refusals; intent-set conformance |
+| `tests/phase-2a2r2-corruption-runtime.php` | Frozen currency/mode, boundary/guarantee, price snapshot, recovery/lapse, cross-Term protection ownership, refund evidence (kind, sum, currency and authoritative-evidence provenance), rewritten current rows, rewritten history rows, unsupported aggregate versions and digest-only command-row corruption all fail closed, are never silently repaired, and converge after exact restoration |
 | `tests/phase-2a2r2-failure-runtime.php` | An injected write boundary at every owning mutation rolls back completely; the identical retry converges; both delegating commands keep the durable R1 half and never duplicate it; a duplicate event sequence and a conflicting replay fail closed |
 | `tests/phase-2a2r2-concurrency-runner.sh` | `renewal_vs_schedule`, `guarantee_vs_close`, `recovery_vs_satisfaction`, `release_vs_succession`, `mode_change_vs_cycle`, `refund_vs_settlement`, `unrelated_recurring_enrolments`, each with isolated DB state, a gated holder and a coherent-aggregate verifier |
 | Adjacent regressions | Phase L/M/N/O/Q/R1 contract and pure suites, `static.php` lint, the schema contract, the fresh-install capability bootstrap and the migration-exception runtime |
@@ -260,24 +335,29 @@ an environment limit of the authoring sandbox, not a result: nothing below may b
 
 Executed in that sandbox (reproducible, structural only):
 
-- a lexical balance/lint pass over every PHP file (347 files, 0 unbalanced) that strips comments and
+- a lexical balance/lint pass over every PHP file (348 files, 0 unbalanced) that strips comments and
   both quoting styles;
 - an installer↔verifier cross-check of migration 026: the 18 declared tables, every
   verifier-required column and every verifier-required index exist in the installer (0 missing);
 - a service↔schema cross-check: every column written by the six R2 repositories and their services
-  exists in the corresponding installed table (0 mismatches);
-- an R2 class/file-name match (22 files) and a repository-wide reference-resolution pass over the R2
-  classes and suites (3,579 `new`/`::` references, 0 unresolved repo-level symbols);
+  exists in the corresponding installed table (399 written keys, 0 mismatches);
+- an R2 class/file-name match (23 files) and a repository-wide reference-resolution pass over the R2
+  classes and suites (661 `new`/`::` references, 0 unresolved repo-level symbols);
 - a forbidden-surface scan of the R2 application layer (`stripe`, `wp_remote_`, `wp_mail`, `curl_`,
   `webhook`, `floatval`, `round(`, `INSERT INTO`, `UPDATE `, `DELETE FROM`, cron scheduling,
   parallel Term/Lesson/funding/claim writers: none present);
+- an assertion-level emulation of `tests/phase-2a2r2-contract.php`: every static assertion in the suite
+  (identity, storage, verifier, rule tables, capability, lock root, outbox seam, delegation, boundary
+  derivation, ownership guards, the correction-round-5 guards and the concurrency modes) evaluated
+  against the same file contents through an equivalent primitive: 0 failures;
 - `git diff --check` clean, `sh -n` on `tests/phase-2a2r2-concurrency-runner.sh`, and all thirteen
   `tests/*-concurrency-runner.sh` committed as mode `100755`;
-- the delivered 403-file working tree hashed content-addressed into a single tree object; that tree
+- the delivered 404-file working tree hashed content-addressed into a single tree object; that tree
   hash is reported in the task handover rather than embedded here, because embedding it would change
-  the tree it describes. The hashing method was validated against the previous round: it reproduces
-  that round's host-materialised tree exactly, so the reported value is the tree the host will
-  materialise into the candidate commit.
+  the tree it describes. The hashing method was validated against the reviewed candidate: run against
+  the unchanged candidate content it reproduces that host-materialised tree exactly
+  (`1d21b3c1963425f962d829bb9633643a584cd03f`), so the reported value is the tree the host will
+  materialise into the new candidate commit.
 
 Still outstanding, and required before this candidate may be described as green — the migration,
 authority, corruption, failure-injection and concurrency suites for Schema 26 plus the adjacent

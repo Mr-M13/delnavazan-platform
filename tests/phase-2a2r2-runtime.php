@@ -14,6 +14,9 @@
  * Correction round 4 adds the recovery-state enforcement of §5.4: a recovery case records a *failed*
  * collection intent of a still-live cycle, and `recovered` records the accepted R1 evidence that
  * settled the obligation.
+ * Correction round 5 adds the derived cycle mode and collection-intent kind/charge instant, the
+ * authoritative refund-evidence provenance of §5.5, the current-Term protection binding with its
+ * authorised release paths of §5.6, and the fail-closed aggregate reads of §7.3.
  */
 if(getenv('DZN_PHASE_2A2R2_RUNTIME_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-R2 runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2r1-fixture.php';
@@ -86,12 +89,22 @@ $cycles=new RenewalCycleService();
 $guarantee=$cycles->activateManualGuarantee($cycleId,dzn_r2_fix_evidence('guarantee'),dzn_r2_fix_key('guarantee'));
 dzn_r2_fix_assert($guarantee['state']==='guarantee_protected'&&(string)$guarantee['guarantee_deadline_at']!=='' ,'the manual guarantee must protect the same slot until its deadline');
 dzn_r2_fix_rejected(fn()=>$cycles->activateManualGuarantee($cycleId,dzn_r2_fix_evidence('guarantee-again'),dzn_r2_fix_key('guarantee-again')),'invalid_renewal_cycle_state','a second guarantee activation');
+// §5.3: a collection intent opens only on a live `payment_required` cycle, so a guaranteed cycle that is
+// not yet awaiting payment owns no collection.
+$collections=new CollectionIntentService();
+dzn_r2_fix_rejected(fn()=>$collections->openManualPaymentRequired($cycleId,array('obligation_id'=>$funded['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-too-early','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-too-early')),'invalid_renewal_cycle_state','opening a collection intent before the cycle requires payment');
+dzn_r2_fix_assert(dzn_r2_fix_count('collection_intents')===0,'a refused collection intent must not be recorded');
 $cycles->requirePayment($cycleId,dzn_r2_fix_evidence('require'),dzn_r2_fix_key('require'));
 dzn_r2_fix_assert((new RenewalCycleReadService())->one($cycleId)['state']==='payment_required','the cycle must record the payment requirement');
 dzn_r2_fix_assert(in_array('MANUAL_RENEWAL_PAYMENT_REQUIRED',$intents('renewal_cycle',$cycleId),true),'the manual payment-required intent must be recorded');
 
-$collections=new CollectionIntentService();
+// §5.3/§4: the intent kind must be the one the cycle's frozen mode authorises, and the automatic-charge
+// instant is derived from the recorded policy and the cycle's boundary — never asserted by a caller.
+dzn_r2_fix_rejected(fn()=>$collections->scheduleAutomaticCharge($cycleId,array('obligation_id'=>$funded['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-kind','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-kind')),'collection_intent_kind_conflict','an automatic-charge intent on a manual cycle');
+dzn_r2_fix_rejected(fn()=>$collections->openManualPaymentRequired($cycleId,array('obligation_id'=>$funded['obligation_id'],'charge_at'=>gmdate('Y-m-d H:i:s'),'evidence_channel'=>'staff_record','evidence_reference'=>'intent-charge-date','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-charge-date')),'collection_charge_time_not_authoritative','a caller-asserted charge instant');
+dzn_r2_fix_assert(dzn_r2_fix_count('collection_intents')===0,'a refused collection intent must never be recorded');
 $intentId=(int)$collections->openManualPaymentRequired($cycleId,array('obligation_id'=>$funded['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-a','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-a'))['collection_intent_id'];
+dzn_r2_fix_assert((new CollectionReadService())->one($intentId)['charge_at']===null,'a manual collection intent must never carry a charge instant');
 dzn_r2_fix_rejected(fn()=>$collections->openManualPaymentRequired($cycleId,array('obligation_id'=>$funded['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-a-dup','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-a-dup')),'collection_intent_already_exists','a duplicate collection intent for one cycle obligation');
 $collections->submit($intentId,dzn_r2_fix_evidence('submit'),dzn_r2_fix_key('submit'));
 $collections->confirm($intentId,dzn_r2_fix_evidence('confirm-intent'),dzn_r2_fix_key('confirm-intent'));
@@ -125,6 +138,11 @@ dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}l
 
 // 6. Continuous cross-Term protection, then its delegated R1 release.
 $protections=new RecurringProtectionService();
+// §5.6 protects the *current* Term's capacity: the active claim of the cycle's own source Term. The
+// successor-Term claim this renewal just created belongs to the next Term, so it can never be adopted
+// as the protection of this cycle's current-Term window.
+dzn_r2_fix_rejected(fn()=>$protections->establishProtection($cycleId,(int)$nextTerm['claim_id'],dzn_r2_fix_evidence('protection-successor-claim'),dzn_r2_fix_key('protection-successor-claim')),'recurring_protection_claim_conflict','adopting the successor-Term claim as this cycle current-Term protection');
+dzn_r2_fix_assert(dzn_r2_fix_count('recurring_protections')===0,'a refused protection must not be recorded');
 $protectionId=(int)$protections->establishProtection($cycleId,(int)$funded['claim_id'],dzn_r2_fix_evidence('protection'),dzn_r2_fix_key('protection'))['recurring_protection_id'];
 dzn_r2_fix_assert((new RecurringProtectionReadService())->one($protectionId)['state']==='active','protection must establish active over the R1 claim');
 $protections->extendProtection($protectionId,dzn_r2_fix_evidence('extend-protection'),dzn_r2_fix_key('extend-protection'));
@@ -134,18 +152,30 @@ dzn_r2_fix_rejected(fn()=>$protections->establishProtection($cycleId,(int)$funde
 // change, so a cycle may not become terminal while it still owns an active protected claim.
 dzn_r2_fix_rejected(fn()=>$cycles->lapse($cycleId,dzn_r2_fix_evidence('lapse-while-protected'),dzn_r2_fix_key('lapse-while-protected')),'recurring_protection_release_required','a lapse while the cycle still owns an active protection');
 dzn_r2_fix_rejected(fn()=>$cycles->cancel($cycleId,dzn_r2_fix_evidence('cancel-while-protected'),dzn_r2_fix_key('cancel-while-protected')),'recurring_protection_release_required','a cancellation while the cycle still owns an active protection');
-dzn_r2_fix_assert((new RenewalCycleReadService())->one($cycleId)['state']==='collected','a refused terminal transition must leave the cycle state untouched');
-dzn_r2_fix_assert(dzn_r2_fix_count('renewal_cycle_commands','renewal_cycle_id',$cycleId)===4,'a refused terminal transition must not record a command');
+dzn_r2_fix_assert((new RenewalCycleReadService())->one($cycleId)['state']==='term_bound','a refused terminal transition must leave the cycle state untouched');
+dzn_r2_fix_assert(dzn_r2_fix_count('renewal_cycle_commands','renewal_cycle_id',$cycleId)===5,'a refused terminal transition must not record a command');
 $protections->releaseProtection($protectionId,array('evidence_channel'=>'staff_record','evidence_reference'=>'release-protection','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('release-protection'));
 dzn_r2_fix_assert((new RecurringProtectionReadService())->one($protectionId)['state']==='released','protection release must be recorded');
 dzn_r2_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}commercial_capacity_claims WHERE id=%d",(int)$funded['claim_id']))==='released','the underlying R1 claim must be released by the R1 authority');
 dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$funded['claim_id']))===0,'no protected interval may survive the release');
 
-// 7. The refund/reversal review trajectory keeps the academic consequence unresolved.
+// 7. The refund/reversal review trajectory keeps the academic consequence unresolved, and §5.5 admits
+//    only the cycle commitment's *own* authoritative refund evidence as its subject.
 $refunds=new RefundReviewService();
-$refund=(new RefundReviewService())->recordRefundEvidence(array('purchase_id'=>(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}commercial_entitlements WHERE id=%d",(int)$funded['entitlement_id'])),'obligation_id'=>$funded['obligation_id'],'evidence_id'=>(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE obligation_id=%d ORDER BY id LIMIT 1",$funded['obligation_id'])),'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'refund-a','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('refund-a'));
+$fundedPurchase=(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}commercial_entitlements WHERE id=%d",(int)$funded['entitlement_id']));
+$fundedSuccessEvidence=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE obligation_id=%d AND evidence_kind='success' ORDER BY id LIMIT 1",(int)$funded['obligation_id']));
+$refundEvidence=dzn_r2_fix_refund_evidence((int)$funded['offer_id'],(int)$funded['obligation_id'],'authority-a',25000,'AUD');
+$refundInput=array('purchase_id'=>$fundedPurchase,'obligation_id'=>$funded['obligation_id'],'evidence_id'=>$refundEvidence,'kind'=>'refund','amount_minor'=>25000,'currency'=>'AUD','evidence_channel'=>'staff_record','evidence_reference'=>'refund-a','evidence_at'=>gmdate('Y-m-d H:i:s'));
+// An ordinary *successful* payment is not refund evidence; a `reversal` has no authoritative R1
+// representation yet; and a caller-asserted sum the evidence does not carry is refused.
+dzn_r2_fix_rejected(fn()=>(new RefundReviewService())->recordRefundEvidence(array_merge($refundInput,array('evidence_id'=>$fundedSuccessEvidence)),dzn_r2_fix_key('refund-success')),'refund_review_evidence_conflict','representing an ordinary successful payment as a refund');
+dzn_r2_fix_rejected(fn()=>(new RefundReviewService())->recordRefundEvidence(array_merge($refundInput,array('kind'=>'reversal')),dzn_r2_fix_key('refund-reversal')),'reversal_evidence_not_supported','representing a reversal R1 never recorded');
+dzn_r2_fix_rejected(fn()=>(new RefundReviewService())->recordRefundEvidence(array_merge($refundInput,array('amount_minor'=>999)),dzn_r2_fix_key('refund-amount')),'refund_review_amount_conflict','asserting a refund sum the authoritative evidence does not carry');
+dzn_r2_fix_assert(dzn_r2_fix_count('refund_review_cases')===0,'a refused refund review must not be recorded');
+$refund=$refunds->recordRefundEvidence($refundInput,dzn_r2_fix_key('refund-a'));
 $refundId=(int)$refund['refund_review_id'];
 dzn_r2_fix_assert($refund['academic_consequence']===null,'the refund academic consequence must stay unresolved');
+dzn_r2_fix_assert((new RefundReviewReadService())->one($refundId)['amount_minor']===25000,'the review must adopt the exact amount carried by the authoritative refund evidence');
 // §5.1: an open refund/reversal review blocks closure of the recurring enrolment that owns the
 // reviewed purchase, even though every protection and recovery case is already resolved.
 dzn_r2_fix_rejected(fn()=>$enrolmentService->close($recurringId,dzn_r2_fix_evidence('close-while-refund-open'),dzn_r2_fix_key('close-while-refund-open')),'recurring_enrolment_not_closable','closing a recurring enrolment with an open refund review');
@@ -167,8 +197,15 @@ $recurringB=dzn_r2_fix_establish($recoveryFunding['enrolment_id'],'authority-b')
 // Another Enrolment's canonical Term may never seed this recurring enrolment's boundary.
 dzn_r2_fix_rejected(fn()=>(new RenewalCycleService())->openCycle($recurringB,array('source_term_id'=>(int)$funded['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-foreign-term','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-foreign-term')),'canonical_source_term_required','a cycle opened against another Enrolment Term');
 dzn_r2_fix_assert(dzn_r2_fix_count('renewal_cycles','recurring_enrolment_id',$recurringB)===0,'a refused cycle open must not create a cycle for the foreign Term');
+// §5.1/§5.2: the cycle snapshots the *recorded* mode of its recurring enrolment. The enrolment is
+// switched to automatic through the audited append-only mode change, and a caller-supplied mode that
+// contradicts the recorded one is refused instead of opening a cycle the enrolment never recorded.
+$enrolmentService->setCollectionMode($recurringB,array('collection_mode'=>'automatic','evidence_channel'=>'staff_record','evidence_reference'=>'mode-b-auto','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('mode-b-auto'));
+dzn_r2_fix_rejected(fn()=>(new RenewalCycleService())->openCycle($recurringB,array('source_term_id'=>$recoveryFunding['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-b-mode-conflict','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-b-mode-conflict')),'recurring_collection_mode_conflict','opening a cycle in a mode the recurring enrolment does not record');
+dzn_r2_fix_assert(dzn_r2_fix_count('renewal_cycles','recurring_enrolment_id',$recurringB)===0,'a refused mode conflict must not create a cycle');
 $cycleB=(new RenewalCycleService())->openCycle($recurringB,array('source_term_id'=>$recoveryFunding['term_id'],'collection_mode'=>'automatic','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-b','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-b'));
 $cycleBId=(int)$cycleB['renewal_cycle_id'];
+dzn_r2_fix_assert((string)$cycleB['collection_mode']==='automatic'&&(new RenewalCycleReadService())->one($cycleBId)['collection_mode']==='automatic','the cycle must snapshot the recorded collection mode of its recurring enrolment');
 // Another Student's settled obligation may never be presented as this cycle's collection obligation.
 dzn_r2_fix_rejected(fn()=>$collections->openManualPaymentRequired($cycleBId,array('obligation_id'=>(int)$funded['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-foreign','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-foreign')),'collection_obligation_ownership_conflict','a collection intent against another Student obligation');
 dzn_r2_fix_assert(dzn_r2_fix_count('collection_intents','renewal_cycle_id',$cycleBId)===0,'a refused collection intent must not be recorded');
@@ -206,9 +243,13 @@ dzn_r2_fix_rejected(fn()=>$cycles->lapse($cycleBId,dzn_r2_fix_evidence('lapse-cy
 $cycles->close($cycleId,dzn_r2_fix_evidence('close-cycle'),dzn_r2_fix_key('close-cycle'));
 dzn_r2_fix_assert((new RenewalCycleReadService())->one($cycleId)['state']==='closed','a term-bound cycle must close');
 
-// 10. A close must be refused while an open recovery case exists on the same recurring enrolment.
-$cycleB2=(new RenewalCycleService())->openCycle($recurringB,array('source_term_id'=>$recoveryFunding['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-b2'));
+// 10. A close must be refused while an open recovery case exists on the same recurring enrolment, and
+//     §5.6 releases a predecessor claim only once its successor is durable or a terminal path ends the
+//     renewal.
+$enrolmentService->setCollectionMode($recurringB,array('collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'mode-b-manual','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('mode-b-manual'));
+$cycleB2=(new RenewalCycleService())->openCycle($recurringB,array('source_term_id'=>$recoveryFunding['term_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'cycle-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-b2'));
 $cycleB2Id=(int)$cycleB2['renewal_cycle_id'];
+$cycles->requirePayment($cycleB2Id,dzn_r2_fix_evidence('require-b2'),dzn_r2_fix_key('require-b2'));
 $intentB2=(int)$collections->openManualPaymentRequired($cycleB2Id,array('obligation_id'=>$recoveryFunding['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-b2'))['collection_intent_id'];
 $collections->submit($intentB2,dzn_r2_fix_evidence('submit-b2'),dzn_r2_fix_key('submit-b2'));
 $collections->recordFailure($intentB2,array('failure_reason_code'=>'declined','evidence_channel'=>'staff_record','evidence_reference'=>'failed-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('failed-b2'));
@@ -217,9 +258,19 @@ dzn_r2_fix_rejected(fn()=>$enrolmentService->close($recurringB,dzn_r2_fix_eviden
 // Protection may not be established across a terminal cycle either.
 $lapsedCycleProtection=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}renewal_cycles WHERE recurring_enrolment_id=%d AND state='lapsed'",$recurringB));
 dzn_r2_fix_rejected(fn()=>$protections->establishProtection((int)$lapsedCycleProtection,(int)$recoveryFunding['claim_id'],dzn_r2_fix_evidence('protection-c'),dzn_r2_fix_key('protection-c')),'invalid_renewal_cycle_state','protection across a lapsed cycle');
-$recoveries->recordRecoveryAttempt($recoveryB2,dzn_r2_fix_evidence('attempt-b2'),dzn_r2_fix_key('attempt-b2'));
-$recoveries->markRecovered($recoveryB2,dzn_r2_fix_evidence('recovered-b2'),dzn_r2_fix_key('recovered-b2'));
-dzn_r2_fix_assert(in_array('PAYMENT_RECOVERED',$intents('recovery_case',$recoveryB2),true),'a recovered recovery case must record the recovered intent');
+// The cycle's own current-Term claim is adopted, and the live cycle has no successor yet: a release
+// would drop protected capacity the renewal still owns, so it fails closed.
+$protectionB2=(int)$protections->establishProtection($cycleB2Id,(int)$recoveryFunding['claim_id'],dzn_r2_fix_evidence('protection-b2'),dzn_r2_fix_key('protection-b2'))['recurring_protection_id'];
+dzn_r2_fix_rejected(fn()=>$protections->releaseProtection($protectionB2,array('evidence_channel'=>'staff_record','evidence_reference'=>'release-b2-early','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('release-b2-early')),'renewal_successor_not_durable','releasing a predecessor before its successor is durable');
+dzn_r2_fix_assert((new RecurringProtectionReadService())->one($protectionB2)['state']==='active','a refused release must leave the protection active');
+dzn_r2_fix_assert((string)dzn_r2_fix_column('commercial_capacity_claims',(int)$recoveryFunding['claim_id'],'state')==='active','a refused release must never touch the R1 protected capacity');
+// An explicit, evidenced terminal recovery lapse is an authorised terminal path: the renewal has
+// ended, so the predecessor's capacity may return to the Teacher.
+$recoveries->markLapsed($recoveryB2,array('policy_unset_authorisation'=>true,'evidence_channel'=>'staff_record','evidence_reference'=>'terminal-lapse-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('terminal-lapse-b2'));
+$protections->releaseProtection($protectionB2,array('evidence_channel'=>'staff_record','evidence_reference'=>'release-b2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('release-b2'));
+dzn_r2_fix_assert((new RecurringProtectionReadService())->one($protectionB2)['state']==='released','a terminal-lapse release must be recorded');
+dzn_r2_fix_assert((string)dzn_r2_fix_column('commercial_capacity_claims',(int)$recoveryFunding['claim_id'],'state')==='released','the terminal-lapse release must release the R1 claim');
+dzn_r2_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_capacity_claim_intervals WHERE claim_id=%d AND state='protected'",(int)$recoveryFunding['claim_id']))===0,'no protected interval may survive the terminal-lapse release');
 $enrolmentService->close($recurringB,dzn_r2_fix_evidence('close-b'),dzn_r2_fix_key('close-b'));
 dzn_r2_fix_assert((new RecurringEnrolmentReadService())->one($recurringB)['state']==='closed','the recurring enrolment must close once no recovery case is open');
 
@@ -280,6 +331,7 @@ dzn_r2_fix_assert(dzn_r2_fix_count('refund_review_cases')===1,'a refused refund 
 //     live cycle, and `recovered` records the exact R1 evidence that settled the obligation.
 $cycleD=(new RenewalCycleService())->openCycle($recurringC,array('source_term_id'=>(int)$foreign['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-d','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-d'));
 $cycleDId=(int)$cycleD['renewal_cycle_id'];
+$cycles->requirePayment($cycleDId,dzn_r2_fix_evidence('require-d'),dzn_r2_fix_key('require-d'));
 $intentD=(int)$collections->openManualPaymentRequired($cycleDId,array('obligation_id'=>(int)$foreign['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-d','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-d'))['collection_intent_id'];
 // A pending or submitted intent is not a failed one, so neither may seed a recovery case.
 $recoveryCases=dzn_r2_fix_count('recovery_cases');
@@ -307,6 +359,7 @@ dzn_r2_fix_assert((new RecoveryReadService())->one($recoveryD)['state']==='recov
 // A terminal cycle is never reopened: a failed intent of a lapsed/cancelled cycle seeds no case.
 $cycleE=(new RenewalCycleService())->openCycle($recurringC,array('source_term_id'=>(int)$foreign['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'cycle-e','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-e'));
 $cycleEId=(int)$cycleE['renewal_cycle_id'];
+$cycles->requirePayment($cycleEId,dzn_r2_fix_evidence('require-e'),dzn_r2_fix_key('require-e'));
 $intentE=(int)$collections->openManualPaymentRequired($cycleEId,array('obligation_id'=>(int)$foreign['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'intent-e','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('intent-e'))['collection_intent_id'];
 $collections->submit($intentE,dzn_r2_fix_evidence('submit-e'),dzn_r2_fix_key('submit-e'));
 $collections->recordFailure($intentE,array('failure_reason_code'=>'declined','evidence_channel'=>'staff_record','evidence_reference'=>'failed-e','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('failed-e'));
@@ -314,7 +367,22 @@ $cycles->cancel($cycleEId,dzn_r2_fix_evidence('cancel-e'),dzn_r2_fix_key('cancel
 dzn_r2_fix_rejected(fn()=>$recoveries->openRecovery($intentE,dzn_r2_fix_evidence('recovery-e'),dzn_r2_fix_key('recovery-e')),'invalid_renewal_cycle_state','opening a recovery case on a terminal cycle');
 dzn_r2_fix_assert((string)dzn_r2_fix_column('renewal_cycles',$cycleEId,'state')==='cancelled','a refused recovery must never reopen a terminal cycle');
 
-// 14. Every intent name recorded so far is a member of the finalised channel-neutral set.
+// 14. An R1-side resolution of the protected claim is the third authorised terminal path (§5.6): once
+//     R1 has durably released the claim, R2 must be able to record that terminal fact instead of
+//     leaving a live protection behind a released claim that no later command could ever clear.
+$resolutionFunding=dzn_r2_fix_funded_enrolment($fixture['sources'][3],'authority-e',5);
+$recurringE=dzn_r2_fix_establish($resolutionFunding['enrolment_id'],'authority-e');
+$cycleF=(new RenewalCycleService())->openCycle($recurringE,array('source_term_id'=>$resolutionFunding['term_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'cycle-f','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('cycle-f'));
+$cycleFId=(int)$cycleF['renewal_cycle_id'];
+$protectionF=(int)$protections->establishProtection($cycleFId,(int)$resolutionFunding['claim_id'],dzn_r2_fix_evidence('protection-f'),dzn_r2_fix_key('protection-f'))['recurring_protection_id'];
+dzn_r1_fix_release_claim((int)$resolutionFunding['claim_id'],'r1-resolution-e');
+dzn_r2_fix_rejected(fn()=>$cycles->cancel($cycleFId,dzn_r2_fix_evidence('cancel-f-early'),dzn_r2_fix_key('cancel-f-early')),'recurring_protection_release_required','a cycle may not terminate while it still owns an unreleased protection');
+$protections->releaseProtection($protectionF,array('evidence_channel'=>'staff_record','evidence_reference'=>'release-f','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('release-f'));
+dzn_r2_fix_assert((new RecurringProtectionReadService())->one($protectionF)['state']==='released','an R1-resolved claim must let R2 record the terminal protection');
+$cycles->cancel($cycleFId,dzn_r2_fix_evidence('cancel-f'),dzn_r2_fix_key('cancel-f'));
+dzn_r2_fix_assert((new RenewalCycleReadService())->one($cycleFId)['state']==='cancelled','the cycle may terminate once its protection is released');
+
+// 15. Every intent name recorded so far is a member of the finalised channel-neutral set.
 $recorded=$wpdb->get_col("SELECT DISTINCT event_type FROM {$p}platform_outbox")?:array();
 dzn_r2_fix_assert(count($recorded)>0,'the notification-intent seam must have been exercised');
 foreach($recorded as $intent)dzn_r2_fix_assert(in_array($intent,\Delnavazan\Platform\Core\Application\RecurringRule::NOTIFICATION_INTENTS,true),'an unrecorded intent name escaped the finalised set: '.$intent);

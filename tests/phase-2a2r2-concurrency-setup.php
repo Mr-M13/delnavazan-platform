@@ -36,6 +36,8 @@ if($mode==='renewal_vs_schedule'){
 }elseif($mode==='recovery_vs_satisfaction'){
     $pair=$duo($mode);
     $cycle=(new \Delnavazan\Platform\Core\Application\RenewalCycleService())->openCycle($pair['recurring_a'],array('source_term_id'=>$pair['funded_a']['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'race-cycle','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-cycle'));
+    // §5.3: a collection intent only opens on a cycle that requires payment.
+    (new \Delnavazan\Platform\Core\Application\RenewalCycleService())->requirePayment((int)$cycle['renewal_cycle_id'],dzn_r2_fix_evidence('race-require'),dzn_r2_fix_key('race-require'));
     $intent=(new \Delnavazan\Platform\Core\Application\CollectionIntentService())->openManualPaymentRequired((int)$cycle['renewal_cycle_id'],array('obligation_id'=>$pair['funded_a']['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'race-intent','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-intent'));
     (new \Delnavazan\Platform\Core\Application\CollectionIntentService())->submit((int)$intent['collection_intent_id'],dzn_r2_fix_evidence('race-submit'),dzn_r2_fix_key('race-submit'));
     (new \Delnavazan\Platform\Core\Application\CollectionIntentService())->recordFailure((int)$intent['collection_intent_id'],array('failure_reason_code'=>'declined','evidence_channel'=>'staff_record','evidence_reference'=>'race-failed','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-failed'));
@@ -45,18 +47,32 @@ if($mode==='renewal_vs_schedule'){
     $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a'],'cycle'=>array('cycle_id'=>(int)$cycle['renewal_cycle_id']),'intent_id'=>(int)$intent['collection_intent_id'],'recovery_id'=>(int)$recovery['recovery_case_id'],'free'=>$free,'target'=>array('local_wall_date'=>(string)$target->local_wall_date,'local_wall_time'=>(string)$target->local_wall_time,'schedule_timezone'=>(string)$target->schedule_timezone)));
 }elseif($mode==='release_vs_succession'){
     $pair=$duo($mode);
-    $cycle=(new \Delnavazan\Platform\Core\Application\RenewalCycleService())->openCycle($pair['recurring_a'],array('source_term_id'=>$pair['funded_a']['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'race-cycle','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-cycle'));
-    $protection=(new \Delnavazan\Platform\Core\Application\RecurringProtectionService())->establishProtection((int)$cycle['renewal_cycle_id'],(int)$pair['funded_a']['claim_id'],dzn_r2_fix_evidence('race-protection'),dzn_r2_fix_key('race-protection'));
-    $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a'],'cycle'=>array('cycle_id'=>(int)$cycle['renewal_cycle_id']),'protection_id'=>(int)$protection['recurring_protection_id']));
+    // §5.6: a predecessor protection may only be released once its successor Term is durable, so the
+    // pre-state runs the ordinary R1 next-Term chain to a durable successor Term and capacity claim.
+    $cycles=new \Delnavazan\Platform\Core\Application\RenewalCycleService();
+    $collections=new \Delnavazan\Platform\Core\Application\CollectionIntentService();
+    $cycle=$cycles->openCycle($pair['recurring_a'],array('source_term_id'=>$pair['funded_a']['term_id'],'collection_mode'=>'manual','evidence_channel'=>'staff_record','evidence_reference'=>'race-cycle','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-cycle'));
+    $cycleId=(int)$cycle['renewal_cycle_id'];
+    $cycles->requirePayment($cycleId,dzn_r2_fix_evidence('race-require'),dzn_r2_fix_key('race-require'));
+    $intent=(int)$collections->openManualPaymentRequired($cycleId,array('obligation_id'=>$pair['funded_a']['obligation_id'],'evidence_channel'=>'staff_record','evidence_reference'=>'race-intent','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-intent'))['collection_intent_id'];
+    $collections->submit($intent,dzn_r2_fix_evidence('race-submit'),dzn_r2_fix_key('race-submit'));
+    $collections->confirm($intent,dzn_r2_fix_evidence('race-confirm'),dzn_r2_fix_key('race-confirm'));
+    $cycles->confirmCollection($cycleId,dzn_r2_fix_evidence('race-collect'),dzn_r2_fix_key('race-collect'));
+    $next=dzn_r2_fix_next_term_entitlement($fixture['sources'][0],(int)$pair['funded_a']['product_id'],'race-succession',4);
+    (new \Delnavazan\Platform\Core\Application\CanonicalTermAuthorityService())->close((int)$pair['funded_a']['term_id'],'current',dzn_r2_fix_evidence('race-close-term'),dzn_r2_fix_key('race-close-term'));
+    $bound=$cycles->bindNextTerm($cycleId,(int)$next['entitlement_id'],array('expected_latest_term_id'=>(int)$pair['funded_a']['term_id'],'expected_latest_state'=>'closed','evidence_channel'=>'staff_record','evidence_reference'=>'race-bind','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_r2_fix_key('race-bind'));
+    $protection=(new \Delnavazan\Platform\Core\Application\RecurringProtectionService())->establishProtection($cycleId,(int)$pair['funded_a']['claim_id'],dzn_r2_fix_evidence('race-protection'),dzn_r2_fix_key('race-protection'));
+    $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a'],'cycle'=>array('cycle_id'=>$cycleId),'next'=>array('entitlement_id'=>(int)$next['entitlement_id'],'claim_id'=>(int)$next['claim_id'],'term_id'=>(int)$bound['next_term_id']),'protection_id'=>(int)$protection['recurring_protection_id']));
 }elseif($mode==='mode_change_vs_cycle'){
     $pair=$duo($mode);
     $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a']));
 }elseif($mode==='refund_vs_settlement'){
     $pair=$duo($mode);
     $purchaseId=(int)$wpdb->get_var($wpdb->prepare("SELECT purchase_id FROM {$p}commercial_entitlements WHERE id=%d",(int)$pair['funded_a']['entitlement_id']));
-    $evidenceId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}commercial_payment_evidence WHERE obligation_id=%d ORDER BY id LIMIT 1",$pair['funded_a']['obligation_id']));
+    // §5.5: the review's subject is the commitment's own authoritative refund evidence.
+    $refundEvidence=dzn_r2_fix_refund_evidence((int)$pair['funded_a']['offer_id'],(int)$pair['funded_a']['obligation_id'],'race',25000,'AUD');
     $offerUid=(string)$wpdb->get_var($wpdb->prepare("SELECT offer_uid FROM {$p}commercial_offers WHERE id=%d",(int)$pair['funded_a']['offer_id']));
-    $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a'],'purchase_id'=>$purchaseId,'evidence_id'=>$evidenceId,'offer_uid'=>$offerUid));
+    $state=array_merge($state,array('funded'=>$pair['funded_a'],'recurring'=>$pair['recurring_a'],'purchase_id'=>$purchaseId,'evidence_id'=>$refundEvidence,'offer_uid'=>$offerUid));
 }elseif($mode==='unrelated_recurring_enrolments'){
     $pair=$duo($mode);
     $state=array_merge($state,array('funded_a'=>$pair['funded_a'],'recurring_a'=>$pair['recurring_a'],'funded_b'=>$pair['funded_b'],'recurring_b'=>$pair['recurring_b']));

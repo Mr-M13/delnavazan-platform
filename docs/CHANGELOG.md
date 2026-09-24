@@ -146,7 +146,59 @@ or delivery path was added.
   `tests/phase-2a2r2-contract.php` asserts the enforcement points and the shared vocabulary; the
   failure-injection suite opens its recovery case while the intent is still failed.
 
-- State: `CANDIDATE — AWAITING INDEPENDENT REVIEW`. The delivered 403-file tree hash is reported in
+### Correction round 5 (independent review of the host-materialized candidate failed on five findings)
+
+The independent review of the host-materialized candidate (host correction round 2 of this task chain;
+failed candidate `98b01601a8005efada67553fc1b5a4bba7d284bc`, tree
+`1d21b3c1963425f962d829bb9633643a584cd03f`) returned **FAIL — CORRECTION REQUIRED** on five blocking
+findings. All five are closed here, additive to the authority above and with no product policy,
+provider column, lock, Term/Lesson/schedule writer or delivery path added.
+
+- **Refund/reversal provenance (§5.5).** `record_refund_evidence` no longer accepts any accepted payment
+  evidence with a caller-supplied kind and sum. The reviewed evidence must be that purchase's and
+  obligation's *accepted* evidence of exactly the reviewed kind, and its exact amount and currency
+  become the recorded review sum; a caller value that disagrees fails closed
+  (`refund_review_evidence_conflict`, `refund_review_amount_conflict`). A `reversal` has no
+  authoritative R1 representation (`CommercialRule::EVIDENCE_KINDS` records none), so it is refused with
+  `reversal_evidence_not_supported` rather than dressing an ordinary successful payment as one.
+- **Derived cycle mode (§5.1/§5.2).** `open_cycle` no longer accepts a free `collection_mode`. It locks
+  and reads the recurring enrolment and snapshots *its* recorded mode; a caller that supplies a
+  different mode fails closed with `recurring_collection_mode_conflict`.
+- **Derived collection intent (§4/§5.3).** A collection intent opens only on a live `payment_required`
+  cycle (`invalid_renewal_cycle_state`), only in the kind the cycle's frozen mode authorises
+  (`collection_intent_kind_conflict`), and its `charge_at` is derived solely through the single
+  `RenewalCycleService::automaticChargeAt()` seam from the recorded
+  `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` policy and the cycle's own boundary. A caller-supplied charge
+  instant is refused (`collection_charge_time_not_authoritative`), so the unset-policy safe default can
+  no longer be bypassed.
+- **Current-Term protection ownership and release authority (§5.6).** Protection binds the active claim
+  of the cycle's own recorded `source_term_id` for its own Student and Course — the successor-Term claim
+  the renewal itself creates can never be adopted (`recurring_protection_claim_conflict`) — and the live
+  cycle state is re-proved inside the serialised transaction. `release_protection` now requires a
+  durable successor (the next Term's own R1 funding plan and its capacity claim) or an authorised
+  terminal path (the claim already released in R1, a `lapsed`/`cancelled` cycle, or an explicit
+  evidenced terminal recovery lapse of that very cycle); anything else fails closed with
+  `renewal_successor_not_durable` *before* any R1 capacity is touched, so a release either adopts a
+  durable fact or records one R2 is authorised to record.
+- **Fail-closed aggregate reads (§7.3).** Every read model now proves its aggregate before returning it:
+  gap-free contiguous `event_sequence`, a leading null `from_state`, a chain in which each event
+  continues from its predecessor, only legal transitions and event types from one locked rule table,
+  the final event agreeing with the recorded current state, a recorded aggregate version equal to the
+  number of events that advanced it (every event except the version-neutral `extended`), and the linked
+  ownership facts (Enrolment, source Term, cycle obligation, recovery cycle/intent, reviewed
+  purchase/obligation/evidence, protection claim Term). A row rewritten to `closed` while its history
+  still ends at `established` is now refused rather than returned as authority. The recovery attempt
+  event also now uses its declared `attempt_recorded` type instead of the state name, so the locked event
+  vocabulary is the vocabulary the services actually write.
+
+`tests/phase-2a2r2-runtime.php` exercises every new guard (including the terminal-lapse release path and
+the successor-Term claim refusal), `tests/phase-2a2r2-corruption-runtime.php` adds rewritten-row and
+rewritten-history probes plus the exact refund-evidence provenance, `tests/phase-2a2r2-failure-runtime.php`
+re-orders its protection block behind the delegated binding so the release is authorised, the concurrency
+pre-state now builds a durable successor for `release_vs_succession` and a real refund evidence for
+`refund_vs_settlement`, and `tests/phase-2a2r2-contract.php` asserts all of the above.
+
+- State: `CANDIDATE — AWAITING INDEPENDENT REVIEW`. The delivered 404-file tree hash is reported in
   the task handover (embedding it here would change the tree it describes). No provider call,
   credential, notification delivery, Theme change, merge or deployment occurred. **No §11 runtime
   suite has been executed
@@ -154,7 +206,7 @@ or delivery path was added.
   Docker daemon, so the migration, authority, corruption, failure-injection and concurrency suites
   plus the adjacent regressions must still be run on the disposable local runtime (exact commands in
   `PHASE-2A-2R2-RENEWAL-NEXT-TERM-COLLECTION-RECOVERY-AUTHORITY.md`). Structural evidence only:
-  balance/lint pass over 347 PHP files, installer↔verifier and service↔schema column cross-checks,
+  balance/lint pass over 348 PHP files, installer↔verifier and service↔schema column cross-checks,
   reference resolution, forbidden-surface scan, `git diff --check`, `sh -n`, and the runner
   executable bits.
 
