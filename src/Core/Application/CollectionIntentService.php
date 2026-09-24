@@ -30,9 +30,14 @@ final class CollectionIntentService {
             // §5.3: a collection intent opens only on a live `payment_required` cycle, only for an
             // obligation of that cycle's own commitment, and only in the kind its frozen mode authorises.
             $cycle=$this->assertCycleCollection($cycleId,$kind,$obligationId);
-            // The charge instant follows the cycle's own frozen mode, so a manual cycle can never carry
-            // one however it is asked, and an automatic one only gets the instant its policy authorises.
-            $chargeAt=RenewalCycleService::automaticChargeAt((string)$cycle['collection_mode'],(string)$cycle['boundary_derived_at']);
+            // §6.2.4(b)(4): the charge instant is read from the cycle's own persisted, immutable column —
+            // the same instant the advance notice announced — and never re-derived from the current
+            // `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` policy. Re-deriving here would let the charged instant
+            // diverge from the announced one after a policy version, so the persisted value is the only
+            // authoritative source. A manual cycle can never carry a charge instant, and an automatic
+            // cycle whose open transaction recorded none never acquires one later.
+            $chargeAt=(string)$cycle['collection_mode']==='automatic'?$cycle['automatic_charge_at']:null;
+            $chargeAt=$chargeAt===null||trim((string)$chargeAt)===''?null:(string)$chargeAt;
             $payload=RecurringIdempotency::payload(array('domain'=>RecurringRule::DOMAIN,'operation'=>'open_collection_intent','renewal_cycle_id'=>$cycleId,'obligation_id'=>$obligationId,'kind'=>$kind,'charge_at'=>$chargeAt,'evidence_reference_digest'=>$evidence['digest']));
             if($winner=$this->repository->command($digest)){$result=$this->replay($winner,$payload);$this->repository->commit();return $result;}
             // Only a live, payment-required cycle opens a *new* collection intent; an unchanged command
@@ -196,7 +201,7 @@ final class CollectionIntentService {
      */
     private function assertCycleCollection(int $cycleId,string $kind,int $obligationId):array{
         global $wpdb;$p=$wpdb->prefix.'dzn_';
-        $cycle=$wpdb->get_row($wpdb->prepare("SELECT c.currency AS currency,c.state AS state,c.collection_mode AS collection_mode,c.boundary_derived_at AS boundary_derived_at,r.student_id AS student_id,r.course_id AS course_id FROM {$p}renewal_cycles c JOIN {$p}recurring_enrolments r ON r.id=c.recurring_enrolment_id WHERE c.id=%d",$cycleId));
+        $cycle=$wpdb->get_row($wpdb->prepare("SELECT c.currency AS currency,c.state AS state,c.collection_mode AS collection_mode,c.boundary_derived_at AS boundary_derived_at,c.automatic_charge_at AS automatic_charge_at,r.student_id AS student_id,r.course_id AS course_id FROM {$p}renewal_cycles c JOIN {$p}recurring_enrolments r ON r.id=c.recurring_enrolment_id WHERE c.id=%d",$cycleId));
         if(!$cycle)throw new \InvalidArgumentException('renewal_cycle_required');
         // Ownership of the referenced R1 obligation is proven first: another Student's, Course's or
         // currency's obligation can never be presented as this cycle's collection, whatever the cycle's
@@ -206,6 +211,6 @@ final class CollectionIntentService {
             ||(int)$obligation->student_id!==(int)$cycle->student_id
             ||(int)$obligation->course_id!==(int)$cycle->course_id
             ||(string)$obligation->currency!==(string)$cycle->currency)throw new \InvalidArgumentException('collection_obligation_ownership_conflict');
-        return array('state'=>(string)$cycle->state,'collection_mode'=>(string)$cycle->collection_mode,'boundary_derived_at'=>(string)$cycle->boundary_derived_at,'currency'=>(string)$cycle->currency);
+        return array('state'=>(string)$cycle->state,'collection_mode'=>(string)$cycle->collection_mode,'boundary_derived_at'=>(string)$cycle->boundary_derived_at,'automatic_charge_at'=>$cycle->automatic_charge_at,'currency'=>(string)$cycle->currency);
     }
 }

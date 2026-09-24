@@ -3,6 +3,157 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-S — Canonical Notification & Communications Authority — candidate, unmerged — 2026-09-24
+
+Schema 27 / migration `027_notification_communications_authority` / build
+`phase2a2s-notification-communications-authority-20260924.1`. Additive only: it extends the shared
+`platform_outbox` seam and adds the S-owned notification storage, and preserves every Phase-1/R1/R2 row.
+
+### Implementation correction round (independent review of candidate `a35d4f4`)
+
+Five blocking findings were corrected in the product code; the schema identity, table count, migration
+name and build identity are unchanged and no merge or deploy is involved.
+
+- The dispatch claim now normalizes its evidence envelope and writes it on every history row it appends, so
+  a lease can actually be acquired (`claim_lease` no longer passes `null` to `event_row`).
+- The claim path re-evaluates the complete frozen eligibility set — subject, recipient, consent, guardian
+  authority and the active suppression, all resolved through their own read sources — proves the frozen
+  rule set against its digest, records the bound-evidence digest, and closes a no-longer-eligible
+  notification in its controlled terminal state without a lease. `re_evaluate_eligibility` runs the same
+  guard, and `hand_off` performs a full successful re-evaluation as an unavoidable prerequisite.
+- The claim set requires the derived window to be open, and each claim pass first expires overdue queued
+  work in one transaction per row (`expired`/`retry_window_exhausted`, outbox row closed in place), so a
+  notification can never be sent outside its mandatory window.
+- One shared aggregate verification re-derives the persisted schedule and identity, checks the outbox
+  mirror, and proves every closed attempt's closure partition and persisted retry schedule; it now runs in
+  `NotificationReadService`, `NotificationAttemptReadService`, the dispatch claim path and
+  `verify_notification_communications_schema`.
+- Observation resolves the version's active template version, freezes the immutable rendered-parameter
+  snapshot in the observation transaction (failing closed with `template_variable_mismatch` /
+  `envelope_decrypt_failure`), persists both `template_version_id` and `rendered_snapshot_id`, and
+  hand-off builds its channel-neutral command from that frozen snapshot.
+
+### Implementation correction round 2 (independent review of candidate `9dabd56`)
+
+Four blocking findings were corrected in the product code; the schema identity, table count and build
+identity are unchanged, the only schema addition is one nullable column inside migration 027, and no merge
+or deploy is involved.
+
+- The transport command is a strict allowlist: `NotificationDispatchService::authorisedCommand()` takes no
+  caller input and returns exactly the six frozen fields — `notification_key_digest`, `attempt_sequence`,
+  `audience`, `template_version_id`, `variable_codes` and the decrypted parameter map — each read from the
+  persisted aggregate and its proved snapshot. The merge of caller input and the post-hoc `unset` loop are
+  gone, so no raw payload, provider-specific field or operator envelope can reach
+  `NotificationTransportPort`.
+- The claim proves the aggregate under its own locks: `claim_lease()` now runs the new `aggregateGuard()`
+  while the notification and outbox rows are locked and before any eligibility verdict or lease, re-deriving
+  the frozen composition and policy, the persisted tier-F instants, the frozen identity and the attempt
+  history and passing them to `NotificationIntegrity::aggregateIntegrity()`. A corrupted schedule,
+  identity, mirror or prior closure refuses the claim whole.
+- An attempt that is already open when the dispatch-time re-evaluation refuses the notification now closes
+  as its own audited fourth closure class, `eligibility_abort` (a correction-round addition to the §14
+  diagnostic vocabulary, recorded here with its `eligibility_abort_invalid` refusal code): it carries the refusal code identically on
+  the attempt (`outcome_code`) and the notification (`failure_reason_code`), closes the notification in the
+  controlled state that code maps to (one shared `NotificationRule::controlledState()`), appends its own
+  `failed` attempt event, derives and persists no retry schedule and re-arms nothing, so it is never
+  represented as — or rejected as — a retry closure. `NotificationIntegrity::closureIntegrity()` gained the
+  matching partition and the `eligibility_abort_invalid` diagnostic, and `FAILURE_CLASSES` stays the closed
+  caller-declarable vocabulary so only the refusal path can write the abort class.
+- The canonical rendered-template variable contract is now persisted and proved:
+  `notification_template_versions.variable_contract` (nullable `varchar(191)`) holds the sorted,
+  deduplicated allowlisted codes as comma-separated text, with the digest and required count *derived* from
+  exactly that text at registration; `NotificationIntegrity::variableContract()` /
+  `renderParameters()` / `renderedSnapshot()` require the declared code set, the encrypted parameter keys
+  and the canonical key-ordered `params_digest` to equal the contract exactly. Snapshot freeze, hand-off,
+  the template read seam and the schema verifier all enforce it, so a snapshot can no longer claim an
+  arbitrary required code set while encrypting a different or empty parameter map.
+
+Two coherence repairs accompany them: `NotificationRetry::exhaustionReasonCode()` is now the single
+mapping from an exhaustion gate to its closed reason code (both the closure path and lease-expiry recovery
+use it), and the static contract suite asserts the draft-only rule guard over the sources that perform the
+guarded write (the workflow service and its repository, per §6.2/§7.2) instead of the migration installer.
+
+### Implementation correction round 3 (independent review of candidate `902b060`)
+
+Three blocking findings were corrected in the product code; the schema identity, table count, migration
+name and build identity are unchanged, no schema object is added, and no merge or deploy is involved.
+
+- **Attempt transitions are enforced.** The hand-off is now a durable, idempotent reservation: `hand_off()`
+  commits the exact `leased → handed_off` transition plus its digest-only `hand_off` command row (guarded on
+  the persisted source state, on the outbox row carrying the *same* lease token and on a lease that has not
+  elapsed, under the §10 lock order aggregate → outbox row → attempt row) **before** it calls
+  `NotificationTransportPort`. A repeated hand-off of an already reserved attempt, and a replay of the same
+  key, both return the persisted reservation without a second port call; an elapsed lease is refused
+  outright because recovery owns it. `record_outcome` now admits an acknowledgement only from `handed_off`
+  and a closure only from an open (`leased`/`handed_off`) attempt, refusing anything else with
+  `notification_attempt_state_conflict`. `NotificationIntegrity::attemptHistoryIntegrity()` (new) proves
+  every persisted history — contiguity from attempt 1, the closed state vocabulary, a contiguous chain of
+  legal transitions ending on the persisted state, the open/closed marker agreeing with that state, at most
+  one open attempt and never an open attempt beside a terminal notification — reporting
+  `attempt_lifecycle_invalid`, and the shared aggregate verification runs it in every protected read, every
+  dispatch claim, the attempt read seam and the schema verifier.
+- **A terminal command resolves the live lease it finds.** `cancel`/`expire`/`suppress` now close the open
+  attempt inside their own transaction through a fifth, audited closure class: the attempt closes
+  `abandoned` with `failure_class = 'lease_cancelled'` and `outcome_code` equal to the terminal state the
+  command produced, appends its own attempt event, persists no retry schedule and re-arms nothing, while the
+  outbox row closes consistently. `closureIntegrity()` gained the matching partition and the
+  `lease_cancellation_invalid` refusal code, `notification_lifecycle` gained the `handed_off|abandoned` and
+  `dispatching|queued` transitions, `release_lease` now closes through the same bounded ceiling-first
+  two-gate path as every other non-terminal closure (it previously wrote an undeclared `abandoned` attempt
+  that no partition could judge), `erase_recipient` takes the root lock inside its own transaction, and a
+  terminal notification with an open attempt is refused by aggregate integrity. The claim guard also
+  re-validates `available_at`/`scheduled_for` under the lock, so a deferral or retry that moved the instant
+  can no longer be leased.
+- The §10 lock order is now uniform: `record_outcome` and `recover_expired_leases` previously locked the
+  attempt row first and the aggregate second, which inverted the fixed order every other path (claim,
+  hand-off reservation, terminal command, overdue expiry, erasure) already uses. Both now discover the ids
+  by an unlocked read and then lock aggregate → outbox row → attempt row, so a hand-off racing a closure on
+  one attempt can no longer deadlock, and the static contract suite asserts the order on both paths.
+- **The concurrency harness drives the complete §15 matrix.** The runner declares `MODES` in the contract's
+  own order and the setup, worker and verifier each implement every one of the fourteen modes
+  (`dispatch_vs_retry`, `lease_expiry_vs_handoff`, `retry_exhaustion_vs_recovery`,
+  `subject_transition_after_enqueue_vs_dispatch`, `policy_change_after_publication_vs_dispatch`,
+  `deferral_vs_claim`, `activation_vs_dispatch`, `competing_activation_same_intent`,
+  `rule_attach_vs_activation`, `suppress_vs_enqueue`, `cancel_vs_dispatch`, `delivery_vs_attempt_close`,
+  `erase_vs_dispatch`, `unrelated_notifications`); the runner is committed executable (`100755`) and the
+  static contract suite asserts the complete matrix, the executable bit and the new lifecycle vocabulary
+  and guards against the sources. Runtime coverage was added for the new rules (retry suite §11 — an
+  acknowledgement refused from `leased`, a repeated hand-off replaying without a second port call, and a
+  `cancel` resolving a live lease to a clean protected read; corruption suite §5 — truncated chain,
+  unreachable state and terminal-beside-open-attempt each failing closed with `attempt_lifecycle_invalid`
+  and converging when restored).
+
+- `platform_outbox` gains the additive dispatch representation — `notification_id` (unique), `workflow_key`,
+  `workflow_version`, `intent_key`, `audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`,
+  `lease_token_digest`, `failure_reason_code` — plus the `dispatch` and `intent_version` lookup indexes.
+  Every added column is nullable with no default, so the R2 insert-only publisher and the Phase-1
+  invitation delivery seam keep working unchanged and S never claims a row it does not own.
+- Eighteen S-owned tables: workflow identity, immutable versions with the `workflow_active`/`intent_active`
+  routing slots, draft-only frozen rule storage, digest-only commands, templates and their immutable
+  versions, rendered-parameter snapshots, the notification aggregate and its append-only history, the
+  attempt lifecycle with its persisted deterministic retry schedule, digest-only delivery facts, the
+  channel-neutral suppression register and the digest-only privacy tombstones.
+- `NotificationWorkflowService` freezes a version's complete required eligibility set, its closed §6.3
+  schedule composition, its mandatory expiry window and its narrow-only §9 retry policy at activation, and
+  arbitrates the single active version per consumed intent through the named routing slot.
+- `NotificationService` observes an R2 intent from the seam, freezes the §6.2.3 bound evidence and the
+  §6.2.4 tier-F instant, derives and mirrors the schedule, and closes an unavailable tier-F instant or an
+  unresolvable timezone basis terminally instead of scheduling one.
+- `NotificationDispatchService` leases through the existing `attempt_count` counter, hands off only through
+  the channel-neutral `NotificationTransportPort`, and closes every attempt through the ceiling-first
+  two-gate rule: ceiling exhaustion is `failed`/`retry_exhausted`, below-ceiling window exhaustion is
+  `expired`/`retry_window_exhausted`, and a `terminal` class closes terminal `failed` with its own
+  normalised reason code at every attempt sequence.
+- Retry scheduling is deterministic and keyed — the immutable notification identity, the attempt sequence
+  and the frozen parameters are the only inputs — and the base back-off is the §9 bounded recurrence, which
+  is the sole canonical semantics.
+- Bounded Phase 2A.2-R2 amendment (§6.2.4): `dzn_renewal_cycles.automatic_charge_at` is a durable,
+  immutable per-cycle fact written in the cycle-open transaction, `CollectionIntentService::open()` reads
+  that persisted column instead of re-deriving the instant from the current lead-time policy, and
+  `AUTOMATIC_RENEWAL_UPCOMING` is published from the cycle-open fact alone.
+- Provider-neutral and external-send-free: no transport binding, no credential, no provider template or
+  identifier, no raw provider payload, no provider call, no Amelia or Theme change, no merge, no deploy.
+
 ## Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority — candidate, unmerged — 2026-09-23
 
 Schema 26 / migration `026_renewal_recurring_enrolment_authority` / build

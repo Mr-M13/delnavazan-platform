@@ -20,7 +20,12 @@ if(str_contains($phaseNVerifier,'new\RuntimeException'))throw new RuntimeExcepti
 if(substr_count($phaseNVerifier,'throw new \RuntimeException')<5)throw new RuntimeException('Phase N verifier failure path must fail closed with RuntimeException');
 if(!str_contains($migration,"CAPABILITY_VERSION = '2a2n'"))throw new RuntimeException('Capability version was not advanced');
 foreach(array('dzn_manage_canonical_lesson_schedules','dzn_override_canonical_lesson_schedule_availability')as$n)if(substr_count($migration,$n)<3)throw new RuntimeException('Capability is not registered, granted and repaired: '.$n);
-if(str_contains(substr($migration,strpos($migration,'CREATE TABLE {$p}canonical_lesson_schedule_versions'),strpos($migration,'private static function private_digest')-strpos($migration,'CREATE TABLE {$p}canonical_lesson_schedule_versions')),'updated_at datetime'))throw new RuntimeException('Canonical schedule evidence must stay immutable');
+// The immutability rule is scoped to Phase N's own table definition rather than to a byte range that a
+// later additive migration may extend: the slice runs to the next CREATE TABLE, whatever phase owns it.
+$phaseNScheduleTable=substr($migration,strpos($migration,'CREATE TABLE {$p}canonical_lesson_schedule_versions'));
+$phaseNNextTable=strpos($phaseNScheduleTable,'CREATE TABLE',8);
+if($phaseNNextTable!==false)$phaseNScheduleTable=substr($phaseNScheduleTable,0,$phaseNNextTable);
+if(str_contains($phaseNScheduleTable,'updated_at datetime'))throw new RuntimeException('Canonical schedule evidence must stay immutable');
 if(str_contains($migration,'teacher_lesson_slot_reservations'))throw new RuntimeException('Phase N must not create a mutable reservation projection');
 foreach(array("const CAPABILITY='dzn_manage_canonical_lesson_schedules'","const OVERRIDE_CAPABILITY='dzn_override_canonical_lesson_schedule_availability'","const DOMAIN='canonical_lesson_schedule_v1'",'schedule_initial','schedule_revise','schedule_release','teacher_slot_conflict','teacher_unavailable','schedule_start_not_future','schedule_already_exists','stale_schedule_version','schedule_unchanged','lesson_not_schedulable','enrolment_not_schedulable','stale_teacher_assignment','administrative_override','within_availability','course_default')as$n)if(!str_contains($service,$n))throw new RuntimeException('Missing Phase N service contract: '.$n);
 foreach(array('resolvePolicy','availabilityBasis','assertCapacity','assertApplicableAssignment','replay','CanonicalLessonScheduleValidator::validForLesson')as$n)if(!str_contains($service,$n))throw new RuntimeException('Missing Phase N service path: '.$n);
