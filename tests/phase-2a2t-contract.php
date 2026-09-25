@@ -308,6 +308,27 @@ if(!str_contains($intake,'$this->abandonDecisionClaim($claim);')||substr_count($
 if(!str_contains($intake,"PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision_claim'"))throw new RuntimeException('[C10-2] the owned claim must be observable before any decision work runs');
 if(!str_contains($rule,'It bounds the work, not merely the row'))throw new RuntimeException('[C10-2] the lease must be documented as the bounded window the owner works inside');
 
+// [C12-1] The append is the last step that same bounded window covers. The fenced `claimed → settled`
+// transition therefore requires the worker's own live slot and an unexpired lease as well as its generation
+// and token, judged against the very `$now` it stamps the row with, so a lease that lapsed after the final
+// R1/R2 work unit can never settle the claim and publish a decision; the intake releases the claim it
+// appended nothing to and converges, so an expired-but-not-yet-taken-over claim never strands the event.
+$settleStart=strpos($providerRepository,'function settleDecisionClaim(');
+$settleBody=substr($providerRepository,$settleStart,strpos($providerRepository,'function releaseDecisionClaim(',$settleStart)-$settleStart);
+if(!str_contains($settleBody,"claim_state='claimed'")||!str_contains($settleBody,'claim_generation=%d')||!str_contains($settleBody,'claim_token_digest=%s'))throw new RuntimeException('[C12-1] the append must stay fenced by the claim state, generation and token');
+if(!str_contains($settleBody,'active_claim_slot=1'))throw new RuntimeException('[C12-1] the append must require the claim\'s live slot');
+if(!str_contains($settleBody,'lease_expires_at IS NOT NULL AND lease_expires_at>=%s'))throw new RuntimeException('[C12-1] the append must require an unexpired lease');
+if(!str_contains($settleBody,"claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s"))throw new RuntimeException('[C12-1] the live slot and the unexpired lease must be conditions of the same conditional statement');
+if(!str_contains($settleBody,'$now,$now,$claimId,$expectedGeneration,$tokenDigest,$now'))throw new RuntimeException('[C12-1] the append must judge the lease against its own $now input');
+$appendStart=strpos($intake,'private function appendDecisionUnderClaim(');
+$appendBody=substr($intake,$appendStart,strpos($intake,'private function abandonDecisionClaim(',$appendStart)-$appendStart);
+if(substr_count($appendBody,'settleDecisionClaim(')!==1)throw new RuntimeException('[C12-1] the decision append must be fenced by exactly one conditional transition');
+if(strpos($appendBody,'settleDecisionClaim(')>strpos($appendBody,'maxDecisionSequence('))throw new RuntimeException('[C12-1] the append fence must precede the decision-sequence allocation');
+if(!str_contains($appendBody,"PaymentExecutionSupport::hook('dzn_phase_2a2t_before_provider_event_decision_append'"))throw new RuntimeException('[C12-1] the append seam after the final work unit and before the fence must be observable');
+if(strpos($appendBody,'before_provider_event_decision_append')>strpos($appendBody,'settleDecisionClaim('))throw new RuntimeException('[C12-1] the append seam must be observable before the fence that closes the window');
+$appendRelease=strpos($appendBody,'abandonDecisionClaim($claim)');
+if($appendRelease===false||$appendRelease<strpos($appendBody,'settleDecisionClaim(')||$appendRelease>strpos($appendBody,'convergeOnOwner'))throw new RuntimeException('[C12-1] a refused append must release the claim it appended nothing to and then converge');
+
 // [C9-3] The §9.2 transport rule is configured, allowlisted and never satisfied by a client's own header.
 if(!str_contains($rule,'public static function trustedProxyHeaders('))throw new RuntimeException('[C9-3] the configured proxy-header gate is missing');
 if(!str_contains($rule,'public static function proxyHeaderIndicatesHttps('))throw new RuntimeException('[C9-3] the allowlisted proxy-header verdict is missing');
@@ -396,6 +417,7 @@ foreach(array(
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
     'conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery',
     'stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit',
+    'stale_owner_at_decision_append',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
 if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
 if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');
@@ -407,6 +429,13 @@ if(!str_contains($concurrency,'lease_expires_at=%s WHERE provider_event_id=%d AN
 if(!str_contains($concurrency,"!is_file(\$gate.'/w1.work')")||!str_contains($concurrency,'the stale generation must perform no R1/R2 work at all'))throw new RuntimeException('[C10-2] the stale-owner race must prove the stale generation performed no R1/R2 work');
 if(!str_contains($concurrency,"is_file(\$gate.'/w2.work')"))throw new RuntimeException('[C10-2] the stale-owner race must prove the takeover generation did the work');
 if(!str_contains($concurrency,'claim_generation===2'))throw new RuntimeException('[C10-2] the stale-owner race must prove the takeover generation advanced the claim');
+// [C12-1] The append race must age the owner's own window at the append seam and prove that the lapsed
+// lease — never a successor's take-over — is what refuses the stale generation, which appends nothing and
+// releases the claim it appended nothing to, and that the next delivery completes the event.
+if(!str_contains($concurrency,'before_provider_event_decision_append'))throw new RuntimeException('[C12-1] the append race must age the window at the append seam');
+if(!str_contains($concurrency,'the stale generation must have reached the R1/R2 work boundaries'))throw new RuntimeException('[C12-1] the append race must prove the stale generation reached the work units');
+if(!str_contains($concurrency,'no successor generation may have replaced the stale generation'))throw new RuntimeException('[C12-1] the append race must prove no successor generation replaced the stale one');
+if(!str_contains($concurrency,'must append nothing and report the event as still owing its decision'))throw new RuntimeException('[C12-1] the append race must prove the stale generation appended nothing');
 foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation','decision_claim','completed-028','029') as $needle)
     if(!str_contains($migrationRuntime,$needle))throw new RuntimeException('The migration-runtime suite is incomplete: '.$needle);
 foreach(array('redrive','reconcile','dispatch_descriptor_unavailable','provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $needle)

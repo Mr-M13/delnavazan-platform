@@ -84,6 +84,45 @@ if(in_array($mode,array('pending_decision_retry','undecided_event_recovery','sta
     }
 }
 
+// [C12-1] The append fence: an owner whose bounded window lapsed after its final R1/R2 work unit — with no
+// successor generation taking its claim over — must append nothing at all. The fenced `claimed → settled`
+// transition of the append itself is what refuses it (never a replaced generation), it releases the live
+// claim it appended nothing to so the event is not stranded, and the next delivery completes it exactly once.
+//
+// The contender is deliberately not inside a take-over when the stale generation appends: the finding is
+// that the lapsed lease alone must refuse the append, so the successor's delivery comes after that refusal.
+// What it proves is the release: the stale generation's own generation-1 row is `released` with no live slot,
+// no generation above 1 exists, and the successor's fresh claim is the one that completes the event.
+if($mode==='stale_owner_at_decision_append'){
+    dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['intent_id'],$fixture['webhook']['cycle_id'],$fixture['prepared_event_id']),'the append race fixture must exist');
+    $webhook=$fixture['webhook'];
+    $prepared=(int)$fixture['prepared_event_id'];
+    dzn_tcv_assert(is_file($gate.'/w1.work'),'the stale generation must have reached the R1/R2 work boundaries: its window closed at the append, never before the work');
+    dzn_tcv_assert(is_file($gate.'/w1.expired_at_append'),'the stale generation must let the window it still owns lapse at the append seam');
+    $claimRows=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d ORDER BY id ASC",$prepared))?:array();
+    $released=0;$settledClaims=0;$successors=0;
+    foreach($claimRows as $claimRow){
+        if((string)$claimRow->claim_state==='released')$released++;
+        if((string)$claimRow->claim_state==='settled')$settledClaims++;
+        if((int)$claimRow->claim_generation>1)$successors++;
+    }
+    dzn_tcv_assert($released===1,'the stale generation must release the live claim it appended nothing to');
+    dzn_tcv_assert($settledClaims===1,'exactly one claim may end settled, and it belongs to the generation that appended the decision');
+    dzn_tcv_assert($successors===0,'no successor generation may have replaced the stale generation: the lapsed lease, never a take-over, must be what refuses the append');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",$prepared))===0,'no live claim may survive the completed decision');
+    dzn_tcv_assert(!$wpdb->get_results("SELECT provider_event_id,COUNT(*) AS total FROM {$p}payment_provider_event_decision_claims WHERE active_claim_slot=1 GROUP BY provider_event_id HAVING total>1"),'two live decision claims must never share one event');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared))===1,'the event must end with exactly one decision');
+    $decision=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared));
+    dzn_tcv_assert($decision!==null,'the event must end with the decision the next generation appended');
+    dzn_tcv_assert((string)$decision->decision_state==='ignored'&&(string)$decision->reason_code==='stale_provider_event','the one decision must be the successor\'s controlled stale refusal: the obligation the stale generation settled inside its window may never be settled twice');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 evidence the stale generation submitted inside its window must stand exactly once');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 settlement the stale generation committed inside its window must stand exactly once');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id']))==='confirmed','the collection intent the stale generation confirmed inside its window must stay confirmed exactly once');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id']))==='collected','the renewal cycle the stale generation collected inside its window must stay collected exactly once');
+    dzn_tcv_assert(isset($records['w1']['outcome']['events'][0])&&$records['w1']['outcome']['events'][0]['created']===false&&!empty($records['w1']['outcome']['events'][0]['pending']),'the stale generation must append nothing and report the event as still owing its decision');
+    dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the next delivery must be the generation that completes the event');
+}
+
 // [C10-2] The stale-owner race: the first worker takes the event's decision claim and then lets its own
 // bounded window expire while it still owns it; the second worker takes the claim over and completes the
 // decision. When the first worker resumes, its closed window must stop it before any R1/R2 work unit — its

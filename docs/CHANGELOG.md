@@ -7,10 +7,45 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 Schema 29 / migrations `028_payment_execution_seam_provider_adapter` and
 `029_payment_event_decision_claim_authority` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260925.11`, additive on top of the Phase-V candidate
+`phase2a2t-payment-execution-seam-stripe-adapter-20260925.12`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 11, SHA-256
-`11aa1ce1162b949d86b0309cf40dc8df8fe1449d2ccc2e6049b487b7310cac0c`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 12, SHA-256
+`bf7602e09eb9bc4c44d35e36645a6a9697e6e550372b1388119725cda159e139`).
+
+**Correction round 12** (build `…20260925.12`) applies the independent review of the candidate
+`09c4134381ba31c8332a0561bec96c9cbd5238e9` / tree `944b45c7fcb9570442d18468664396ee823994e4`
+additively, without rewriting that history. One blocking finding is closed:
+
+- **The decision append is bounded by the same window as the work it publishes.** `settleDecisionClaim()`
+  fenced only `claim_state`, `claim_generation` and `claim_token_digest`, so a lease that lapsed after the
+  last R1/R2 work unit but before the decision-append transaction still let the stale generation settle its
+  live claim and append its decision — publishing authority inside a window §9.5 C10-2 had already closed,
+  which makes the lease the bounded window the *whole* decision operation, the append included, runs
+  inside. The fenced `claimed → settled` transition now also requires `active_claim_slot = 1` **and** a
+  non-null, unexpired `lease_expires_at`, judged against the same `$now` the statement stamps the row with,
+  so an append that runs past the lease affects zero rows and publishes nothing. The intake treats that
+  zero-row outcome as a closed window: it rolls back, releases the live claim it appended nothing to
+  (fenced by its own generation and token, so a successor's claim is never touched) and converges — so an
+  expired-but-not-yet-taken-over claim no longer strands the event behind a lease nobody is working inside,
+  and the next delivery completes it. The seam between the final work unit and that fence is observable
+  through the new §8.4 hook `dzn_phase_2a2t_before_provider_event_decision_append` (ids only, outside the
+  worker context and outside any transaction).
+
+`tests/phase-2a2t-contract.php` asserts the corrected source contract (the settlement's own live-slot and
+unexpired-lease conditions judged against its own `$now`, the append seam ahead of the fence, and the
+release-then-converge order of a refused append); `tests/phase-2a2t-failure-runtime.php` proves the
+transition behaviourally — an append that runs past the claim's lease settles nothing and leaves the claim
+live, for that generation to release or for exactly one successor to take over; and
+`tests/phase-2a2t-concurrency-runner.sh` adds `stale_owner_at_decision_append` (twenty-three modes): the
+owner completes **every** R1/R2 work unit of the decision operation and then lets the window it still
+exclusively holds lapse at the append seam, aged in the database, with no successor generation having taken
+its claim over. The verifier proves the owner reached the R1/R2 work boundaries (so the window closed at
+the append, never before the work), that the append — and never a take-over — refused it (the owner's own
+generation-1 claim ends `released` with no live slot and no lease, no generation above 1 exists and no live
+claim survives), that the stale generation appended nothing and reported the event as still owing its
+decision, and that the next delivery is the one that completes the event with its single decision, while
+the work the stale generation committed inside its window stands exactly once (one R1 evidence, one R1
+settlement, one confirmed collection intent, one collected renewal cycle).
 
 **Correction round 11** (build `…20260925.11`) applies the independent review of the candidate
 `d60544a7c30231ec82b887b8238561b4c46dfce0` / tree `0f000a8d9df3312488534729efd44ce961579f27`

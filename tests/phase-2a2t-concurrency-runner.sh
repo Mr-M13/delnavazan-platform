@@ -12,7 +12,8 @@ case $mode in
   submit_vs_cancel_in_flight|redrive_after_crash|concurrent_expired_lease|takeover_reissue_fenced|\
   fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure|\
   conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|\
-  stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit) ;;
+  stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit|\
+  stale_owner_at_decision_append) ;;
   *) echo "Unknown Phase T concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives
@@ -40,7 +41,7 @@ waitfor "$gate/w1.started" || { echo "holder worker never gated"; cat "$gate/w1.
 wprun "$gate" w2 "$repo/tests/phase-2a2t-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 w2=$!
 case $mode in
-  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit)
+  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit|stale_owner_at_decision_append)
     # [C8-3] Both deliveries must be in flight together, so neither worker holds a lock: each announces
     # itself in the gate directory and waits for its sibling before submitting the same provider event
     # identity, and the unique `provider_event` index arbitrates the race. [C9-1] The decision-claim
@@ -54,6 +55,11 @@ case $mode in
     # unit: the first worker stalls *inside* an R1/R2 mutation with its own window aged, the second worker
     # delivers while it is stalled (it can own nothing and works nowhere), and once the fence has rolled the
     # stalled unit back and released the claim, the second worker completes the event's decision.
+    # [C12-1] `stale_owner_at_decision_append` uses the gate in the other direction again: the first worker
+    # lets its own window lapse *after* its last R1/R2 work unit — the append seam of the decision operation —
+    # with no successor having taken its claim over, and the second worker delivers only once the first has
+    # returned, so the append fence (never a take-over) is what refuses the stale generation and the next
+    # delivery is what completes the event.
     waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
     ;;
   unrelated_students)

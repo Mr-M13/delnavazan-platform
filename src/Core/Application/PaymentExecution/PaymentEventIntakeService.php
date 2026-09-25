@@ -624,20 +624,36 @@ final class PaymentEventIntakeService {
     }
 
     /**
-     * [C9-1]/[C9-2] Append the decision under the claim's fence, or write nothing at all.
+     * [C9-1]/[C9-2]/[C12-1] Append the decision under the claim's fence, or write nothing at all.
      *
      * The conditional `claimed → settled` transition and the decision insert are **one transaction**: the
      * affected-row count proves this generation still owns the event and takes the claim row's lock, so
      * the next `decision_sequence` is allocated under that lock and two workers can never derive the same
      * one. An owner that lost its fence — an expired claim another generation took over — rolls back,
      * writes no decision and converges on whatever the successor recorded.
+     *
+     * [C12-1] The append is the last step the claim's bounded window covers, so the transition requires the
+     * worker's own live slot and an unexpired lease as well as its generation and token. A window that lapsed
+     * after the final R1/R2 work unit but before this transaction therefore appends nothing here; the owner
+     * releases the live claim it appended nothing to and converges, so the event is completed by the next
+     * delivery instead of being held behind a lease nobody is working inside.
      */
     private function appendDecisionUnderClaim(object $event,array $decision,array $claim,string $context):array{
         $now=PaymentExecutionSupport::now();
+        // [C12-1] Observable seam of the contract's last bounded step: every R1/R2 work unit has finished and
+        // the decision is about to be published under the claim's fence. It fires outside the §9.7 worker
+        // context and outside any transaction, and carries ids only — never a token, payload or reference.
+        PaymentExecutionSupport::hook('dzn_phase_2a2t_before_provider_event_decision_append',(int)$event->id,(int)$claim['generation']);
         $this->repository->begin();
         try{
             if($this->repository->settleDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$now)!==1){
                 $this->repository->rollback();
+                // [C12-1] The append was refused — the bounded window closed before this statement, either
+                // because the lease lapsed after the last work unit or because exactly one successor
+                // generation took the claim over. This generation appends nothing in either case, so it
+                // releases the live claim it still owns (fenced by its own generation and token, so a
+                // successor's claim is never touched) and converges on the current owner's decision.
+                $this->abandonDecisionClaim($claim);
                 return $this->convergeOnOwner((int)$event->id);
             }
             $decisionId=$this->repository->insertDecision(array(

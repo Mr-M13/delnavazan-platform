@@ -154,17 +154,25 @@ final class PaymentProviderRepository {
         return $wpdb->get_results("SELECT * FROM {$this->p}payment_provider_event_decision_claims ORDER BY id ASC")?:array();
     }
     /**
-     * [C9-2] Fenced `claimed → settled`: one affected row is the proof this generation still owns the event.
+     * [C9-2]/[C12-1] Fenced `claimed → settled`: one affected row is the proof this generation still owns
+     * the event *inside an open window*.
      *
      * It is the first statement of the transaction that appends the decision, so the claim row's lock
      * serialises the next `decision_sequence` allocation a losing or replaced owner might otherwise
      * derive at the same time.
+     *
+     * [C12-1] The append is bounded by the same window that bounded the work: the transition requires the
+     * worker's own live generation, its live slot and token **and** an unexpired `lease_expires_at`, judged
+     * against the very `$now` that stamps the row. A lease that lapsed after the final R1/R2 work unit but
+     * before this transaction therefore settles nothing and appends nothing, exactly like a replaced
+     * generation. The caller releases the claim it appended nothing to (fenced by its own generation and
+     * token) and converges, so an expired-but-not-yet-taken-over claim never strands the event.
      */
     public function settleDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $now):int{
         global $wpdb;
         return (int)$wpdb->query($wpdb->prepare(
-            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s",
-            $now,$now,$claimId,$expectedGeneration,$tokenDigest
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s",
+            $now,$now,$claimId,$expectedGeneration,$tokenDigest,$now
         ));
     }
     /** [C9-2] Fenced `claimed → released`: the owner appended no decision and frees the event's live slot. */

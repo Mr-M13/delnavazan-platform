@@ -55,6 +55,12 @@ $wpdb->query($wpdb->prepare("INSERT INTO {$p}payment_provider_events (uid,receip
 $failureEvent=(int)$wpdb->insert_id;
 $failureClaim=$providerRepository->insertDecisionClaim(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'claim_state'=>'claimed','claim_generation'=>1,'claim_token_digest'=>str_repeat('d',64),'lease_expires_at'=>gmdate('Y-m-d H:i:s',time()+60),'claimed_at'=>gmdate('Y-m-d H:i:s'),'settled_at'=>null,'active_claim_slot'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'updated_at'=>gmdate('Y-m-d H:i:s')));
 $providerRepository->begin();
+// [C12-1] The append is bounded by the same window that bounded the work: the fenced transition is judged
+// against the instant the append itself runs, so an append that runs after the claim's lease has lapsed
+// settles nothing — the stale generation appends nothing rather than publishing a decision the contract
+// does not let it own. (The race suite proves the same refusal against a row whose lease is aged in the
+// database: `stale_owner_at_decision_append`.)
+dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64),gmdate('Y-m-d H:i:s',time()+3600))===0,'a claim whose window has already lapsed must never be settled by the append');
 dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64),gmdate('Y-m-d H:i:s'))===1,'the owner must settle its own live decision claim');
 $providerRepository->insertDecision(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'decision_sequence'=>$providerRepository->maxDecisionSequence($failureEvent),'decision_state'=>'refused','reason_code'=>'provider_event_not_authoritative','r2_consequence_state'=>'not_applicable','decided_at'=>gmdate('Y-m-d H:i:s'),'recorded_at'=>gmdate('Y-m-d H:i:s'),'created_at'=>gmdate('Y-m-d H:i:s')));
 $providerRepository->rollback();

@@ -22,6 +22,12 @@
  *   claim over and completes the decision, and the first worker then resumes. It must perform **no** R1/R2
  *   work: the gate in front of every work unit refuses the closed window instead of discovering the loss
  *   later, so exactly one worker ever reaches the R1 boundary and the R2 consequence.
+ * - [C12-1] the append race (`stale_owner_at_decision_append`): the first worker completes every R1/R2 work
+ *   unit of the decision operation and then lets the very window it is still inside lapse at the append
+ *   seam, with no successor having taken its claim over. The fenced `claimed → settled` transition of the
+ *   append must refuse it — the lease, never a replaced generation, is what closes the window — so the stale
+ *   generation appends nothing, releases the live claim it appended nothing to, and converges, and the next
+ *   delivery completes the event exactly once.
  */
 if(getenv('DZN_PHASE_2A2T_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-T concurrency worker refused.\n");exit(1);}
 use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeService,PaymentExecutionDispatchSeal,PaymentExecutionService,PaymentExecutionSupport,PaymentProviderRegistry,ProviderReferenceClaims};
@@ -35,7 +41,7 @@ $fixture=get_option('dzn_phase_2a2t_concurrency_fixture');
 dzn_tcw_assert(is_array($fixture)&&count($fixture['rows']??array())>=2,'the concurrency fixture must exist');
 wp_set_current_user(1);
 $mode=(string)$fixture['mode'];
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)){
     if(!defined('DZN_PLATFORM_PAYMENT_TEST_VAULT'))define('DZN_PLATFORM_PAYMENT_TEST_VAULT',true);
     PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
     dzn_tcw_assert(isset($fixture['webhook']['selector'],$fixture['webhook']['body'],$fixture['webhook']['body_changed']),'the duplicate-webhook race fixture must exist');
@@ -60,6 +66,26 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
             while(!file_exists($gate.'/w2.json')&&$waited<900){usleep(100000);$waited++;}
         };
         add_action('dzn_phase_2a2t_after_provider_event_decision_claim',$stall,10,2);
+    }
+    // [C12-1] The append-seam race: every R1/R2 work unit of the decision operation has finished and the
+    // decision is about to be published. The first worker ages the window it is still inside *at that seam*
+    // — exactly what a decision operation that outlives DECISION_CLAIM_LEASE_SECONDS between its last work
+    // unit and its append produces, expressed here without waiting two minutes — and no successor generation
+    // takes its claim over, so the fenced append itself, and never a take-over, is what must refuse it.
+    if($mode==='stale_owner_at_decision_append'&&$gate!==''&&is_dir($gate)){
+        $mark=function(...$arguments)use($gate,$worker):void{file_put_contents($gate.'/'.$worker.'.work','1',FILE_APPEND);};
+        add_action('dzn_phase_2a2r1_after_evidence_insert',$mark,10,1);
+        add_action('dzn_phase_2a2r1_after_settlement',$mark,10,1);
+        add_action('dzn_phase_2a2r2_after_collection_intent_event_insert',$mark,10,2);
+        add_action('dzn_phase_2a2r2_after_cycle_event_insert',$mark,10,2);
+        $expire=function(int $eventId,int $generation)use($gate,$worker,$wpdb,$p):void{
+            if($worker!=='w1')return;
+            // The owner's own live claim — its own generation, its live slot, its own token — is now older
+            // than its lease, and it is still exclusively the owner's: no successor has taken it over.
+            $wpdb->query($wpdb->prepare("UPDATE {$p}payment_provider_event_decision_claims SET lease_expires_at=%s WHERE provider_event_id=%d AND active_claim_slot=1 AND claim_generation=%d",gmdate('Y-m-d H:i:s',time()-5),$eventId,$generation));
+            file_put_contents($gate.'/w1.expired_at_append','1');
+        };
+        add_action('dzn_phase_2a2t_before_provider_event_decision_append',$expire,10,2);
     }
     // [C11-1] The in-unit fence race: the first worker stalls *inside* the R1 (or R2) mutation it is
     // running, with the bounded window that unit is running inside aged past expiry. The fence of the
@@ -94,6 +120,14 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
         if($mode==='stale_owner_after_lease_expiry'&&$worker==='w2'){
             $waited=0;
             while(!file_exists($gate.'/w1.claimed')&&$waited<900){usleep(100000);$waited++;}
+        }
+        // [C12-1] The append-race contender may only deliver once the owner has aged its own window at the
+        // append seam and returned, having released the claim it appended nothing to. The refusal the stale
+        // generation observes is therefore the lapsed lease of the claim it still owns — never a successor's
+        // take-over — and this delivery is the one that completes the event.
+        if($mode==='stale_owner_at_decision_append'&&$worker==='w2'){
+            $waited=0;
+            while(!file_exists($gate.'/w1.json')&&$waited<900){usleep(100000);$waited++;}
         }
     }
     if(in_array($mode,array('stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)){

@@ -2,7 +2,7 @@
 
 **Status:** implementation contract (preflight). Planning/audit only.
 **Schema:** 029 (`028_payment_execution_seam_provider_adapter`, plus — since correction round 10 — the decision-claim aggregate `029_payment_event_decision_claim_authority`)
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.11` (proposed; correction round 11)
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.12` (proposed; correction round 12)
 **Correction round 2:** independent review of commit `adbd78795f6e11ee7731c985975a7276f8351659`
 (tree `f96569c8e70254d436b8571db64be0d057583fef`) returned FAIL on six blocking findings. §0 records
 each finding and its correction, and every corrected clause carries a `[C2]` marker so a reviewer can
@@ -83,6 +83,14 @@ transactions and invoke WordPress hooks, so either may outlive the 120-second le
 then take the expired claim over atomically, and the original worker still completes the R1/R2 mutation it
 had already started — its next gate notices the loss, but too late. §0I records the finding and its
 correction, and every corrected clause carries a `[C11-1]` marker so a reviewer can locate the change
+without re-reading the document.
+**Correction round 12:** independent review of commit `09c4134381ba31c8332a0561bec96c9cbd5238e9`
+(tree `944b45c7fcb9570442d18468664396ee823994e4`) returned FAIL on one blocking finding — the decision
+append was fenced by claim state, generation and token only, so it did not require an active, unexpired
+lease: a lease that lapsed after the last R1/R2 work unit but before the decision-append transaction still
+allowed the stale generation to settle the claim and publish its decision, even though the lease is the
+bounded window the *whole* decision operation, the append included, runs inside. §0J records the finding and
+its correction, and every corrected clause carries a `[C12-1]` marker so a reviewer can locate the change
 without re-reading the document.
 **Base:** `main` with Phase 2A.2-R2 merged (Schema 26). R1 is already authoritative on `main`;
 R2 / Schema 26 is the active candidate and is a hard dependency of the R2-collection half of this
@@ -252,6 +260,20 @@ changed by this round, and no authority, table, capability, policy or provider c
 | # | Blocking finding (review of `d60544a`) | Correction made in this round |
 | --- | --- | --- |
 | C11-1 | §9.5/§14: the fenced renewal committed before the R1/R2 unit began, so the lease bounded the decision row and the unit's *entry* only. A unit that outlived the 120-second lease — its own transaction, or a hook a listener ran inside it, blocked longer than the window — could be superseded by a take-over generation while the original worker nevertheless committed the already-started R1/R2 mutation. The implementation therefore only fenced entry, not the duration of work, and C10-2's requirement that the claim owner be the only worker performing decision/consequence work (and that an expired generation stop *before* work) was violated for the whole duration of a unit. | A decision work unit is now fenced at the **connection's statement boundary, from inside the unit's own transaction**. The intake registers one listener on `PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER` (`query`) for exactly the unit's duration and removes it again in a `finally`; the listener never rewrites a statement, passes transaction control and session configuration through untouched (`START TRANSACTION`, `ROLLBACK`, `SET …`), and precedes **every other statement — the unit transaction's `COMMIT` included — with the fenced window proof**: one `SELECT … FOR UPDATE` on the claim row that must return exactly one row (this worker's own `claim_generation` and `claim_token_digest`, `claim_state = 'claimed'`, its live slot and an unexpired `lease_expires_at`) and that, when the statement runs outside any transaction, additionally renews the window first. The locking read holds the claim row for the rest of the unit's transaction, so a decision-claim take-over — which needs that same row *and* an expired lease — can never interleave with a unit, and a unit's commit can never land outside the window it was granted. A proof that finds no live window raises the controlled `DecisionClaimWindowClosed` **before** the statement executes, so the R1/R2 service that owns the transaction rolls the whole unit back: a closed window can no longer be discovered only after an already-started mutation committed. The stale generation then releases the live claim it appended nothing to (its own generation and token fence the release) and converges, so the event is completed by the next generation instead of waiting out a lease nobody is working inside; a take-over generation releases nothing (§9.5, §12.1, §13, §14, §17). |
+
+## 0J. Correction round 12 (independent review of `09c4134` / tree `944b45c7`)
+
+The reviewed candidate returned FAIL on one blocking finding: the fenced `claimed → settled` transition of
+the decision append required only the owner's claim state, its `claim_generation` and its
+`claim_token_digest`. The claim's lease therefore bounded the R1/R2 work units but **not** the append that
+publishes their outcome: if the lease lapsed after the last work unit and before the append transaction, the
+stale generation still settled its claim and appended its decision, publishing authority inside a window the
+contract had already closed. The finding is resolved below. No clause outside it is changed by this round,
+and no authority, table, capability, policy or provider call is added.
+
+| # | Blocking finding (review of `09c4134`) | Correction made in this round |
+| --- | --- | --- |
+| C12-1 | §9.5 C10-2/§12.1/§14: `PaymentProviderRepository::settleDecisionClaim()` fenced only `claim_state`, `claim_generation` and `claim_token_digest`, so it required neither the claim's live slot nor an unexpired `lease_expires_at`. A generation whose lease lapsed after its final R1/R2 work unit — but before the decision-append transaction — therefore settled its live claim and appended its decision, even though C10-2 makes the lease the bounded window the *entire* decision operation runs inside and requires a lapsed generation to append nothing and converge. The intake then left the event owing its decision behind a lease nobody was working inside, because the zero-row convergence path did not release the live claim the stale owner had appended nothing to. | The append is now bounded by the same window that bounded the work. `settleDecisionClaim()` requires, in its one conditional statement, the owner's own `claim_state = 'claimed'`, its `claim_generation`, its `claim_token_digest`, its `active_claim_slot = 1` **and** a non-null, unexpired `lease_expires_at`, judged against the very `$now` that statement stamps the row with, so an append that runs after the claim's lease has lapsed affects zero rows and publishes nothing — exactly as a replaced generation publishes nothing. `PaymentEventIntakeService::appendDecisionUnderClaim()` treats that zero-row outcome as a closed window: it rolls back, **releases** the live claim it appended nothing to (fenced by its own generation and token, so a successor's claim is never touched) and converges, so an expired-but-not-yet-taken-over claim never strands the event and the next delivery completes it. The seam between the final work unit and the fence is observable through the new §8.4 hook `dzn_phase_2a2t_before_provider_event_decision_append` (ids only, outside the worker context and outside any transaction). §9.5, §12.1, §13, §14 and §17 are updated; the failure suite proves the transition refuses an append that runs past the lease; and the concurrency matrix adds `stale_owner_at_decision_append`, which completes every R1/R2 work unit and then lets the window the owner still exclusively holds lapse at the append seam, and proves that the append — and never a take-over — refuses the stale generation, that the owner's own generation-1 claim is released with no live slot and no generation above 1 exists, that the owner appended nothing, and that the next delivery is the one that completes the event's decision exactly once. |
 
 ## 1. Verified authoritative state
 
@@ -1363,6 +1385,15 @@ principal's authority. [C2-2] Every id passed to a hook is the declared `id` of 
 names — `payment_execution_commands.id`, `payment_provider_events.id` and
 `payment_provider_event_decisions.id` — so each hook argument is resolvable against a declared primary
 identifier (§12.3) and is never a uid, digest or raw reference.
+[C12-1] One further observability hook, `do_action('dzn_phase_2a2t_before_provider_event_decision_append',
+$eventId, $claimGeneration)`, fires at the append seam of one decision operation: after every R1/R2 work
+unit of §9.5 has finished and before the fenced `claimed → settled` transaction that publishes the
+decision. It carries the declared `payment_provider_events.id` and the claim's own `claim_generation` —
+never a token, payload or reference — and it fires outside any transaction and outside the §9.7 worker
+context, so it can never observe the worker principal's authority or a half-open window. It exists so an
+observer can prove the bounded window the operation ran inside is still *the owner's own* at the moment the
+append is fenced, which is exactly what makes a lapsed window refuse the append instead of publishing
+through it.
 
 ## 9. Webhook contract
 
@@ -1572,7 +1603,15 @@ unauthenticated and is never impersonated as a human principal.
   publishes. Ownership is never asserted from memory or from a read: every work unit is preceded by the
   affected-row proof that this generation still owns the event and that its window still covers the work
   about to run, and the decision append stays fenced by the same generation and token inside the
-  transaction that inserts it.
+  transaction that inserts it. [C12-1] The append is the *last* step that same window covers, so closing
+  the window is part of the append's own fence and not a step before it: the `claimed → settled`
+  transition requires the owner's live slot and an unexpired lease **as well as** its generation and
+  token, all judged against the instant the append runs, so a window that lapsed after the final work
+  unit settles nothing here — the same zero-row outcome a replaced generation produces. Because the
+  zero-row outcome is a closed window, the owner does not merely converge: it releases the live claim it
+  appended nothing to (the release is fenced by its own generation and token, so a successor's claim is
+  never touched) and *then* converges, so an expired-but-not-yet-taken-over claim never strands the event
+  behind a lease nobody is working inside and the next delivery completes it.
 - [C11-1] **Ownership also covers the duration of every work unit, not only its entry.** The window is
   proved — and, outside a transaction, renewed first — *inside the unit's own transaction*, at the
   connection's statement boundary (`DECISION_UNIT_FENCE_FILTER`), before every statement that transaction
@@ -2192,6 +2231,12 @@ itself. A claim whose owner's window closed while it appended nothing is release
 working inside. It stores no decision outcome (that stays in the append-only
 `payment_provider_event_decisions`, §12.2) and no provider reference: the token is a keyed digest and the
 event reference is the identifier the owning boundary already recorded.
+[C12-1] The window closes on the append itself, so the `claimed → settled` transition requires the same
+proof every work unit does: the owner's own live generation and token, its live `active_claim_slot` **and**
+a non-null, unexpired `lease_expires_at`, judged against the append's own instant. A window that lapsed
+after the final work unit settles nothing and appends nothing, exactly like a replaced generation, and the
+owner then releases the live claim it appended nothing to before it converges — so the row ends `released`
+(no live slot, no lease) rather than a terminal `settled` row for a decision that was never published.
 
 ### 12.2 Append-only evidence
 
@@ -2540,7 +2585,11 @@ capability it mints is never stored, so the dispatch repository's mutation surfa
 live-slot insert, the fenced `claimed → settled` transition, the fenced `claimed → released` release and
 the conditional expired-lease take-over that bumps the generation and re-issues the token — each a single
 statement whose affected-row count is the outcome, plus the read of an event's live claim and the
-append-only decision/event/receipt reads. [C10-2] It also exposes exactly one bounded-window renewal: a
+append-only decision/event/receipt reads. [C12-1] The `claimed → settled` transition is bounded by the
+claim's window exactly as the work units are: besides the owner's own `claim_generation` and
+`claim_token_digest` it requires `active_claim_slot = 1` **and** a non-null, unexpired `lease_expires_at`,
+judged against the append's own `$now`, so an append that runs after the lease has lapsed affects no row
+and publishes nothing. [C10-2] It also exposes exactly one bounded-window renewal: a
 conditional statement that requires the caller's own live generation (`claim_state = 'claimed'`, its
 `claim_generation` and `claim_token_digest`, `active_claim_slot = 1`) **and** an unexpired
 `lease_expires_at`, and only then extends the window — so the work-unit gate can never renew a window that
@@ -2607,7 +2656,13 @@ payload, secret, raw reference, raw signature, source address or provider status
   the unit it was about to run: it performs no decision work, no R1/R2 consequence work and no append, and
   converges on the decision the current owner publishes. The append itself stays fenced by the same
   generation and token inside the transaction that inserts the decision, so the fence now covers the work
-  and not merely the row. §17's `stale_owner_after_lease_expiry` proves it.
+  and not merely the row. §17's `stale_owner_after_lease_expiry` proves it. [C12-1] The append *closes*
+  that window as part of the same fence: the `claimed → settled` transition also requires the owner's live
+  slot and an unexpired lease, judged against the append's own instant, so a lease that lapsed after the
+  final work unit settles nothing there either — the append publishes nothing, the owner releases the live
+  claim it appended nothing to (fenced by its own generation and token) and converges, and the next
+  delivery completes the event. §17's `stale_owner_at_decision_append` proves that refusal is the lapsed
+  lease itself and never a take-over.
 - [C11-1] Ownership covers the *duration* of every work unit, not merely its entry. The window is proved
   — and, outside a transaction, renewed — from inside the unit's own transaction, before every statement
   that transaction runs (§9.5, `DECISION_UNIT_FENCE_FILTER`). The claim row is therefore held for the
@@ -2699,7 +2754,7 @@ webhook path publishes ids only through the existing `platform_outbox` seam.
 | `tests/phase-2a2t-secret-runtime.php` | encryption round trip; ciphertext differs from the plaintext; nonce uniqueness across writes; key rotation keeps exactly one active row and preserves history; unknown cipher/key version fails closed; authentication failure records `decrypt_failed` and returns no value; a non-adapter scope cannot reveal; diagnostics/notices/exports/outbox contain `[REDACTED_SECRET]` and never a value; a WordPress salt change fails closed; a full storage scan finds no plaintext secret; [C2-5] **every production write path rejects a provider secret** — a fully capable administrator with a valid nonce is refused `provider_secret_write_not_authorised` for a Stripe `api_key` and for a Stripe `webhook_signing_secret`, an audit `write_refused` row is recorded, no `payment_provider_secrets` row is created, and a source scan proves no path writes that table while `DZN_PLATFORM_PAYMENT_TEST_VAULT` is undefined; [C2-6] a NULL account scope cannot be inserted and two active secrets cannot share one scope |
 | `tests/phase-2a2t-corruption-runtime.php` | mutated execution command (selector shape, amount/currency), [C2-1] a mutated or duplicated `payment_execution_results` row (wrong `result_state`, `result_id` naming a foreign attempt, a second row for one command, a `completed` result with no attempt), [C3-1] a mutated dispatch claim (a claim for a command that already has a result row — [C5-1] other than the single permitted pairing of a terminal `released` claim with its own `refused`/`dispatch_descriptor_unavailable` result, a claim whose `dispatch_state` is not a `DISPATCH_STATES` member, a foreign `execution_command_id`, two live claims sharing one arbitration subject, and a `dispatching` command with no live claim), [C4-1] a mutated sealed descriptor (a tampered ciphertext, a `descriptor_digest` that no longer matches its envelope, an envelope whose sealed binding names another command's key digest, and a descriptor transplanted from another command), [C4-2] a claim whose `claim_generation` was rolled back or forged, and a settlement attempted with a stale generation or token (which must write no attempt and no result for the fenced-out owner), [C3-2] a `payment_provider_account_commands`/`_object_commands` row whose `result_id` is NULL, foreign or names another command's event row, mutated attempt, mutated event fact identity, mutated receipt verification state, corrupted account/mode, forged mapping, [C2-6] a secret row with a foreign or NULL account scope, and [C2-3] a decision row whose recorded R2 states disagree with the R2 tables — each fails closed at the owning boundary, manufactures no settlement/authority, is never silently repaired, and converges after exact restoration |
 | `tests/phase-2a2t-failure-runtime.php` | injected write boundary at every owning mutation (command insert, dispatch-claim insert, [C2-1] result insert, receipt insert, event insert, decision insert, [C2-3] R2 intent-confirm step, R2 cycle-confirm step, secret write, secret audit, mapping write, account state write) — each fully rolled back with retry convergence and no partial external-call ambiguity, and no partially applied R2 consequence left invisible; [C3-1] a crash after the claim commit and before the port call (claim `claimed`) and a crash after the port call and before transaction 2 (claim `in_flight` with an expired lease) are each recovered by `redrive()` to exactly one attempt and one settled claim, with the post-call crash reconciled rather than re-issued; [C4-1] a crash between the seal and the claim insert leaves neither a command row nor a claim row and no reachable descriptor; [C4-2] a crash between the fenced settle update and the attempt/result insert leaves the claim terminal with no attempt and no result (a recorded, visible integrity fault that is never silently repaired), while a crash after the port call but before settling leaves the claim `in_flight` for a fenced re-drive, and an owner fenced out before its settlement writes no attempt and no result; [C4-3] a failure raised inside the worker execution context still restores the caller's previous identity, and a decision refused for a §10.1 reason still records the worker principal as its `recorded_by` rather than an anonymous actor |
-| `tests/phase-2a2t-concurrency-runner.sh` | `duplicate_webhook`, `out_of_order_event`, `submit_vs_cancel`, `settlement_vs_attempt`, `mapping_change_vs_intake`, `secret_rotation_vs_intake`, `unrelated_students`, [C2-1] `duplicate_command_replay`, [C2-3] `settlement_vs_r2_consequence`, [C3-1] `submit_vs_cancel_in_flight` (two opposing operations for one intent race the live `subject_claim` slot: exactly one dispatches and the loser is refused durably with `dispatch_in_flight`, never two provider calls), [C3-1] `redrive_after_crash` (a concurrent `redrive()` on an expired `in_flight` claim yields exactly one mutating dispatch and one reconciled attempt, never two calls), [C4-2] `concurrent_expired_lease` — the required round-4 case: two `redrive()` calls observe one expired `in_flight` claim simultaneously; exactly one take-over succeeds (the other's conditional update affects `0` rows, so it writes nothing, calls nothing and reports the pending state), exactly one reconciliation is performed, at most one mutating call is issued, and the command ends with exactly one attempt, one terminal result row and one settled claim; [C4-2] `fenced_settlement_lost` (an owner whose lease is taken over between its call and its settlement records no attempt and no result, and the taker's reconciliation adopts the provider state once); [C7-2] `post_preflight_capability_failure` (two concurrent owners on one generation-1 `in_flight` claim both observe the pre-call capability refusal: exactly one fenced no-call abort affects `1` row, the loser affects `0`, writes nothing and reports the pending state, and the command ends with one refused result, no attempt and no provider call); [C8-3] `duplicate_webhook` is a real delivery race: two workers announce themselves in the gate directory, wait for each other and then submit one provider event identity simultaneously (neither holds a lock), and the verifier proves one recorded event, one decision, exactly one R1 settlement and evidence, one confirmed intent, one collected cycle and no conflict decision — so a worker that loses `UNIQUE provider_event` converges instead of translating; [C8-3] `conflicting_duplicate_webhook` re-delivers the same event identity with materially different recorded facts and proves one event, exactly two decisions of which exactly one is `conflicting_provider_event`, still exactly one R1 settlement/evidence, and a recorded event whose `payload_digest` is one of the two deliveries; [C10-2] `stale_owner_after_lease_expiry` — the owner takes the claim for an owed decision and then lets its own bounded lease lapse while it still owns it: the successor generation takes the claim over and completes the decision, the resumed stale generation is refused by the work-unit gate before its first R1/R2 unit and therefore performs no decision work, no R1/R2 consequence work and no append, and exactly one R1 settlement/evidence, one confirmed intent, one collected cycle, one decision and one settled generation-2 claim remain; [C11-1] `stale_owner_inside_r1_unit` and `stale_owner_inside_r2_unit` — the round-11 cases: the owner stalls *inside* the R1 evidence submission (respectively the R2 collection-intent confirmation) with the window that unit is running inside aged past expiry while the contender delivers the same event, so the contender owns nothing and works nowhere, the stalled generation's unit is rolled back *from inside its own transaction* (the successor's recorded observation shows no R1 evidence and no settlement at all in the R1 case, — after which the successor's own R1 and R2 units apply the ordered consequence exactly once (one confirmed intent, one collected cycle) — and in the R2 case the R1 unit that finished inside its window stays committed while the intent is still `submitted`, the cycle is still `payment_required` and neither a confirmation event nor a confirmation command exists, so that event's deliberately older occurrence instant makes the successor's re-decision the controlled `stale_provider_event` refusal and no generation confirms or collects anything), that generation releases its lapsed claim instead of holding the event, and exactly one R1 evidence/settlement, one decision appended by the successor, one released generation-1 claim and one settled successor claim remain |
+| `tests/phase-2a2t-concurrency-runner.sh` | `duplicate_webhook`, `out_of_order_event`, `submit_vs_cancel`, `settlement_vs_attempt`, `mapping_change_vs_intake`, `secret_rotation_vs_intake`, `unrelated_students`, [C2-1] `duplicate_command_replay`, [C2-3] `settlement_vs_r2_consequence`, [C3-1] `submit_vs_cancel_in_flight` (two opposing operations for one intent race the live `subject_claim` slot: exactly one dispatches and the loser is refused durably with `dispatch_in_flight`, never two provider calls), [C3-1] `redrive_after_crash` (a concurrent `redrive()` on an expired `in_flight` claim yields exactly one mutating dispatch and one reconciled attempt, never two calls), [C4-2] `concurrent_expired_lease` — the required round-4 case: two `redrive()` calls observe one expired `in_flight` claim simultaneously; exactly one take-over succeeds (the other's conditional update affects `0` rows, so it writes nothing, calls nothing and reports the pending state), exactly one reconciliation is performed, at most one mutating call is issued, and the command ends with exactly one attempt, one terminal result row and one settled claim; [C4-2] `fenced_settlement_lost` (an owner whose lease is taken over between its call and its settlement records no attempt and no result, and the taker's reconciliation adopts the provider state once); [C7-2] `post_preflight_capability_failure` (two concurrent owners on one generation-1 `in_flight` claim both observe the pre-call capability refusal: exactly one fenced no-call abort affects `1` row, the loser affects `0`, writes nothing and reports the pending state, and the command ends with one refused result, no attempt and no provider call); [C8-3] `duplicate_webhook` is a real delivery race: two workers announce themselves in the gate directory, wait for each other and then submit one provider event identity simultaneously (neither holds a lock), and the verifier proves one recorded event, one decision, exactly one R1 settlement and evidence, one confirmed intent, one collected cycle and no conflict decision — so a worker that loses `UNIQUE provider_event` converges instead of translating; [C8-3] `conflicting_duplicate_webhook` re-delivers the same event identity with materially different recorded facts and proves one event, exactly two decisions of which exactly one is `conflicting_provider_event`, still exactly one R1 settlement/evidence, and a recorded event whose `payload_digest` is one of the two deliveries; [C10-2] `stale_owner_after_lease_expiry` — the owner takes the claim for an owed decision and then lets its own bounded lease lapse while it still owns it: the successor generation takes the claim over and completes the decision, the resumed stale generation is refused by the work-unit gate before its first R1/R2 unit and therefore performs no decision work, no R1/R2 consequence work and no append, and exactly one R1 settlement/evidence, one confirmed intent, one collected cycle, one decision and one settled generation-2 claim remain; [C11-1] `stale_owner_inside_r1_unit` and `stale_owner_inside_r2_unit` — the round-11 cases: the owner stalls *inside* the R1 evidence submission (respectively the R2 collection-intent confirmation) with the window that unit is running inside aged past expiry while the contender delivers the same event, so the contender owns nothing and works nowhere, the stalled generation's unit is rolled back *from inside its own transaction* (the successor's recorded observation shows no R1 evidence and no settlement at all in the R1 case, — after which the successor's own R1 and R2 units apply the ordered consequence exactly once (one confirmed intent, one collected cycle) — and in the R2 case the R1 unit that finished inside its window stays committed while the intent is still `submitted`, the cycle is still `payment_required` and neither a confirmation event nor a confirmation command exists, so that event's deliberately older occurrence instant makes the successor's re-decision the controlled `stale_provider_event` refusal and no generation confirms or collects anything), that generation releases its lapsed claim instead of holding the event, and exactly one R1 evidence/settlement, one decision appended by the successor, one released generation-1 claim and one settled successor claim remain; [C12-1] `stale_owner_at_decision_append` — the round-12 case: the owner completes every R1/R2 work unit of the decision operation and then lets the window it still exclusively holds lapse *at the append seam*, with no successor having taken its claim over, so the fenced `claimed → settled` transition of the append itself is what must refuse it — proven by that owner own generation-1 claim ending `released` with no live slot and by the absence of any generation above 1; the owner appends nothing, reports the event as still owing its decision and releases the live claim it appended nothing to, and the next delivery is the one that completes the event with exactly one decision (the controlled `stale_provider_event` refusal of the obligation the stale generation own committed R1 settlement already covers), while exactly one R1 evidence/settlement, one confirmed intent and one collected cycle stand from the work that generation did inside its window |
 | Adjacent regressions | Phase L, M, M0, N, O, P, Q, R1 and R2 runtime suites re-run green (P and Q only where their pre-existing fixture-order limitations are recorded honestly) |
 
 Correction round 5 adds these required proofs, each inside the suite whose row already owns the
@@ -2859,7 +2914,9 @@ Correction round 9 adds these required proofs, each inside the suite whose row a
   intent/collected cycle result, with no second translation or consequence.
   `tests/phase-2a2t-failure-runtime.php` proves the fence's atomicity: a rollback between the settle update and the decision insert
   leaves the claim live and no decision, an expired claim is taken over by exactly one generation, and a
-  stale generation never takes it twice. `tests/phase-2a2t-corruption-runtime.php` adds the mutated claim
+  stale generation never takes it twice; [C12-1] an append that runs after the claim's lease has lapsed
+  settles nothing and leaves the claim live for that generation to release or for exactly one successor to
+  take over. `tests/phase-2a2t-corruption-runtime.php` adds the mutated claim
   shapes — unknown state, live claim without its lease, terminal claim that kept its live slot, malformed
   token — each of which fails closed on the aggregate proof and is never repaired.
 - [C9-3] `tests/phase-2a2t-contract.php` proves the transport contract in source: the locked
@@ -2943,6 +3000,29 @@ Correction round 11 adds these required proofs, each inside the suite whose row 
   `stale_provider_event` refusal, and no generation confirms or collects anything. Both cases leave
   exactly one R1 evidence/settlement, one decision appended by the successor, one released generation-1
   claim and one settled successor claim.
+
+Correction round 12 adds these required proofs, each inside the suite whose row already owns the subject:
+
+- [C12-1] `tests/phase-2a2t-contract.php` proves the appended-window contract in source: the repository's
+  `claimed → settled` transition requires, in its one conditional statement, the owner's own
+  `claim_state = 'claimed'`, its `claim_generation`, its `claim_token_digest`, its `active_claim_slot = 1`
+  **and** a non-null, unexpired `lease_expires_at`, judged against the same `$now` the statement stamps the
+  row with; and the intake, on that transition affecting zero rows, releases the live claim it appended
+  nothing to and *then* converges, after the append seam it exposes through
+  `dzn_phase_2a2t_before_provider_event_decision_append`. `tests/phase-2a2t-failure-runtime.php` proves the
+  transition behaviourally: an append that runs past the claim's lease settles nothing and leaves the claim
+  live, for this generation to release or for exactly one successor to take over.
+  `tests/phase-2a2t-concurrency-runner.sh` adds `stale_owner_at_decision_append` (twenty-three modes): the
+  first worker takes the event's decision claim for an owed decision, completes **every** R1/R2 work unit of
+  the decision operation, and then lets the window it still exclusively holds lapse at the append seam —
+  aged in the database, with no successor generation having taken its claim over. The verifier proves the
+  owner reached the R1/R2 work boundaries (so the window closed at the append, never before the work), that
+  the append — and never a take-over — refused the stale generation: its own generation-1 claim ends
+  `released` with no live slot and no lease, no generation above 1 exists, and no live claim survives; that
+  the stale generation appended nothing and reported the event as still owing its decision; and that the
+  next delivery is the generation that completes the event with its single decision, while the work the
+  stale generation committed inside its window stands exactly once (one R1 evidence, one R1 settlement, one
+  confirmed collection intent, one collected renewal cycle).
 
 Fresh-install, 26 → 29 upgrade, idempotency, webhook and representative runtime tests are mandatory
 acceptance gates. Every suite must run on the disposable WordPress + MariaDB runtime used by R1/R2,
