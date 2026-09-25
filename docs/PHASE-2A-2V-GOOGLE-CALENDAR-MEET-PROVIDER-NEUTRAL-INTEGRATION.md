@@ -1,6 +1,6 @@
 # Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (implementation record)
 
-Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 3 APPLIED — NOT INDEPENDENTLY
+Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 4 APPLIED — NOT INDEPENDENTLY
 REVIEWED / NOT MERGED / NOT DEPLOYED.** No live credential, no provider traffic, no production data,
 no Theme change, no deployment and no public cutover is authorised by this document or by the code it
 describes.
@@ -25,6 +25,14 @@ describes.
 > returned FAIL / CORRECTION REQUIRED with two blocking findings. Section 10 records each finding and
 > the exact correction. History remains additive: nothing was reset, rebased, amended or force-pushed,
 > and this round is a strictly additive change on top of that candidate.
+>
+> **Correction round 4.** Independent review of the round-3 candidate
+> `d9c47b60d085817009a0734e51886154352b6359` / tree `bc02802f40a780b19750d5e349e44f98f206739d`
+> (materialised in this workspace as commit `eed38cda98e0a59614c2ae92872a2c1ff1032d80`, same tree)
+> returned FAIL / CORRECTION REQUIRED with two blocking findings: the reverse canonical lock order of
+> `lockLessonRoots()` and the non-atomic `MAX(event_sequence)+1` receipt allocation. Section 11
+> records each finding and the exact correction. History remains additive: nothing was reset, rebased,
+> amended or force-pushed.
 
 ## 1. Identity
 
@@ -167,7 +175,7 @@ academic, attendance, delivery, notification or payment storage into the phase.
 | `src/Core/Application/Port/*.php` | `ProviderOAuthPort`, `ProviderCalendarPort`, `ProviderMeetingPort`, `ProviderEventNormalizer`. |
 | `src/Integrations/GoogleCalendarMeetAdapter.php` | The only Google-specific translation seam: pure, no HTTP client, no OAuth library, no credential, no webhook, translation-only projections. |
 | `src/Integrations/ContractProviderAdapters.php` | Deterministic no-I/O adapters implementing all four ports for the evidence runs; credential material is never recorded. |
-| `src/Core/Infrastructure/Repository/ProviderIntegrationRepository.php` | All ten tables plus the Phase-V lock order (`Student–Course identity root → Enrolment → Term → canonical Lesson`). |
+| `src/Core/Infrastructure/Repository/ProviderIntegrationRepository.php` | All ten tables plus the Phase-V lock order (`Student–Course identity root → Enrolment → Term → canonical Lesson`, taken in that order by `lockLessonRoots()` and revalidated against the locked rows before a caller sees them) and the provider-scoped serialisation of the receipt sequence (`lockProviderEventSequence()` / `releaseProviderEventSequence()`). |
 
 Core never imports `Delnavazan\Platform\Integrations\*`; the adapters are injected through the ports.
 
@@ -181,7 +189,7 @@ Core never imports `Delnavazan\Platform\Integrations\*`; the adapters are inject
 | `tests/phase-2a2v-runtime.php` | Consent lifecycle with deterministic digest replay, exact-lifecycle completion with a competing pending consent, sealing, mappings, calendar/Meet projection against the exact canonical version, pending→acknowledged promotion, stale-version refusal, retraction without canonical mutation, authenticated Phase-P evidence seam, immutable receipt with an appended admission, duplicate convergence, durable conflict, capability denial, object-level reads including the view-capability requirement, digest-only persistence. | NOT EXECUTED HERE |
 | `tests/phase-2a2v-corruption-runtime.php` | Corrupt connection state/identity digest, credential versions and sealed material, mapping shapes (including a pending projection), provider-event context/state/proof, handoff outcome, conflict kind and command evidence; every path fails closed and recovers after repair. | NOT EXECUTED HERE |
 | `tests/phase-2a2v-failure-runtime.php` | Injected write boundaries at the connection, projection and ingest gates: full rollback, no orphan provider reference, no falsely replayable command, no Phase-P fact from a rolled-back ingest, and no reported admission for a receipt whose handoff outcome is absent. | NOT EXECUTED HERE |
-| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay` (two processes consuming one identical authorization state with one identical command key), `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay` (two processes consuming one identical authorization state with one identical command key), `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `provider_event_sequence_race` (two distinct event keys for two different Lessons delivered together — disjoint canonical chains, one provider-scoped receipt sequence), `ingest_vs_canonical_authority` (a provider ingest raced against a canonical schedule authority holding the complete canonical chain), `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
 
 Runtime suites are gated on `DZN_PHASE_2A2V_RUNTIME_TEST` ∈
 `migration|authority|corruption|failure|concurrency` and refuse to run outside WP-CLI on a
@@ -199,6 +207,39 @@ DZN_PHASE_2A2V_REPO=<repo> DZN_PHASE_2A2V_WP_DIR=<wp> DZN_PHASE_2A2V_NET=<net> \
 ```
 
 ## 7. Evidence executed for this correction round
+
+### Correction round 4
+
+The environment constraint is unchanged: no PHP interpreter is on the `PATH`, no Docker runtime is
+reachable (the Docker CLI reports `permission denied while trying to connect to the docker API`) and
+network access is restricted, so no PHP file could be linted and no suite could be executed here.
+Executed instead, against the two reviewed findings:
+
+- a structural balance check over every touched PHP file (all clean);
+- a line-by-line review of each corrected path, including a trace of `lockLessonRoots()` against the
+  canonical authorities it must interleave with (`CanonicalLessonAuthorityService`,
+  `CanonicalLessonScheduleService`, `CanonicalLessonDeliveryService`, `CanonicalAttendanceIntakeService`)
+  and a trace of the provider-sequence allocation against the two-connection race the new mode stages;
+- a symbol-resolution check over every touched PHP file: each referenced class and helper
+  (`GET_LOCK`/`RELEASE_LOCK` are driver statements, not PHP symbols) resolves to an imported,
+  same-namespace or fully-qualified name;
+- a static contract extension in `tests/phase-2a2v-contract.php` that now *machine-checks* the declared
+  lock order (the identity root is locked before the Enrolment, the Enrolment before the Term and the
+  Term before the Lesson), the presence of the three relationship revalidations, the fact that an
+  acknowledgement locks the canonical chain before the mapping row, and the fact that the ingest takes
+  the provider-scoped sequence serialisation before the receipt insert and releases it on every path;
+- `sh -n tests/phase-2a2v-concurrency-runner.sh` (the runner script gained two modes);
+- `git diff --check` and a complete `git status` review before publication;
+- `php -l` over every touched PHP file: **NOT EXECUTED** (no PHP runtime in this environment) and must
+  be run in the disposable harness before merge, together with the runtime suites.
+
+Every suite in §6, including the two that need no WordPress, is marked NOT EXECUTED HERE. This round
+changed source and test surface that those suites assert on, so the earlier candidate's results do not
+carry over and must be reproduced by the reviewer's harness before this candidate is accepted. No live
+credential, no provider traffic, no production data, no Theme change and no deployment were used or
+produced.
+
+### Correction round 3
 
 Executed in the correcting environment (no PHP interpreter is on the `PATH` and no Docker runtime is
 reachable there — the Docker CLI reports `permission denied while trying to connect to the docker
@@ -363,3 +404,84 @@ unresolvable class name. The gap is carried by the authoritative base `559b173�
 phase, and is deliberately **not** repaired here: a bounded correction round must not widen the
 reviewed surface. It is recorded so the owning Phase-N slice can schedule the import fix under its own
 review, together with the runtime coverage that would catch it.
+
+## 11. Correction round 4 — blocking findings and their resolution
+
+Reviewed candidate `d9c47b60d085817009a0734e51886154352b6359` / tree
+`bc02802f40a780b19750d5e349e44f98f206739d` (materialised in this workspace as commit
+`eed38cda98e0a59614c2ae92872a2c1ff1032d80`, identical tree). Both findings are corrected in code and
+in the test surface that asserts the corrected behaviour:
+
+1. **`lockLessonRoots()` took the canonical chain in the reverse of the declared order.** The Phase-V
+   order is `Student–Course identity root → Enrolment → Term → canonical Lesson`, and every canonical
+   authority (`CanonicalLessonAuthorityService`, `CanonicalLessonScheduleService`,
+   `CanonicalLessonDeliveryService`, `CanonicalAttendanceIntakeService`) takes exactly that order via
+   `CanonicalLessonAuthorityRepository::lockRoot()`. `lockLessonRoots()` instead locked the Lesson
+   first, then the Enrolment, then the Term, and only then the identity root, so a Phase-V ingest or
+   projection racing a canonical operation on the same aggregate could form a lock cycle — the
+   integration path holds the Lesson and waits for the root while the canonical path holds the root and
+   waits for the Lesson. *Corrected:* the Lesson is read first only as an **unlocked** hint that names
+   its Enrolment; the identity root is located from that Enrolment and locked first; the Enrolment, the
+   Term and finally the Lesson are locked in the declared order; and the locked relationship is
+   revalidated before it is handed to a caller (`canonical_enrolment_identity_root_changed`,
+   `canonical_lesson_enrolment_changed`, `canonical_lesson_term_changed`), so a hint that changed
+   between the read and the locks can never move the lock onto a different aggregate. The same
+   invariant is now honoured by `ProviderIntegrationService::acknowledge()`, which previously locked a
+   mapping row and *then* took the canonical chain — the mirror image of the cycle a projection forms
+   when it locks the chain and then the mapping row; the mapping is now read as an unlocked hint, the
+   canonical chain is locked, and only then is the mapping row locked and revalidated against the chain
+   that was locked. `tests/phase-2a2v-concurrency-runner.sh` gains the
+   `ingest_vs_canonical_authority` mode, which holds the complete canonical chain inside a canonical
+   schedule operation while a provider ingest takes the same chain, and asserts that the canonical
+   operation fails closed leaving the canonical aggregate untouched, that the ingest still leaves its
+   immutable receipt, and that neither contender is answered with a deadlock or a lock-wait timeout.
+   `tests/phase-2a2v-contract.php` now additionally pins the declared order statically: the identity
+   root must be locked before the Enrolment, the Enrolment before the Term and the Term before the
+   Lesson, the three revalidations must be present, and an acknowledgement must lock the chain before
+   the mapping row.
+2. **A new receipt allocated `event_sequence` with an unsynchronised `MAX(...)+1`.** `event_sequence`
+   is unique per provider, but two deliveries that name different Lessons take different canonical
+   chains, so nothing serialised the read of the head: both contenders could choose the same number and
+   the loser failed the unique `(provider_code,event_sequence)` index instead of recording its immutable
+   receipt. *Corrected:* a new receipt now takes the provider-scoped sequence under
+   `ProviderIntegrationRepository::lockProviderEventSequence()`, a provider-scoped named lock
+   (`GET_LOCK` on a bounded digest of the provider code) that is taken **before** the head is read and
+   released only after the receipt transaction has committed or rolled back, so a contender always
+   reads the committed head and takes the next number. The unique `(provider_code,event_sequence)` index
+   is preserved unchanged as the durable guard behind the serialisation, and the lock is released on
+   every path (including the rollback and the duplicate-convergence path). The concurrency matrix gains
+   the `provider_event_sequence_race` mode: two distinct event keys for two different Lessons are
+   delivered together while the holder's receipt transaction is still open, and the verifier asserts
+   that two immutable receipts exist with the two next provider sequences (no gap, no collision), that
+   they belong to the two raced Lessons, and that neither contender is answered with a duplicate-key
+   persistence failure or with an unavailable serialisation.
+
+Behaviour that the review confirmed and that this round deliberately preserves: the authenticated
+envelope boundary, the immutable provider-event receipt with append-only handoff outcomes, admission
+written only after a successful Phase-P handoff, the pending→acknowledged projection boundary, and no
+write of any kind to Phase-M/N/O/P storage — the only writes remain the ten Phase-V tables and the
+Phase-P intake seam. No new table, column, index or migration was introduced by this round, and the
+schema stays Schema 27 / migration `027_google_calendar_meet_provider_integration`.
+
+## 12. Declared canonical lock order and the provider-scoped receipt sequence
+
+Two invariants make the Phase-V storage safe to share with the canonical authorities. Both are stated
+here so that §5, the repository docblock, the static contract and the concurrency matrix all describe
+the same rule.
+
+**Canonical lock order.** Anything that needs both a canonical aggregate and a Phase-V integration row
+takes the canonical chain first, in exactly this order: Student–Course identity root → Enrolment →
+Term → canonical Lesson. Only after the chain is held may a caller lock an integration row (a
+connection, a credential, an identity mapping, a calendar or meeting mapping, an ingest receipt, a
+conflict or a command). A row that is needed to *discover* the Lesson is read first as an unlocked
+hint and re-read under `FOR UPDATE` after the chain is held, so a stale hint can never move the lock
+onto another aggregate. `ProviderIntegrationRepository::lockLessonRoots()` implements the rule;
+`ProviderIntegrationService::acknowledge()` follows it; `ProviderIntegrationService::retract()` locks
+only its own mapping row and takes no canonical lock at all, so it cannot form the reverse cycle.
+
+**Provider-scoped receipt sequence.** `event_sequence` in `dzn_provider_ingest_events` is unique per
+`provider_code` and is the provider-scoped ordering of immutable receipts. Because two deliveries for
+different Lessons hold disjoint canonical chains, the sequence is allocated under a provider-scoped
+serialisation: `lockProviderEventSequence()` is taken before the head is read, `maxEventSequence()+1`
+is computed inside that serialisation, and `releaseProviderEventSequence()` runs after the receipt
+transaction has ended. The unique `(provider_code,event_sequence)` index remains the durable guard.

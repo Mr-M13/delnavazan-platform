@@ -51,14 +51,26 @@ if($mode==='authorization_replay'){
     if($mode==='mapping_revoke_vs_ingest'){
         $state['identity_mapping_id']=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}provider_identity_mappings WHERE connection_id=%d AND mapping_state='verified' LIMIT 1",$connectionA));
     }
+    if($mode==='provider_event_sequence_race'){
+        // A second occurrence in the same provider on a *different* Lesson: the two contenders therefore
+        // lock different canonical chains, and the only shared serialisation is the provider-scoped
+        // receipt sequence the ingest allocates before it writes an immutable receipt.
+        $fundedB=dzn_r2_fix_funded_enrolment($fixture['sources'][1],$mode.'-b',2);
+        $targetB=$wpdb->get_row($wpdb->prepare("SELECT version.* FROM {$p}canonical_lesson_schedule_versions version INNER JOIN {$p}lessons lesson ON lesson.id=version.lesson_id WHERE lesson.term_id=%d AND version.applicable_slot=1 ORDER BY version.id LIMIT 1",(int)$fundedB['term_id']));
+        dzn_vcs_assert($targetB!==null,'the second occurrence must leave one applicable canonical schedule version');
+        $state['occurrence_b']=array('lesson_id'=>(int)$targetB->lesson_id,'schedule_version_id'=>(int)$targetB->id);
+    }
 }
 // One deterministic provider-event delivery for the ingest modes, so an exact duplicate is genuinely
 // exact and only the deliberate conflict variant differs.
 $state['delivery']=array('event_key'=>$mode.'-event-'.substr(str_replace('-','',wp_generate_uuid4()),0,8),'observed_at'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'));
+if($mode==='provider_event_sequence_race')
+    $state['delivery_b']=array('event_key'=>$mode.'-event-b-'.substr(str_replace('-','',wp_generate_uuid4()),0,8),'observed_at'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'));
 $state['baseline']=array(
     'versions'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d",$lessonId)),
     'events'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_events WHERE lesson_id=%d",$lessonId)),
     'lesson_state'=>(string)$lesson->lifecycle_state,
+    'applicable_version'=>(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d AND applicable_slot=1",$lessonId)),
 );
 update_option('dzn_phase_2a2v_concurrency',$state,false);
 echo "Phase 2A.2-V concurrency setup prepared: ".$mode."\n";

@@ -39,11 +39,14 @@ $connect=static function(int $teacher,string $label) use($service,$scope,$eviden
 };
 $given=is_array($state['delivery']??null)?$state['delivery']:array('event_key'=>$mode.'-event-'.substr(str_replace('-','',wp_generate_uuid4()),0,8),'observed_at'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'));
 $eventKey=(string)$given['event_key'];
-/** One authenticated transport envelope over the exact body the fixture already fixed. */
-$delivery=static function(array $state,string $joinAt) use($given,$eventKey):array{
-    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>(string)$given['observed_at'],'join_at_utc'=>$joinAt,'leave_at_utc'=>(string)$given['leave_at_utc']);
+/** One authenticated transport envelope over the exact body the fixture fixed for one occurrence. */
+$envelope=static function(int $lessonId,int $scheduleVersionId,string $eventKey,string $joinAt,string $observedAt,string $leaveAt):array{
+    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt);
     $body=(string)wp_json_encode($facts);
-    return array('provider_code'=>'google_meet','lesson_id'=>(int)$state['lesson_id'],'schedule_version_id'=>(int)$state['schedule_version_id'],'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-0000','facts'=>$facts);
+    return array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-0000','facts'=>$facts);
+};
+$delivery=static function(array $state,string $joinAt) use($given,$eventKey,$envelope):array{
+    return $envelope((int)$state['lesson_id'],(int)$state['schedule_version_id'],$eventKey,$joinAt,(string)$given['observed_at'],(string)$given['leave_at_utc']);
 };
 try{
     if($mode==='connect_vs_revoke'){
@@ -97,6 +100,37 @@ try{
             $join=(string)$given['join_at_utc'];
             if((string)getenv('DZN_PHASE_2A2V_VARIANT')==='conflict')$join=gmdate('Y-m-d H:i:s',strtotime((string)$given['join_at_utc'].' UTC')+900);
             $result['outcome']=$ingest->ingest($delivery($state,$join),$key('race-ingest-2'));
+        }
+        $result['ok']=true;
+    }elseif($mode==='provider_event_sequence_race'){
+        // Two distinct event keys for two different Lessons arrive together. The holder keeps its receipt
+        // transaction open, so the contender has to take a sequence that is distinct from the one the
+        // holder is still holding — neither may be answered with a duplicate-key persistence failure.
+        $other=is_array($state['occurrence_b']??null)?$state['occurrence_b']:null;
+        if($other===null)throw new RuntimeException('provider event sequence race fixture missing');
+        if($worker==='w1'){
+            $result['action']='ingest_provider_event';
+            $hold('dzn_phase_2a2v_after_ingest_write');
+            $result['outcome']=$ingest->ingest($delivery($state,(string)$given['join_at_utc']),$key('race-sequence-a'));
+        }else{
+            $givenB=is_array($state['delivery_b']??null)?$state['delivery_b']:$given;
+            $eventKeyB=(string)$givenB['event_key'];
+            $result['action']='ingest_distinct_provider_event_other_lesson';
+            $result['outcome']=$ingest->ingest($envelope((int)$other['lesson_id'],(int)$other['schedule_version_id'],$eventKeyB,(string)$givenB['join_at_utc'],(string)$givenB['observed_at'],(string)$givenB['leave_at_utc']),$key('race-sequence-b'));
+        }
+        $result['ok']=true;
+    }elseif($mode==='ingest_vs_canonical_authority'){
+        // The canonical schedule authority holds the complete canonical chain — root, Enrolment, Term and
+        // Lesson — while the provider ingest takes the same chain in the same declared order. The release
+        // names a version that is not applicable, so the canonical operation fails closed after it holds
+        // the locks; the ingest must still complete and the canonical aggregate must stay untouched.
+        if($worker==='w1'){
+            $result['action']='release_canonical_schedule_stale';
+            $hold('dzn_phase_2a2n_schedule_locks_held');
+            $result['outcome']=(new CanonicalLessonScheduleService())->release((int)$state['lesson_id'],array('expected_schedule_version_id'=>(int)$state['schedule_version_id']+1000,'reason_code'=>'race_release')+$evidence('race-release'),$key('race-release'));
+        }else{
+            $result['action']='ingest_provider_event';
+            $result['outcome']=$ingest->ingest($delivery($state,(string)$given['join_at_utc']),$key('race-ingest'));
         }
         $result['ok']=true;
     }elseif($mode==='mapping_revoke_vs_ingest'){

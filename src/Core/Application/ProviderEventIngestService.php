@@ -23,6 +23,11 @@ use Delnavazan\Platform\Core\Support\Identifier;
  * received, and it is written before the Phase-P handoff so an interruption always leaves evidence.
  * Admission is a separate appended outcome, written only after the handoff succeeded, so a receipt can
  * never be read — or returned to a retrying caller — as admitted when Phase P never saw the fact.
+ *
+ * A new receipt takes the next provider-scoped `event_sequence` under the provider sequence lock, which
+ * is held until its transaction has committed: two deliveries that name different Lessons lock different
+ * canonical chains, yet they still take distinct sequences instead of colliding on the unique
+ * `(provider_code,event_sequence)` index.
  */
 final class ProviderEventIngestService {
     public function __construct(
@@ -68,7 +73,7 @@ final class ProviderEventIngestService {
         $eventFactDigest=ProviderIntegrationIdempotency::payload($context);
         $digest=ProviderIntegrationIdempotency::key($key);
         $now=gmdate('Y-m-d H:i:s');
-        $eventId=0;$duplicate=false;
+        $eventId=0;$duplicate=false;$sequenceLocked=false;
         $this->repository->begin();
         try{
             $this->repository->lockLessonRoots($lessonId);
@@ -95,6 +100,11 @@ final class ProviderEventIngestService {
                 $this->repository->commit();
                 $duplicate=true;
             }else{
+                // The provider-scoped sequence lock is taken before the head is read and released only
+                // after this transaction has ended, so a delivery for a different Lesson can never take
+                // the same `event_sequence` while this receipt is still uncommitted.
+                $this->repository->lockProviderEventSequence($providerCode);
+                $sequenceLocked=true;
                 $eventId=$this->repository->insertIngestEvent(array(
                     'uid'=>Identifier::uid(),'connection_id'=>isset($delivery['connection_id'])?(int)$delivery['connection_id']:null,
                     'provider_code'=>$providerCode,'provider_event_key_digest'=>$eventKeyDigest,'event_fact_digest'=>$eventFactDigest,
@@ -121,6 +131,10 @@ final class ProviderEventIngestService {
             if(!$winner)throw $e;
             if(!hash_equals((string)$winner->event_fact_digest,$eventFactDigest))throw new IdempotencyConflictException('Idempotency conflict');
             $eventId=(int)$winner->id;$duplicate=true;
+        }finally{
+            // The lock is not transactional, so it is always released once the receipt transaction — and
+            // the read of the committed head that decides the next sequence — is finished.
+            if($sequenceLocked)$this->repository->releaseProviderEventSequence($providerCode);
         }
         // Phase P owns intake, identity resolution, assessment and any canonical consequence. The
         // integration layer supplies facts only, and its own transaction is already closed so no

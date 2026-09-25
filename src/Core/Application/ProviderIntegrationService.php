@@ -659,13 +659,20 @@ final class ProviderIntegrationService {
         $now=gmdate('Y-m-d H:i:s');
         $this->repository->begin();
         try{
-            $mapping=$purpose==='meeting_conference'?$this->repository->meetingMapping($mappingId,true):$this->repository->calendarMapping($mappingId,true);
-            if(!$mapping)throw new \InvalidArgumentException('integration_mapping_required');
-            if(!ProviderIntegrationValidator::mappingShape($mapping,$purpose))throw new \InvalidArgumentException('integration_mapping_malformed');
+            // The mapping is read first only as an *unlocked* hint that names its Lesson. The canonical
+            // chain is then taken in the declared Phase-V order and the mapping row is locked after it:
+            // locking the mapping before the chain would form the reverse cycle against a projection,
+            // which locks the chain first and only then this row.
+            $hint=$purpose==='meeting_conference'?$this->repository->meetingMapping($mappingId):$this->repository->calendarMapping($mappingId);
+            if(!$hint)throw new \InvalidArgumentException('integration_mapping_required');
+            if(!ProviderIntegrationValidator::mappingShape($hint,$purpose))throw new \InvalidArgumentException('integration_mapping_malformed');
             // The acknowledgement arrives after the projection, so the canonical occurrence is
             // revalidated under the Phase-V lock order: a version that went stale in between may never
             // be promoted to a verified provider reference.
-            $this->repository->lockLessonRoots((int)$mapping->lesson_id);
+            $this->repository->lockLessonRoots((int)$hint->lesson_id);
+            $mapping=$purpose==='meeting_conference'?$this->repository->meetingMapping($mappingId,true):$this->repository->calendarMapping($mappingId,true);
+            if(!$mapping||(int)$mapping->lesson_id!==(int)$hint->lesson_id)throw new \InvalidArgumentException('integration_mapping_required');
+            if(!ProviderIntegrationValidator::mappingShape($mapping,$purpose))throw new \InvalidArgumentException('integration_mapping_malformed');
             $applicable=ProviderIntegrationValidator::projectionApplicable((int)$mapping->lesson_id,(int)$mapping->schedule_version_id,$this->schedules,$this->lessons,true);
             if(!$applicable['applicable'])throw new \InvalidArgumentException((string)$applicable['reason']);
             if(!ProviderIntegrationValidator::occurrenceAggregateValid((int)$mapping->lesson_id,$this->repository,$this->schedules,$this->lessons,true))throw new \InvalidArgumentException('canonical_lesson_aggregate_invalid');

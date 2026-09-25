@@ -12,7 +12,8 @@ namespace Delnavazan\Platform\Core\Infrastructure\Repository;
  * Lock order (Phase-V §12) is implemented by {@see lockLessonRoots()}: Student–Course identity root →
  * Enrolment → Term → canonical Lesson, and only after that may a caller take a provider connection,
  * mapping, ingest or command row. Nothing in this class locks an integration row before the canonical
- * Lesson chain.
+ * Lesson chain. The provider-scoped receipt sequence is serialised by {@see lockProviderEventSequence()},
+ * which is taken *inside* the caller's transaction and released only once that transaction has ended.
  */
 final class ProviderIntegrationRepository {
     private string $p;
@@ -23,19 +24,53 @@ final class ProviderIntegrationRepository {
     public function commit():void{global $wpdb;if($wpdb->query('COMMIT')===false)throw new \RuntimeException('Transaction commit failed');}
     public function rollback():void{global $wpdb;$wpdb->query('ROLLBACK');}
 
-    /** Take the canonical Lesson chain in the Phase-V lock order before touching integration rows. */
+    /**
+     * Take the canonical Lesson chain in the Phase-V lock order before touching integration rows.
+     *
+     * The declared order is Student–Course identity root → Enrolment → Term → canonical Lesson, exactly
+     * the order every canonical authority takes, so this path can never form the reverse cycle that
+     * would deadlock against a Phase-L/M/N/O/P operation on the same aggregate. The Lesson is read first
+     * only as an *unlocked* hint that names its Enrolment; the identity root is then located from that
+     * Enrolment; and every lock is taken in the declared order. The locked relationship is revalidated
+     * afterwards, so a hint that changed between the read and the locks can never move the lock onto a
+     * different aggregate, nor hand a caller a Lesson that no longer belongs to the chain it locked.
+     */
     public function lockLessonRoots(int $lessonId):array{
         global $wpdb;
+        $hint=$this->row("SELECT * FROM {$this->p}lessons WHERE id=%d",$lessonId);
+        if(!$hint)throw new \InvalidArgumentException('canonical_lesson_required');
+        if($hint->enrolment_id!==null){
+            $enrolmentHint=$this->row("SELECT * FROM {$this->p}enrolments WHERE id=%d",(int)$hint->enrolment_id);
+            if(!$enrolmentHint)throw new \InvalidArgumentException('canonical_enrolment_required');
+            // 1. Student–Course identity root.
+            $root=$this->row("SELECT * FROM {$this->p}enrolment_identity_roots WHERE student_id=%d AND course_id=%d FOR UPDATE",(int)$enrolmentHint->student_id,(int)$enrolmentHint->course_id);
+            if(!$root)throw new \RuntimeException('Enrolment identity root unavailable');
+            // 2. Enrolment.
+            $enrolment=$this->row("SELECT * FROM {$this->p}enrolments WHERE id=%d FOR UPDATE",(int)$enrolmentHint->id);
+            if(!$enrolment)throw new \InvalidArgumentException('canonical_enrolment_required');
+            if((int)$enrolment->student_id!==(int)$root->student_id||(int)$enrolment->course_id!==(int)$root->course_id)throw new \RuntimeException('canonical_enrolment_identity_root_changed');
+            // 3. Term.
+            $term=$hint->term_id===null?null:$this->row("SELECT * FROM {$this->p}terms WHERE id=%d FOR UPDATE",(int)$hint->term_id);
+            // 4. Canonical Lesson.
+            $lesson=$this->row("SELECT * FROM {$this->p}lessons WHERE id=%d FOR UPDATE",$lessonId);
+            if(!$lesson)throw new \InvalidArgumentException('canonical_lesson_required');
+            if((int)$lesson->enrolment_id!==(int)$enrolment->id)throw new \RuntimeException('canonical_lesson_enrolment_changed');
+            $this->assertLessonTerm($lesson,$term);
+            return array('root'=>$root,'enrolment'=>$enrolment,'term'=>$term,'lesson'=>$lesson);
+        }
+        // A Lesson with no Enrolment has neither an identity root nor an Enrolment lock to take: the Term
+        // (when the hint names one) still precedes the Lesson, and the relationship is revalidated.
+        $term=$hint->term_id===null?null:$this->row("SELECT * FROM {$this->p}terms WHERE id=%d FOR UPDATE",(int)$hint->term_id);
         $lesson=$this->row("SELECT * FROM {$this->p}lessons WHERE id=%d FOR UPDATE",$lessonId);
         if(!$lesson)throw new \InvalidArgumentException('canonical_lesson_required');
-        $enrolment=$lesson->enrolment_id===null?null:$this->row("SELECT * FROM {$this->p}enrolments WHERE id=%d FOR UPDATE",(int)$lesson->enrolment_id);
-        $term=$lesson->term_id===null?null:$this->row("SELECT * FROM {$this->p}terms WHERE id=%d FOR UPDATE",(int)$lesson->term_id);
-        $root=null;
-        if($enrolment){
-            $root=$this->row("SELECT * FROM {$this->p}enrolment_identity_roots WHERE student_id=%d AND course_id=%d FOR UPDATE",(int)$enrolment->student_id,(int)$enrolment->course_id);
-            if(!$root)throw new \RuntimeException('Enrolment identity root unavailable');
-        }
-        return array('root'=>$root,'enrolment'=>$enrolment,'term'=>$term,'lesson'=>$lesson);
+        if($lesson->enrolment_id!==null)throw new \RuntimeException('canonical_lesson_enrolment_changed');
+        $this->assertLessonTerm($lesson,$term);
+        return array('root'=>null,'enrolment'=>null,'term'=>$term,'lesson'=>$lesson);
+    }
+    /** The locked Lesson must still name the Term that was locked for it; a moved Term never passes. */
+    private function assertLessonTerm(object $lesson,?object $term):void{
+        if($lesson->term_id===null){if($term!==null)throw new \RuntimeException('canonical_lesson_term_changed');return;}
+        if(!$term||(int)$lesson->term_id!==(int)$term->id)throw new \RuntimeException('canonical_lesson_term_changed');
     }
 
     // ---- Connections -------------------------------------------------------------------------
@@ -163,6 +198,30 @@ final class ProviderIntegrationRepository {
     }
     public function maxEventSequence(string $providerCode):int{
         global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(event_sequence),0) FROM {$this->p}provider_ingest_events WHERE provider_code=%s",$providerCode));
+    }
+    /**
+     * Serialise the provider-scoped receipt sequence for the rest of the caller's transaction.
+     *
+     * `event_sequence` is unique per provider, but two deliveries that name different Lessons lock
+     * different canonical chains, so an unsynchronised `MAX(event_sequence)+1` lets both contenders
+     * choose the same number and the loser fails the unique `(provider_code,event_sequence)` index
+     * instead of recording its immutable receipt. The allocation is therefore serialised on a
+     * provider-scoped named lock that is taken *before* the sequence is read and released only after the
+     * receipt transaction has committed or rolled back — so a contender always reads the committed head
+     * and takes the next number. The unique index stays as the durable guard behind the serialisation.
+     */
+    public function lockProviderEventSequence(string $providerCode):void{
+        global $wpdb;
+        $acquired=$wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s,%d)',$this->providerEventSequenceLock($providerCode),15));
+        if((int)$acquired!==1)throw new \RuntimeException('provider_event_sequence_lock_unavailable');
+    }
+    public function releaseProviderEventSequence(string $providerCode):void{
+        global $wpdb;
+        $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)',$this->providerEventSequenceLock($providerCode)));
+    }
+    /** A bounded, provider-scoped lock name: one sequence per provider code, never one per Lesson. */
+    private function providerEventSequenceLock(string $providerCode):string{
+        return 'dzn_pv_event_seq_'.substr(hash('sha256','provider_event_sequence:'.$providerCode),0,40);
     }
 
     // ---- Provider event conflicts ------------------------------------------------------------

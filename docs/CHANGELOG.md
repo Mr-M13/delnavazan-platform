@@ -6,13 +6,34 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ## Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration — candidate, unmerged — 2026-09-25
 
 Schema 27 / migration `027_google_calendar_meet_provider_integration` / build
-`phase2a2v-provider-neutral-google-calendar-meet-20260925.3`. Reconstructed candidate: the previously
+`phase2a2v-provider-neutral-google-calendar-meet-20260925.4`. Reconstructed candidate: the previously
 recorded Phase-V candidate `3724edb3c36959f3657e6b495ab96f26d347c476` / tree
 `5402cf890e2db898bccb15ba8ffc97176ced6457` was lost from every workspace, backup object store, reflog
 and remote branch, so this slice was rebuilt from the approved provider-neutral contract, the
 authoritative current code/docs and the preserved Phase-V run evidence. It is additive on top of the
 materialised R1/R2 base and renumbers nothing. See
 `docs/PHASE-2A-2V-GOOGLE-CALENDAR-MEET-PROVIDER-NEUTRAL-INTEGRATION.md`.
+
+**Correction round 4** (build `…20260925.4`) applies the independent-review findings against the
+candidate `d9c47b60d085817009a0734e51886154352b6359` / tree
+`bc02802f40a780b19750d5e349e44f98f206739d` (materialised here as commit `eed38cda…`, identical tree),
+additively and without rewriting that history:
+
+- `ProviderIntegrationRepository::lockLessonRoots()` now takes the canonical chain in the declared
+  Phase-V order — Student–Course identity root → Enrolment → Term → canonical Lesson — instead of the
+  reverse, so a Phase-V ingest or projection can no longer form the lock cycle that deadlocked against
+  a canonical Phase-L/M/N/O/P operation on the same aggregate. The Lesson is read first only as an
+  unlocked hint that names its Enrolment; the locked relationship is revalidated before it is handed to
+  a caller. `ProviderIntegrationService::acknowledge()` now also locks the canonical chain before the
+  mapping row it needs, which was the same cycle in mirror image. The concurrency matrix gains the
+  `ingest_vs_canonical_authority` mode and the static contract now pins the declared order.
+- A new provider-event receipt no longer allocates `event_sequence` with an unsynchronised
+  `MAX(...)+1`. The allocation is serialised on a provider-scoped lock
+  (`lockProviderEventSequence()` / `releaseProviderEventSequence()`, `GET_LOCK`) that is taken before
+  the head is read and released only after the receipt transaction has ended, so two deliveries for
+  different Lessons take distinct sequences instead of colliding on the unique
+  `(provider_code,event_sequence)` index, which stays as the durable guard. The concurrency matrix
+  gains the `provider_event_sequence_race` mode.
 
 **Correction round 3** (build `…20260925.3`) applies the independent-review findings against the
 candidate `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree
@@ -101,6 +122,16 @@ candidate `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree
   touched files reference is imported or same-namespace — which is how the missing
   `ProviderIntegrationRule` import in the deterministic adapter was confirmed and closed — a
   content-level tree check, `git diff --check` and a complete `git status` review.
+- Evidence for correction round 4: the environment constraint is unchanged, so every suite in the
+  phase's test surface is once again marked NOT EXECUTED HERE and must be re-run in the reviewer's
+  disposable harness before acceptance. What was executed here: a structural balance check over every
+  touched PHP file, a line-by-line review of each corrected path against both findings (a trace of
+  `lockLessonRoots()` and of `acknowledge()` through the canonical authorities they interleave with,
+  and a trace of the provider-sequence allocation through the two-connection race the new mode
+  stages), a symbol-resolution check over the touched files, `sh -n` over the extended concurrency
+  runner, the extended static contract in `tests/phase-2a2v-contract.php` (declared lock order,
+  revalidations, chain-before-mapping in the acknowledgement, and sequence serialisation before the
+  receipt insert), `git diff --check` and a complete `git status` review.
 
 ## Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority — candidate, unmerged — 2026-09-23
 

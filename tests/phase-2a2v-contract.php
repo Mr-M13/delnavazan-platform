@@ -149,10 +149,46 @@ foreach(array(
     array($migrationRuntime,'DZN_PHASE_2A2V_RUNTIME_TEST','migration'),array($runtime,'DZN_PHASE_2A2V_RUNTIME_TEST','authority'),
     array($corruption,'DZN_PHASE_2A2V_RUNTIME_TEST','corruption'),array($failure,'DZN_PHASE_2A2V_RUNTIME_TEST','failure'),
 ) as $gate)if(!str_contains($gate[0],$gate[1])||!str_contains($gate[0],$gate[2])||!str_contains($gate[0],'wp_get_environment_type'))throw new RuntimeException('Phase V runtime artefact must be harness-gated: '.$gate[2]);
-foreach(array('connect','revoke','authorization','projection','completion','duplicate','conflict','archival','unrelated') as $mode)
+foreach(array('connect','revoke','authorization','projection','completion','duplicate','conflict','archival','unrelated','provider_event_sequence_race','ingest_vs_canonical_authority') as $mode)
     if(!str_contains($concurrency,$mode))throw new RuntimeException('Concurrency matrix is missing mode: '.$mode);
 if(!str_contains($contractAdapters,'implements ProviderOAuthPort')||!str_contains($contractAdapters,'ProviderCalendarPort')||!str_contains($contractAdapters,'ProviderMeetingPort')||!str_contains($contractAdapters,'ProviderEventNormalizer'))throw new RuntimeException('The deterministic contract adapters must implement all four ports');
 if(!str_contains($contractAdapters,'[redacted]'))throw new RuntimeException('The deterministic adapters must never record credential material');
 if(str_contains($contractAdapters,'wp_remote_')||str_contains($adapter,'wp_remote_'))throw new RuntimeException('The adapter seam must make no provider call');
 if(!str_contains($adapter,'code_challenge_method')||!str_contains($adapter,'PKCE')&&!str_contains($adapter,'S256'))throw new RuntimeException('The Google translation seam must render a PKCE-bound authorization request');
+
+// Declaration order: the Phase-V canonical chain is taken root → Enrolment → Term → Lesson, so the
+// projection, acknowledgement and ingest paths can never form the reverse cycle that would deadlock
+// against a canonical Phase-L/M/N/O/P operation on the same aggregate.
+$lockAt=strpos($repository,'function lockLessonRoots');
+$lockEnd=strpos($repository,'private function assertLessonTerm');
+if($lockAt===false||$lockEnd===false)throw new RuntimeException('The Phase-V canonical chain lock must be confined to one declared primitive');
+$lockBody=substr($repository,$lockAt,$lockEnd-$lockAt);
+$rootLock=strpos($lockBody,'enrolment_identity_roots');
+$enrolmentLock=strpos($lockBody,'enrolments WHERE id=%d FOR UPDATE');
+$termLock=strpos($lockBody,'terms WHERE id=%d FOR UPDATE');
+$lessonLock=strpos($lockBody,'lessons WHERE id=%d FOR UPDATE');
+if($rootLock===false||$enrolmentLock===false||$termLock===false||$lessonLock===false)throw new RuntimeException('The Phase-V canonical chain lock must name each lock of the declared order');
+if(!($rootLock<$enrolmentLock&&$enrolmentLock<$termLock&&$termLock<$lessonLock))throw new RuntimeException('lockLessonRoots must take the canonical chain in the declared order: root → Enrolment → Term → Lesson');
+if(!str_contains($lockBody,'canonical_enrolment_identity_root_changed')||!str_contains($lockBody,'canonical_lesson_enrolment_changed')||!str_contains($repository,'canonical_lesson_term_changed'))throw new RuntimeException('The locked canonical relationship must be revalidated before it is handed to a caller');
+// A caller that needs a mapping row must take the canonical chain first: locking the mapping before the
+// chain would form the reverse cycle against a projection, which locks the chain and then this row.
+$ackAt=strpos($service,'private function acknowledge(');
+$ackEnd=strpos($service,'private function connectionForProjection(');
+if($ackAt===false||$ackEnd===false||$ackEnd<$ackAt)throw new RuntimeException('The Phase-V acknowledgement path must stay a single declared operation');
+$ackBody=substr($service,$ackAt,$ackEnd-$ackAt);
+$ackChain=strpos($ackBody,'lockLessonRoots');
+$ackMappingLock=strpos($ackBody,'meetingMapping($mappingId,true)');
+if($ackChain===false||$ackMappingLock===false||!($ackChain<$ackMappingLock))throw new RuntimeException('An acknowledgement must lock the canonical chain before it locks the mapping row');
+if(!str_contains($ackBody,'integration_mapping_malformed'))throw new RuntimeException('An acknowledgement must still validate the mapping shape it locked');
+
+// Provider-scoped receipt sequence: a new receipt takes its `event_sequence` under a provider-scoped
+// serialisation taken before the head is read and released only after the receipt transaction ended, so
+// two deliveries that lock different Lessons cannot both choose the same sequence.
+if(!str_contains($repository,'function lockProviderEventSequence')||!str_contains($repository,'function releaseProviderEventSequence'))throw new RuntimeException('The provider-scoped receipt sequence must be serialised by its own primitive');
+if(!str_contains($repository,'GET_LOCK')||!str_contains($repository,'RELEASE_LOCK'))throw new RuntimeException('The provider-scoped receipt sequence must be serialised on a provider-scoped lock');
+$sequenceAcquire=strpos($ingest,'lockProviderEventSequence');
+$sequenceInsert=strpos($ingest,'insertIngestEvent(');
+$sequenceRelease=strpos($ingest,'releaseProviderEventSequence');
+if($sequenceAcquire===false||$sequenceInsert===false||$sequenceRelease===false||!($sequenceAcquire<$sequenceInsert&&$sequenceInsert<$sequenceRelease))throw new RuntimeException('The ingest must serialise the sequence before the receipt insert and release it after the transaction');
+if(!str_contains($ingest,'}finally{'))throw new RuntimeException('The provider-scoped sequence lock must be released on every path');
 echo "Phase 2A.2-V contract static test passed\n";

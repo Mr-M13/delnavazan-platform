@@ -91,6 +91,44 @@ if($mode==='connect_vs_revoke'){
     dzn_vcv_assert($count('provider_identity_mappings','id=%d AND mapping_state=%s',array((int)$state['identity_mapping_id'],'revoked'))===1,'the identity mapping must be recorded as revoked');
     dzn_vcv_assert($count('provider_identity_mappings','teacher_id=%d AND mapping_state=%s',array($teacherId,'verified'))===0,'a revoked mapping may never stay verified');
     dzn_vcv_assert($count('provider_ingest_events','lesson_id=%d',array((int)$state['lesson_id']))<=1,'the concurrent ingest must leave at most one integration receipt');
+}elseif($mode==='provider_event_sequence_race'){
+    // Two distinct event keys for two different Lessons, delivered together: the canonical chains are
+    // disjoint, so the only shared resource is the provider-scoped receipt sequence. Both immutable
+    // receipts must exist, each with its own sequence, and neither contender may be answered with a
+    // duplicate-key persistence failure for a delivery that never collided on its own event key.
+    $lessonA=(int)$state['lesson_id'];$lessonB=(int)($state['occurrence_b']['lesson_id']??0);
+    dzn_vcv_assert($lessonB>0&&$lessonB!==$lessonA,'the race must name two distinct canonical Lessons');
+    $receipts=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE provider_code=%s AND lesson_id IN (%d,%d) ORDER BY event_sequence,id",'google_meet',$lessonA,$lessonB),ARRAY_A)?:array();
+    dzn_vcv_assert(count($receipts)===2,'each distinct provider event key must leave exactly one immutable receipt');
+    $sequences=array_map(static fn(array $row)=>(int)$row['event_sequence'],$receipts);
+    dzn_vcv_assert(!in_array(0,$sequences,true)&&count(array_unique($sequences))===2,'concurrent distinct deliveries must take distinct provider-scoped sequences');
+    dzn_vcv_assert(count(array_unique(array_map(static fn(array $row)=>(int)$row['lesson_id'],$receipts)))===2,'the two receipts must belong to the two raced Lessons');
+    sort($sequences);
+    dzn_vcv_assert($sequences===range(1,2),'the raced receipts must take the two next provider sequences without a gap or a collision');
+    foreach(array('w1'=>$w1,'w2'=>$w2) as $worker=>$contender){
+        $message=(string)($contender['message']??'');
+        dzn_vcv_assert(!str_contains($message,'Duplicate entry'),$worker.' must never be answered with a duplicate-key persistence failure');
+        dzn_vcv_assert(!str_contains($message,'provider_event_sequence_lock_unavailable'),$worker.' must never fail to serialise its provider-scoped receipt allocation');
+    }
+}elseif($mode==='ingest_vs_canonical_authority'){
+    // The canonical schedule authority held the complete canonical chain while the provider ingest took
+    // the same chain in the same declared order. The canonical operation named a version that is not
+    // applicable, so it must fail closed with its own controlled reason and move nothing; the ingest
+    // must still leave its immutable receipt, and neither contender may report a deadlock or a lock-wait
+    // timeout in place of the outcome its own authority recorded.
+    $lessonId=(int)$state['lesson_id'];
+    dzn_vcv_assert($w1['ok']===false,'the competing canonical operation must fail closed');
+    dzn_vcv_assert((string)($w1['message']??'')==='stale_schedule_version','the canonical authority must refuse the stale release with its own controlled reason');
+    dzn_vcv_assert((int)$count('canonical_lesson_schedule_versions','lesson_id=%d',array($lessonId))===(int)$state['baseline']['versions'],'a failed canonical operation must never change the canonical schedule aggregate');
+    dzn_vcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d AND applicable_slot=1",$lessonId))===(int)$state['baseline']['applicable_version'],'the applicable canonical version must remain exactly the one the baseline recorded');
+    dzn_vcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT lifecycle_state FROM {$p}lessons WHERE id=%d",$lessonId))===(string)$state['baseline']['lesson_state'],'the canonical Lesson state must remain exactly what the canonical authority recorded');
+    dzn_vcv_assert((int)$count('provider_integration_commands','lesson_id=%d',array($lessonId))===0,'the integration layer must never record a Lesson-lifecycle or schedule operation');
+    $receipts=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE lesson_id=%d",$lessonId),ARRAY_A)?:array();
+    dzn_vcv_assert(count($receipts)===1&&(int)$receipts[0]['event_sequence']>0,'the cross-authority ingest must still leave exactly one immutable receipt with its own sequence');
+    foreach(array('w1'=>$w1,'w2'=>$w2) as $worker=>$contender){
+        $message=(string)($contender['message']??'');
+        dzn_vcv_assert(!str_contains($message,'Deadlock found')&&!str_contains($message,'Lock wait timeout'),$worker.' must never be answered with a lock-order deadlock or a lock-wait timeout');
+    }
 }elseif($mode==='teacher_archival_vs_connection'){
     $teacher=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}teachers WHERE id=%d",$teacherId));
     dzn_vcv_assert($teacher!==null,'the Teacher must still exist');
