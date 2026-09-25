@@ -169,6 +169,14 @@ final class NotificationIntegrity {
             if((string)$attempt->state!==NotificationRule::ACKNOWLEDGED_OUTCOME
                 ||$outcome===null||$outcome!==NotificationRule::ACKNOWLEDGED_OUTCOME)throw new \RuntimeException('attempt_lifecycle_invalid');
             if($persisted)throw new \RuntimeException('attempt_lifecycle_invalid');
+            // §6.6: the acknowledgement is defined by what it produced, never by its own row alone — the port
+            // accepted the hand-off, so the aggregate it closes is `dispatched` with no failure code. An
+            // acknowledged attempt persisted beside a terminal (or otherwise non-`dispatched`) notification
+            // is a forged pair — a `failed`, `expired`, `suppressed` or `cancelled` status dressed as a
+            // successful hand-off — and carries no class for any closure partition to judge, so it is refused
+            // here rather than read as an acknowledgement.
+            if((string)$notification->state!=='dispatched')throw new \RuntimeException('attempt_lifecycle_invalid');
+            if(($notification->failure_reason_code??null)!==null)throw new \RuntimeException('attempt_lifecycle_invalid');
             return;
         }
         // The member is unique to that shape, so no closure class may borrow it: a `retryable`, `defer`,
@@ -461,36 +469,50 @@ final class NotificationIntegrity {
      * row may exist for each re-arming attempt — one per persisted schedule, each directly after the `queued`
      * row that re-arm appended, restating the state it produced and carrying the closure's own code — and
      * none may exist for a closure that derived nothing, so the notification's audit trail can neither omit a
-     * re-arm nor announce one that never happened.
+     * re-arm nor announce one that never happened. The rows are proved **in the order the lifecycle produced
+     * them** — the re-arming attempt's own `attempt_sequence` paired with the `retry_scheduled` row's own
+     * `event_sequence` — so each row's digest is bound to its own re-arm rather than merely being a member of
+     * an acceptable set: two re-arms whose distinct evidenced digests were exchanged would leave every
+     * expected digest present exactly once and could never be caught by set membership.
      *
      * @throws \RuntimeException `attempt_lifecycle_invalid`.
      */
     public static function retryEvidenceIntegrity(object $notification,array $attempts):void{
         global $wpdb;$table=$wpdb->prefix.'dzn_notification_events';
+        // §9: one expected evidence per re-arming closure, ordered by the attempt sequence that produced it —
+        // the order the notification's own history must record them in, because attempt `n + 1` cannot be
+        // claimed until attempt `n`'s re-arm has committed the `queued` transition it becomes claimable on.
         $expected=array();
         foreach($attempts as $attempt){
             $schedule=self::persistedRetrySchedule($attempt);
             if($schedule===null)continue;
-            $evidence=self::retryEvidence($notification,$attempt,$schedule);
-            if(array_key_exists($evidence,$expected))throw new \RuntimeException('attempt_lifecycle_invalid');
-            $expected[$evidence]=$attempt->outcome_code===null?'':(string)$attempt->outcome_code;
+            $expected[]=array(
+                'sequence'=>(int)$attempt->attempt_sequence,
+                'digest'=>self::retryEvidence($notification,$attempt,$schedule),
+                'code'=>$attempt->outcome_code===null?'':(string)$attempt->outcome_code,
+            );
         }
+        usort($expected,static fn(array $left,array $right):int=>$left['sequence']<=>$right['sequence']);
         $events=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} WHERE notification_id=%d ORDER BY event_sequence",(int)$notification->id))?:array();
-        $previous=null;$seen=array();
+        $previous=null;$index=0;
         foreach($events as $event){
             if((string)$event->event_type===NotificationRule::RETRY_SCHEDULED_EVENT){
-                // The row is the audit companion of the re-arm the `queued` row just recorded, and carries
-                // that closure's own outcome code — never a state of its own and never a stray row.
+                // The row is the audit companion of the re-arm the `queued` row just recorded: it restates
+                // that transition (`queued → queued`), it is the contiguous immediate successor of the same
+                // re-arm's `queued` row, and it carries that closure's own outcome code — never a state of
+                // its own and never a stray row.
                 if($previous===null||(string)$previous->event_type!=='queued'||(string)$previous->to_state!=='queued'
-                    ||$event->reason_code===null)throw new \RuntimeException('attempt_lifecycle_invalid');
+                    ||(string)$event->from_state!=='queued'||(string)$event->to_state!=='queued')throw new \RuntimeException('attempt_lifecycle_invalid');
+                if($index>=count($expected))throw new \RuntimeException('attempt_lifecycle_invalid');
+                $matched=$expected[$index++];
+                if($matched['code']===''||$event->reason_code===null||(string)$event->reason_code!==$matched['code']
+                    ||(string)$previous->reason_code!==$matched['code'])throw new \RuntimeException('attempt_lifecycle_invalid');
                 $digest=$event->evidence_reference_digest===null?'':(string)$event->evidence_reference_digest;
-                if($digest===''||!array_key_exists($digest,$expected)||isset($seen[$digest]))throw new \RuntimeException('attempt_lifecycle_invalid');
-                if((string)$event->reason_code!==$expected[$digest]||(string)$previous->reason_code!==$expected[$digest])throw new \RuntimeException('attempt_lifecycle_invalid');
-                $seen[$digest]=true;
+                if($digest===''||!hash_equals($matched['digest'],$digest))throw new \RuntimeException('attempt_lifecycle_invalid');
             }
             $previous=$event;
         }
-        if(count($seen)!==count($expected))throw new \RuntimeException('attempt_lifecycle_invalid');
+        if($index!==count($expected))throw new \RuntimeException('attempt_lifecycle_invalid');
     }
     /**
      * §7.2/§9 — the deterministic retry schedule one attempt persisted, or null when its closure derived

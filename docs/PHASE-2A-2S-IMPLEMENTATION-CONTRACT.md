@@ -1671,7 +1671,10 @@ class only ever closes the notification as terminal `failed`, the status is part
   transition in one transaction and every closure closes both together, so exactly one attempt may be open,
   and only while the aggregate is `dispatching`); a closed attempt that carries **no** `failure_class` in any
   shape other than the acknowledged one — a forged `failed`, `expired` or `abandoned` row with a legal event
-  chain — or a closure class that borrows the acknowledgement member; and any attempt whose `attempt_sequence`
+  chain — or a closure class that borrows the acknowledgement member, the acknowledged shape being itself
+  valid only beside the `dispatched` notification it produced (a NULL failure code and no other status, so an
+  acknowledged-looking attempt persisted beside a `failed`, `expired`, `suppressed` or `cancelled`
+  notification is that same forged pair read the other way round); and any attempt whose `attempt_sequence`
   is not contiguous from 1, whose state is outside the closed vocabulary, whose open/closed marker disagrees
   with its state, or whose append-only history is not a contiguous run of legal transitions ending on that
   state.
@@ -1680,11 +1683,15 @@ class only ever closes the notification as terminal `failed`, the status is part
   **or** on the notification's own history; a closure that derived nothing — either exhaustion shape, a
   `terminal`, abort or cancellation class, or the acknowledged hand-off — or a notification with no re-arm at
   all, beside a `retry_scheduled` row it never earned; a `retry_scheduled` row that is not the closing
-  attempt's last history row, or that is not directly after the `queued` row the same re-arm appended; and a
+  attempt's last history row, or that is not the contiguous immediate successor of the `queued` row the same
+  re-arm appended and does not restate that `queued → queued` transition; and a
   `retry_scheduled` row whose `reason_code` is not the closing attempt's own outcome code, or whose
   `evidence_reference_digest` is not exactly the digest-only retry evidence of that persisted schedule.
-  Because the evidence is proved on both append-only histories, no re-arm can be silently unaudited and no
-  exhaustion can be dressed as a re-arm.
+  The notification's rows are proved **per re-arm, in the order the lifecycle produced them**
+  (`attempt_sequence` against `event_sequence`), never as an unordered set of acceptable digests, so two
+  re-arms whose distinct evidences were exchanged are refused rather than each satisfying the other's
+  expectation. Because the evidence is proved on both append-only histories, no re-arm can be silently
+  unaudited and no exhaustion can be dressed as a re-arm.
 - The verifier also rejects a retry-ceiling or reason-code violation: an attempt row whose
   `attempt_sequence` exceeds `retry_max_attempts`, a notification returned to a claimable status (or given
   a further `leased` row) after a `retryable`, `defer` or `expired` closure at
@@ -2338,7 +2345,7 @@ payloads):
 | `retry_exhaustion_invalid` | a **ceiling**-exhaustion closure refused or rejected because the closing notification is not terminal `failed` with a `failure_reason_code` of exactly `retry_exhausted` — a NULL, empty, terminal-vocabulary member, the window code `retry_window_exhausted` or any other code — or because the closing attempt is not at the ceiling (`attempt_sequence = retry_max_attempts`), or because the closing attempt borrowed a cross-class code — a non-terminal attempt whose `outcome_code` is a member of the closed §6.6 terminal-reason vocabulary or the ceiling code `retry_exhausted`, or a closing attempt reclassified to `failure_class = terminal` while the notification carries the ceiling code. It is the mirror image of `terminal_reason_invalid`, **scoped to the ceiling gate** (the gate read first), so every exhaustion closure is judged by exactly one rule: the terminal vocabulary, this ceiling rule, or the window rule below (§6.6, §7.3) |
 | `retry_window_exhaustion_invalid` | a **window**-exhaustion closure refused or rejected because the closing notification is not terminal `expired` with a `failure_reason_code` of exactly `retry_window_exhausted` — a NULL, empty, terminal-vocabulary member, the ceiling code `retry_exhausted` or any other code — or because the closure is at the ceiling (which the ceiling rule classifies), or because it derived and announced a schedule the window shape must never have (any of the four retry columns written, a `retry_scheduled` event appended or the outbox row re-armed), or because the closing attempt's non-terminal class and closure code were rewritten. It is the exact mirror of `retry_exhaustion_invalid` one gate later, applied only to a non-terminal closure **with an attempt remaining** (`attempt_sequence < retry_max_attempts`, §6.6/§7.3/§9) — never to a `terminal`-class closing attempt, so an `expired` notification carrying a `terminal` attempt with a matching member is `terminal_reason_invalid` rather than this diagnostic (§6.6, §7.3) |
 | `intent_unbound` | a registration or activation refused for the reserved-unbound `GUARANTEE_EXPIRED` intent, which no R2 writer publishes |
-| `attempt_lifecycle_invalid` | a persisted attempt history, or one closure's shape, that does not reproduce §6.6's lifecycle: an `attempt_sequence` that is not contiguous from 1 or that exceeds the frozen `retry_max_attempts` (the ceiling is the total acquisition budget, so attempt `max + 1` is unrepresentable and is never read as a further ceiling closure), a state outside the closed vocabulary, an append-only history that is not a contiguous run of legal transitions ending on the persisted state, an open/closed marker that disagrees with that state, a `dispatching` notification holding other than exactly one live attempt, a closed attempt that carries no `failure_class` other than the acknowledged shape — or a closure class that borrows the acknowledgement member — and a `retry_scheduled` audit row that is missing where a closure persisted its schedule (on either append-only history), present where no schedule was derived, not placed as the closure's own last row or directly after the `queued` row a re-arm appended, or whose `reason_code`/`evidence_reference_digest` disagrees with the closure (§6.6/§7.3/§9) |
+| `attempt_lifecycle_invalid` | a persisted attempt history, or one closure's shape, that does not reproduce §6.6's lifecycle: an `attempt_sequence` that is not contiguous from 1 or that exceeds the frozen `retry_max_attempts` (the ceiling is the total acquisition budget, so attempt `max + 1` is unrepresentable and is never read as a further ceiling closure), a state outside the closed vocabulary, an append-only history that is not a contiguous run of legal transitions ending on the persisted state, an open/closed marker that disagrees with that state, a `dispatching` notification holding other than exactly one live attempt, a closed attempt that carries no `failure_class` other than the acknowledged shape — the acknowledgement being itself valid only beside the `dispatched` notification it produced, with a NULL failure code — or a closure class that borrows the acknowledgement member, and a `retry_scheduled` audit row that is missing where a closure persisted its schedule (on either append-only history), present where no schedule was derived, not placed as the closure's own last row or as the contiguous immediate successor of the `queued` row a re-arm appended and restating that `queued → queued` transition, not matched in the order the lifecycle produced the re-arms (`attempt_sequence` against `event_sequence`), or whose `reason_code`/`evidence_reference_digest` disagrees with the closure (§6.6/§7.3/§9) |
 | `tier_f_instant_unavailable` | a tier-F registration, activation or observation refused or closed terminally because the bound authoritative instant is not durably recorded on the subject row, including an absent `automatic_charge_at` while the §6.2.4 R2 amendment is unmerged |
 | `tier_f_instant_divergence` | a tier-F instant, derived schedule or dispatch evidence that does not reproduce from the persisted subject column |
 | `schedule_expiry_missing` | an activation refused because the mandatory §6.3 `expiry` rule is absent, malformed or outside its declared range |
@@ -2401,11 +2408,16 @@ encoding/interval refusals, its recurrence-divergence pin and overflow-safety ca
 read as assertions**: an attempt above the frozen ceiling is refused as `attempt_lifecycle_invalid` (the
 ceiling shape belongs to the sequence *at* the ceiling alone, so `>=` is not a spelling of `==`), a closed
 attempt may carry no `failure_class` only as the acknowledgement — with the acknowledgement member never
-borrowed by a closure class — and a `retry_scheduled` audit row must be present exactly where a closure
-persisted its schedule and absent everywhere else, proved on **both** append-only histories, and the
+borrowed by a closure class and the acknowledged shape itself valid only beside the `dispatched`
+notification it produced — and a `retry_scheduled` audit row must be present exactly where a closure
+persisted its schedule and absent everywhere else, proved on **both** append-only histories and, on the
+notification, per re-arm in the order the lifecycle produced it (directly after that re-arm's `queued` row
+and restating its `queued → queued` transition), and the
 corruption suite carries the matching end-to-end cases (an attempt `retry_max_attempts + 1` behind a
 three-attempt ceiling walk, two open attempts on one `dispatching` notification, the three class-less
-closures, the removed/forged/reused retry evidence on either history, the injected evidence beside an
+closures, an acknowledged attempt beside a terminal notification, the removed/forged/reused **and
+exchanged** retry evidence on either history, the audit row that does not restate its `queued → queued`
+transition or no longer follows its own `queued` row, the injected evidence beside an
 exhausted closure, and a re-arm whose quadruple disagrees with the derivation even though both evidence
 rows were recomputed) and the
 §6.2.4 tier-F durable-instant suite (including
@@ -2559,6 +2571,25 @@ execution evidence and deferred product decisions but do not block this contract
   deployment occurred.
 
 ## 19. Correction record
+
+Implementation correction round 8 (host review `CORRECTION ROUND 5`; failed candidate `52ebb18`, tree
+`e821b302`) — the independent review refused the candidate with two blocking findings in the shared
+integrity proofs. This is the same review the host ledger numbers correction round 5 of the current
+implementation attempt; this document's record sequence continues at 8. This entry records the
+**product-code** correction only: no migration identity, table count, migration name, build identity or
+contract rule change is involved — every correction makes the persisted runtime match the rules §6.6,
+§7.3 and §9 already state — no schema object is added, and no merge, deploy, provider activation, external
+send, Amelia or Theme change is involved.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| The acknowledgement branch of `closureIntegrity()` accepted a class-less `acknowledged` attempt on its own shape alone, so a forged attempt with `state`/`outcome_code = acknowledged`, no `failure_class` and no retry columns passed even beside a `failed`, `expired`, `suppressed` or `cancelled` notification — the outbox mirror does not constrain the aggregate's status, and the attempt carries no class for any closure partition to judge — although §6.6 defines the acknowledgement by what it produced: the port accepted the hand-off, so the notification it closes is `dispatched`. | The acknowledged shape is now proved against the aggregate it produced and not only against its own row: the null-class branch of `closureIntegrity()` refuses unless the notification's `state` is exactly `dispatched` **and** its `failure_reason_code` is NULL, so an acknowledged-looking attempt persisted beside a terminal (or otherwise non-`dispatched`) status — or a `dispatched` row that still carries a failure code — is refused whole with `attempt_lifecycle_invalid` instead of being read as a successful hand-off, and every protected read, the dispatch claim, the attempt read seam and `verify_notification_communications_schema()` refuse it together. Coverage: `tests/phase-2a2s-retry-runtime.php` §6 refuses the acknowledged attempt beside a `failed`, an `expired` and a failure-coded `dispatched` notification; `tests/phase-2a2s-corruption-runtime.php` §9(b) proves the forged pair end-to-end — a real acknowledgement whose notification is rewritten to `failed`/`retry_exhausted` (and, separately, `expired`/`retry_window_exhausted` and a `dispatched` row carrying a failure code) — fails the protected read **and** the schema verifier, converging once the `dispatched` status is restored; `tests/phase-2a2s-contract.php` §15 asserts the source rule and the case labels. | §6.6, §7.2, §7.3, §9, §14, §15 |
+| `NotificationIntegrity::retryEvidenceIntegrity()` validated the notification-side `retry_scheduled` evidence as an unordered **set**: for two retryable re-arms it accepted any assignment of the two expected digests to the two rows, so exchanging their distinct digests passed (both were expected, both preceding `queued` rows carried the same reason, and the set cardinality was unchanged), and the method never checked the audit row's own `from_state`/`to_state` at all — although §9 requires each row to follow and restate the `queued` transition of its own re-arm. | The notification's audit rows are now proved **per re-arm, in the order the lifecycle produced them**: the expected evidence is one entry per re-arming closure, ordered by the re-arming attempt's `attempt_sequence`, and the `retry_scheduled` rows are consumed in `event_sequence` order, so the *n*-th audit row must carry exactly the *n*-th re-arm's digest-only evidence and its own outcome code — a missing row, a stray row beyond the expected count and an exchanged pair are each refused — and each row must be the contiguous immediate successor of its own `queued` row while itself restating `queued → queued`. Coverage: `tests/phase-2a2s-corruption-runtime.php` §9(g) exchanges the two re-arms' distinct digests (refused) and, in turn, rewrites the audit row's `from_state`, its `to_state` and its preceding `queued` row's `to_state` (each refused), converging once restored; `tests/phase-2a2s-contract.php` §15 asserts the ordered rule and every new runtime case label. | §6.6, §7.3, §9, §14, §15 |
+
+Verification available here: `tests/phase-2a2s-contract.php` §15 asserts every new source rule and every new
+runtime case label. This correction environment provides no PHP or WordPress runtime, so the runtime suites
+are updated and reviewed by source but were **not executed here**; no migration was re-run and no schema
+object, identity or build changed.
 
 Implementation correction round 7 (host review `CORRECTION ROUND 4`; failed candidate `8c83d2f`, tree
 `f2a0dee5`) — the independent review refused the candidate with three blocking findings in the shared

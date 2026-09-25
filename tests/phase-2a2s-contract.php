@@ -317,8 +317,14 @@ if(!str_contains($integrity,'if($sequence===$maxAttempts){'))throw new RuntimeEx
 if(!str_contains($integrity,'$retryRows!==($schedule===null?0:1)'))throw new RuntimeException('The retry audit row must be present exactly where the closure persisted a schedule');
 if(!str_contains($integrity,"if((string)\$attempt->state!==NotificationRule::ACKNOWLEDGED_OUTCOME"))throw new RuntimeException('A class-less closed attempt must be refused unless it is the acknowledgement');
 if(!str_contains($integrity,"||\$outcome===null||\$outcome!==NotificationRule::ACKNOWLEDGED_OUTCOME"))throw new RuntimeException('The acknowledgement must carry its own shared outcome code');
+if(!str_contains($integrity,"if((string)\$notification->state!=='dispatched')throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('The acknowledgement must be proved against the dispatched aggregate it produced');
+if(!str_contains($integrity,"if((\$notification->failure_reason_code??null)!==null)throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('The acknowledgement must be refused beside a failure code');
 if(!str_contains($integrity,'public static function retryEvidenceIntegrity(object $notification,array $attempts):void'))throw new RuntimeException('The notification history must prove its own retry evidence');
 if(!str_contains($integrity,'self::retryEvidenceIntegrity($notification,$attempts);'))throw new RuntimeException('Aggregate integrity must prove the retry evidence on both append-only histories');
+if(!str_contains($integrity,"||(string)\$event->from_state!=='queued'||(string)\$event->to_state!=='queued'"))throw new RuntimeException('The notification-side retry evidence row must restate the queued transition it follows');
+if(!str_contains($integrity,"if(\$index>=count(\$expected))throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('The notification-side retry evidence must be matched to its own re-arm in lifecycle order');
+if(!str_contains($integrity,"if(\$index!==count(\$expected))throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('Every re-arm must be proved by exactly one notification-side evidence row');
+if(!str_contains($integrity,"usort(\$expected,static fn(array \$left,array \$right):int=>\$left['sequence']<=>\$right['sequence']);"))throw new RuntimeException('The expected retry evidence must be ordered by the re-arming attempt sequence');
 if(!str_contains($integrity,'if(!$reArm){')||!str_contains($integrity,"if(\$schedule===null)throw new \RuntimeException('retry_schedule_divergence');"))throw new RuntimeException('The persisted retry schedule must agree with the §9 derivation in both directions');
 if(!str_contains($rule,"ACKNOWLEDGED_OUTCOME='acknowledged'"))throw new RuntimeException('The acknowledgement outcome code must be the one shared member');
 if(!str_contains($dispatch,'NotificationRule::ACKNOWLEDGED_OUTCOME'))throw new RuntimeException('The acknowledgement must write the shared outcome code');
@@ -328,8 +334,15 @@ foreach(array(
     "'attempt_lifecycle_invalid','an attempt above the frozen retry ceiling'",
     "'attempt_lifecycle_invalid','two open attempts on one dispatching notification'",
     "'attempt_lifecycle_invalid','a forged failed closure that carries no failure class'",
+    "'attempt_lifecycle_invalid','an acknowledged attempt persisted beside a terminal notification'",
+    "'attempt_lifecycle_invalid','an acknowledged attempt persisted beside an expired notification'",
+    "'attempt_lifecycle_invalid','a dispatched notification carrying a failure code beside the acknowledgement'",
     "'attempt_lifecycle_invalid','a re-armed attempt whose attempt-side retry evidence was removed'",
     "'attempt_lifecycle_invalid','a re-armed attempt whose notification-side retry evidence was removed'",
+    "'attempt_lifecycle_invalid','two re-arms whose notification-side evidence digests were exchanged'",
+    "'attempt_lifecycle_invalid','a notification-side retry evidence row that does not restate the queued transition it follows'",
+    "'attempt_lifecycle_invalid','a notification-side retry evidence row that restates another state'",
+    "'attempt_lifecycle_invalid','a notification-side retry evidence row that no longer follows its own queued transition'",
     "'attempt_lifecycle_invalid','an exhausted closure that announced a retry schedule it never derived'",
     "'retry_schedule_divergence','a re-arming closure whose persisted back-off disagrees with the §9 derivation'",
 ) as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The corruption suite must prove the ceiling, the live lease and the retry audit evidence: '.$needle);

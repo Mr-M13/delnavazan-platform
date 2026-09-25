@@ -388,6 +388,21 @@ $wpdb->update($p.'notification_attempts',array('failure_class'=>'retryable'),arr
 dzn_s_fix_rejected(fn()=>$read->one($ackNotificationId),'attempt_lifecycle_invalid','an acknowledgement reclassified as a retry closure that borrows its code');
 $wpdb->update($p.'notification_attempts',array('failure_class'=>null),array('id'=>(int)$ackClaim['attempt_id']));
 dzn_s_fix_assert($read->one($ackNotificationId)['state']==='dispatched','restoring the acknowledgement must restore the read');
+// The acknowledgement is defined by what it produced: it may only sit beside a `dispatched` notification
+// with no failure code, so an acknowledged-looking attempt beside a terminal status — the forged pair the
+// class-less shape would otherwise read as a successful hand-off — is refused whole.
+$wpdb->update($p.'notifications',array('state'=>'failed','failure_reason_code'=>'retry_exhausted'),array('id'=>$ackNotificationId));
+dzn_s_fix_rejected(fn()=>$read->one($ackNotificationId),'attempt_lifecycle_invalid','an acknowledged attempt persisted beside a terminal notification');
+$ackVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$ackVerifier=str_contains($error->getMessage(),'attempt_lifecycle_invalid');}
+dzn_s_fix_assert($ackVerifier,'an acknowledged attempt beside a terminal notification must fail the S verifier');
+$wpdb->update($p.'notifications',array('state'=>'expired','failure_reason_code'=>'retry_window_exhausted'),array('id'=>$ackNotificationId));
+dzn_s_fix_rejected(fn()=>$read->one($ackNotificationId),'attempt_lifecycle_invalid','an acknowledged attempt persisted beside an expired notification');
+$wpdb->update($p.'notifications',array('state'=>'dispatched','failure_reason_code'=>'send_refused'),array('id'=>$ackNotificationId));
+dzn_s_fix_rejected(fn()=>$read->one($ackNotificationId),'attempt_lifecycle_invalid','a dispatched notification carrying a failure code beside the acknowledgement');
+$wpdb->update($p.'notifications',array('state'=>'dispatched','failure_reason_code'=>null),array('id'=>$ackNotificationId));
+Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
+dzn_s_fix_assert($read->one($ackNotificationId)['state']==='dispatched','restoring the dispatched status must restore the read');
 // (c) A re-armed attempt whose audit row was removed, forged, or rewritten is refused on either history.
 $wpdb->delete($p.'notification_attempt_events',array('id'=>(int)$attemptOneEvidence->id));
 dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','a re-armed attempt whose attempt-side retry evidence was removed');
@@ -446,5 +461,33 @@ $wpdb->update($p.'notification_attempt_events',array('evidence_reference_digest'
 $wpdb->update($p.'notification_events',array('evidence_reference_digest'=>(string)$notificationEvidence->evidence_reference_digest),array('id'=>(int)$notificationEvidence->id));
 Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
 dzn_s_fix_assert($read->one($ceilingNotificationId)['state']==='failed','restoring the persisted schedule must restore the read');
+dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notification_events WHERE notification_id=%d AND event_type='retry_scheduled'",$ceilingNotificationId))===2,'the restored ceiling walk must keep exactly its two retry evidence rows');
+// (g) The notification-side audit rows are proved per re-arm, in the order the lifecycle produced them, and
+//     each row must restate the `queued` transition it follows. Two re-arms whose distinct digests were
+//     exchanged leave every expected digest present exactly once, so only an ordered comparison can refuse
+//     them; a row that does not restate `queued → queued`, or that no longer follows its own `queued`
+//     transition, is refused the same way.
+$firstRetryDigest=(string)$notificationEvidence->evidence_reference_digest;
+$secondRetryDigest=(string)$secondNotificationEvidence->evidence_reference_digest;
+dzn_s_fix_assert(!hash_equals($firstRetryDigest,$secondRetryDigest),'the two re-arms must carry distinct notification-side evidence digests');
+$wpdb->update($p.'notification_events',array('evidence_reference_digest'=>$secondRetryDigest),array('id'=>(int)$notificationEvidence->id));
+$wpdb->update($p.'notification_events',array('evidence_reference_digest'=>$firstRetryDigest),array('id'=>(int)$secondNotificationEvidence->id));
+dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','two re-arms whose notification-side evidence digests were exchanged');
+$wpdb->update($p.'notification_events',array('evidence_reference_digest'=>$firstRetryDigest),array('id'=>(int)$notificationEvidence->id));
+$wpdb->update($p.'notification_events',array('evidence_reference_digest'=>$secondRetryDigest),array('id'=>(int)$secondNotificationEvidence->id));
+dzn_s_fix_assert($read->one($ceilingNotificationId)['state']==='failed','restoring the exchanged evidence must restore the read');
+$wpdb->update($p.'notification_events',array('from_state'=>'failed'),array('id'=>(int)$notificationEvidence->id));
+dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','a notification-side retry evidence row that does not restate the queued transition it follows');
+$wpdb->update($p.'notification_events',array('from_state'=>'queued','to_state'=>'dispatching'),array('id'=>(int)$notificationEvidence->id));
+dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','a notification-side retry evidence row that restates another state');
+$wpdb->update($p.'notification_events',array('from_state'=>'queued','to_state'=>'queued'),array('id'=>(int)$notificationEvidence->id));
+$precedingQueuedId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}notification_events WHERE notification_id=%d AND event_sequence<%d ORDER BY event_sequence DESC LIMIT 1",$ceilingNotificationId,(int)$notificationEvidence->event_sequence));
+$precedingQueuedTo=(string)$wpdb->get_var($wpdb->prepare("SELECT to_state FROM {$p}notification_events WHERE id=%d",$precedingQueuedId));
+dzn_s_fix_assert($precedingQueuedTo==='queued','the re-arm evidence row must follow a queued transition');
+$wpdb->update($p.'notification_events',array('to_state'=>'dispatching'),array('id'=>$precedingQueuedId));
+dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','a notification-side retry evidence row that no longer follows its own queued transition');
+$wpdb->update($p.'notification_events',array('to_state'=>$precedingQueuedTo),array('id'=>$precedingQueuedId));
+Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
+dzn_s_fix_assert($read->one($ceilingNotificationId)['state']==='failed','restoring the retry-row states must restore the read');
 dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notification_events WHERE notification_id=%d AND event_type='retry_scheduled'",$ceilingNotificationId))===2,'the restored ceiling walk must keep exactly its two retry evidence rows');
 echo "Phase 2A.2-S corruption runtime passed\n";

@@ -183,6 +183,49 @@ Theme change is involved.
   closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
   which its §5 assertion referenced without the import (a latent fatal in the suite itself).
 
+### Implementation correction round 8 (host review `CORRECTION ROUND 5`, failed candidate `52ebb18`, tree `e821b302`)
+
+The host review refused the candidate with two blocking findings in the shared integrity proofs. This is
+the same review the host ledger numbers correction round 5 of the current implementation attempt; this
+record's own sequence continues at 8. The schema identity, table count, migration name and build identity
+are unchanged, no schema object is added (the findings restate rules §6.6, §7.3 and §9 already state), and
+no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The acknowledgement is now proved against the aggregate it produced, not only against its own row.**
+  The null-class branch of `NotificationIntegrity::closureIntegrity()` accepted a class-less `acknowledged`
+  attempt on its shape alone, so a forged attempt with `state`/`outcome_code = acknowledged`, no
+  `failure_class` and no retry columns passed even beside a `failed`, `expired`, `suppressed` or
+  `cancelled` notification — the outbox mirror constrains only the mirrored schedule, not the aggregate's
+  status, and a class-less attempt leaves no closure partition to judge — although §6.6 defines the
+  acknowledgement by its result: the port accepted the hand-off, so the notification it closes is
+  `dispatched`. The branch now refuses unless the notification's `state` is exactly `dispatched` **and** its
+  `failure_reason_code` is NULL, so an acknowledged-looking attempt beside a terminal status — or a
+  `dispatched` row that still carries a failure code — is refused whole with `attempt_lifecycle_invalid` on
+  every protected read, the dispatch claim, the attempt read seam and `verify_notification_communications_schema()`.
+- **The notification-side `retry_scheduled` evidence is proved per re-arm, in lifecycle order, not as an
+  unordered set.** `NotificationIntegrity::retryEvidenceIntegrity()` compared each audit row's digest
+  against a set of acceptable digests, so for two retryable re-arms exchanging their distinct digests
+  passed — both were expected, both preceding `queued` rows carried the same reason and the cardinality was
+  unchanged — and the method never checked the audit row's own `from_state`/`to_state`, although §9
+  requires each row to directly follow and restate the `queued` transition of its own re-arm. The expected
+  evidence is now built as one entry per re-arming closure, ordered by the re-arming attempt's
+  `attempt_sequence`, and the `retry_scheduled` rows are consumed in `event_sequence` order, so the *n*-th
+  row must carry exactly the *n*-th re-arm's digest and outcome code (a missing row, a stray row beyond the
+  expected count, or an exchanged pair is refused), and each row must be the contiguous immediate successor
+  of its own `queued` row while itself restating `queued → queued`.
+- Coverage: `tests/phase-2a2s-retry-runtime.php` §6 refuses the acknowledged attempt beside a `failed`, an
+  `expired` and a failure-coded `dispatched` notification; `tests/phase-2a2s-corruption-runtime.php` §9(b)
+  proves the forged acknowledgement pair end-to-end — a real acknowledgement whose notification is
+  rewritten to `failed`/`retry_exhausted` (and, separately, `expired`/`retry_window_exhausted` and a
+  `dispatched` row carrying a failure code) — fails the protected read **and** the schema verifier,
+  converging once the `dispatched` status is restored, while §9(g) exchanges the two re-arms' distinct
+  notification-side digests (refused) and rewrites the audit row's `from_state`, its `to_state` and its
+  preceding `queued` row's `to_state` in turn (each refused), converging once restored.
+  `tests/phase-2a2s-contract.php` §15 asserts every new source rule and every new runtime case label.
+- Verification available here: this correction environment provides no PHP or WordPress runtime, so the
+  runtime suites are updated and reviewed by source but were **not executed here**; no migration was
+  re-run and no schema object, identity or build changed.
+
 ### Implementation correction round 7 (host review `CORRECTION ROUND 4`, failed candidate `8c83d2f`, tree `f2a0dee5`)
 
 The host review refused the candidate with three blocking findings in the shared integrity proofs. This is

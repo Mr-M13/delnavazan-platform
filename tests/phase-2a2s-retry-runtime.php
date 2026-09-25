@@ -96,6 +96,13 @@ dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity($ceilingNotific
 $acknowledgedAttempt=(object)array('attempt_sequence'=>1,'state'=>'acknowledged','failure_class'=>null,'outcome_code'=>'acknowledged','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
 NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'dispatched','failure_reason_code'=>null)),$acknowledgedAttempt,$baseline);
 foreach(array('failed','expired','abandoned') as $forgedState)dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity($ceilingNotification,(object)array_merge((array)$acknowledgedAttempt,array('state'=>$forgedState)),$baseline),'attempt_lifecycle_invalid','a closed attempt persisted as '.$forgedState.' without a failure class');
+// §6.6: the acknowledgement is recognised by what it produced, not by its own row alone — the port accepted
+// the hand-off, so the notification it closes is `dispatched` with no failure code, and the acknowledged
+// shape persisted beside any other status (or beside a failure code) is the same forged pair read the other
+// way round.
+dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'failed','failure_reason_code'=>'retry_exhausted')),$acknowledgedAttempt,$baseline),'attempt_lifecycle_invalid','an acknowledged attempt persisted beside a terminal notification');
+dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'expired','failure_reason_code'=>'retry_window_exhausted')),$acknowledgedAttempt,$baseline),'attempt_lifecycle_invalid','an acknowledged attempt persisted beside an expired notification');
+dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'dispatched','failure_reason_code'=>'send_refused')),$acknowledgedAttempt,$baseline),'attempt_lifecycle_invalid','a dispatched notification carrying a failure code beside the acknowledgement');
 $windowAttempt=(object)array('attempt_sequence'=>2,'failure_class'=>'retryable','outcome_code'=>'retryable','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
 $windowNotification=(object)array_merge((array)$notificationRow,array('state'=>'expired','failure_reason_code'=>'retry_window_exhausted'));
 NotificationIntegrity::closureIntegrity($windowNotification,$windowAttempt,$baseline);
