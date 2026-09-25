@@ -298,6 +298,8 @@ if ( substr_count( $corruption, '$replayProbe(' ) < 15 ) throw new RuntimeExcept
 if ( ! str_contains( $corruption, "identical replay converges on the recorded typed result after exact restoration" ) ) throw new RuntimeException( 'Every corruption-replay probe must prove convergence after exact restoration' );
 if ( substr_count( $corruption, "substituted secondary result" ) < 6 ) throw new RuntimeException( 'Every command family must prove that a substituted secondary typed result fails closed' );
 if ( ! str_contains( $corruption, 'correction substituted secondary result' ) ) throw new RuntimeException( 'The corruption suite must prove that a substituted valid correction id is refused' );
+if ( ! str_contains( $corruption, 'correction substituted corrected rate amount' ) ) throw new RuntimeException( 'The corruption suite must prove that a correction whose corrected rate amount alone differs is refused command_replay_conflict' );
+if ( ! str_contains( $corruption, 'correction substituted corrected derived amount' ) ) throw new RuntimeException( 'The corruption suite must prove that a correction whose corrected derived amount alone differs is refused command_replay_conflict' );
 if ( ! str_contains( $corruption, 'a converged override replay reports the override its own evaluation carries' ) ) throw new RuntimeException( 'The corruption suite must prove a converged replay reports the verified secondary result, never the recorded command value' );
 // The pure replay unit suite proves the shared behaviour *and* the correction command facts' own
 // canonical reconstitution, so the payload proof of a re-loaded correction cannot silently regress.
@@ -309,6 +311,7 @@ foreach ( array(
 	"'canonicalCurrency'",
 	'the facts reconstituted from the recorded correction row reproduce the recorded command payload exactly',
 	'a substituted correction of the same Lesson, snapshot and reason fails the payload proof',
+	'a substituted corrected rate amount fails the payload proof',
 ) as $needle ) if ( ! str_contains( $replayUnit, $needle ) ) throw new RuntimeException( 'The §15.3 replay unit suite must prove the typed-result shape and the correction payload reconstitution: ' . $needle );
 
 // ---- The candidate must ship the contract it implements. ----------------------------------------

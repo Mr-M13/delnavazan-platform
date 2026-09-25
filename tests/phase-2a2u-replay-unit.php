@@ -13,6 +13,11 @@ use Delnavazan\Platform\Core\Application\Finance\{FinanceRefusalException,Financ
  * converges on its refusal, a recorded success converges only when its typed result row is present and
  * still names the command's own aggregate, and an absent, mismatched or non-reproducing result fails
  * closed with `command_replay_conflict` instead of returning a recorded result id.
+ *
+ * The correction family's own facts builder is proved too: its payload carries *every* material
+ * correction fact — the corrected rate row and version, the corrected rate amount, the corrected derived
+ * amount, the currency and the reason — so a self-consistent second correction whose corrected rate
+ * amount alone differs is refused `command_replay_conflict`, never converged on as a substitute.
  */
 $root = dirname( __DIR__ );
 if ( ! function_exists( 'wp_salt' ) ) { function wp_salt( string $scheme = '' ):string { return 'phase-2a2u-replay-unit-' . $scheme; } }
@@ -133,24 +138,36 @@ dzn_u_replay_refusal(
 // §15.3: the snapshot-correction command facts are built in one place, and the replay reconstitutes them
 // from the re-loaded correction row. The builder is private to its service, so it is proved through
 // reflection — still no WordPress and no database: the class is loaded, never constructed, so none of its
-// repositories are needed.
+// repositories are needed. `correctionFacts()` carries every material correction fact — the corrected
+// rate row, its version, the corrected *rate* amount, the corrected derived amount, the currency and the
+// operator reason — in the declared positional order
+// (lesson, snapshot, rate id, rate version, rate amount, derived amount, currency, reason).
 require_once $root . '/src/Core/Application/Finance/FinanceCorrectionService.php';
 $correctionServiceClass = 'Delnavazan\\Platform\\Core\\Application\\Finance\\FinanceCorrectionService';
 $correctionFacts = new ReflectionMethod( $correctionServiceClass, 'correctionFacts' );
 $canonicalInt = new ReflectionMethod( $correctionServiceClass, 'canonicalInt' );
 $canonicalCurrency = new ReflectionMethod( $correctionServiceClass, 'canonicalCurrency' );
 // No `setAccessible()` call is needed: this phase requires PHP 8.1+, where it has no effect.
-$writtenFacts = $correctionFacts->invoke( null, 11, 22, $canonicalInt->invoke( null, '5' ), $canonicalInt->invoke( null, 2 ), $canonicalInt->invoke( null, '12000' ), $canonicalCurrency->invoke( null, 'aud' ), 'operator_evidence_correction' );
+$writtenFacts = $correctionFacts->invoke( null, 11, 22, $canonicalInt->invoke( null, '5' ), $canonicalInt->invoke( null, 2 ), $canonicalInt->invoke( null, '12000' ), $canonicalInt->invoke( null, '13000' ), $canonicalCurrency->invoke( null, 'aud' ), 'operator_evidence_correction' );
 $recordedDigest = FinanceSupport::payload( $writtenFacts );
-$reconstitutedFacts = $correctionFacts->invoke( null, 11, 22, (int) '5', (int) '2', (int) '12000', (string) 'AUD', 'operator_evidence_correction' );
+$reconstitutedFacts = $correctionFacts->invoke( null, 11, 22, (int) '5', (int) '2', (int) '12000', (int) '13000', (string) 'AUD', 'operator_evidence_correction' );
 dzn_u_replay( hash_equals( $recordedDigest, FinanceSupport::payload( $reconstitutedFacts ) ), 'the facts reconstituted from the recorded correction row reproduce the recorded command payload exactly' );
-$substitutedAmount = $correctionFacts->invoke( null, 11, 22, 5, 2, 12001, 'AUD', 'operator_evidence_correction' );
+// Only the corrected *rate* amount moves: the corrected derived amount, rate row, version, currency and
+// reason are byte-identical, so only the payload's own rate-amount fact can refuse this correction.
+$substitutedRateAmount = $correctionFacts->invoke( null, 11, 22, 5, 2, 12001, 13000, 'AUD', 'operator_evidence_correction' );
+dzn_u_replay_refusal(
+	static fn() => FinanceSupport::assertReplayPayload( $recordedDigest, $substitutedRateAmount, 'finance_snapshot_corrections' ),
+	'command_replay_conflict',
+	'a substituted corrected rate amount fails the payload proof'
+);
+// Only the corrected *derived* amount moves, leaving the rate amount unchanged.
+$substitutedAmount = $correctionFacts->invoke( null, 11, 22, 5, 2, 12000, 13001, 'AUD', 'operator_evidence_correction' );
 dzn_u_replay_refusal(
 	static fn() => FinanceSupport::assertReplayPayload( $recordedDigest, $substitutedAmount, 'finance_snapshot_corrections' ),
 	'command_replay_conflict',
 	'a substituted correction of the same Lesson, snapshot and reason fails the payload proof'
 );
-$substitutedRate = $correctionFacts->invoke( null, 11, 22, 6, 2, 12000, 'AUD', 'operator_evidence_correction' );
+$substitutedRate = $correctionFacts->invoke( null, 11, 22, 6, 2, 12000, 13000, 'AUD', 'operator_evidence_correction' );
 dzn_u_replay_refusal(
 	static fn() => FinanceSupport::assertReplayPayload( $recordedDigest, $substitutedRate, 'finance_snapshot_corrections' ),
 	'command_replay_conflict',
@@ -158,4 +175,4 @@ dzn_u_replay_refusal(
 );
 
 if ( $failures > 0 ) { fwrite( STDERR, 'phase-2a2u-replay-unit: FAIL (' . $failures . ")\n" ); exit( 1 ); }
-echo "phase-2a2u-replay-unit: OK (shared §15.3 replay re-verification: refusal convergence, absent/mismatched fail-closed, exact typed-result shape, exact correction-payload reconstitution, exact convergence)\n";
+echo "phase-2a2u-replay-unit: OK (shared §15.3 replay re-verification: refusal convergence, absent/mismatched fail-closed, exact typed-result shape, exact correction-payload reconstitution of the corrected rate amount and the corrected derived amount, exact convergence)\n";

@@ -44,6 +44,7 @@ final class FinanceCorrectionService {
         $payload=FinanceSupport::payload(self::correctionFacts(
             $lessonId,(int)$snapshot->id,
             self::canonicalInt($input['corrected_rate_id']??0),self::canonicalInt($input['corrected_rate_version']??0),
+            self::canonicalInt($input['corrected_rate_amount_minor']??null),
             self::canonicalInt($input['corrected_derived_amount_minor']??null),self::canonicalCurrency($input['corrected_currency']??''),
             $reason
         ));
@@ -143,6 +144,7 @@ final class FinanceCorrectionService {
         FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,self::correctionFacts(
             (int)$correction->lesson_id,(int)$correction->snapshot_id,
             (int)$correction->corrected_rate_id,(int)$correction->corrected_rate_version,
+            (int)$correction->corrected_rate_amount_minor,
             (int)$correction->corrected_derived_amount_minor,(string)$correction->corrected_currency,
             (string)$correction->reason_code
         ),'finance_snapshot_corrections');
@@ -168,12 +170,15 @@ final class FinanceCorrectionService {
      * §15.3: the canonical command facts of one `correct_snapshot` command.
      *
      * The recorded payload is a pure function of the correction row the command wrote — its Lesson and
-     * snapshot, its corrected rate row and version, its corrected derived amount and currency, and its
-     * operator reason — so both the write path and the replay path build the digested facts here, and a
-     * replay reconstitutes exactly these facts from the re-loaded correction row.
+     * snapshot, its corrected rate row, version and restated rate amount, its corrected derived amount and
+     * currency, and its operator reason — so both the write path and the replay path build the digested
+     * facts here, and a replay reconstitutes exactly these facts from the re-loaded correction row. Every
+     * material correction fact is carried: a second self-consistent correction of the same Lesson,
+     * snapshot and reason whose corrected rate amount *or* corrected derived amount differs therefore
+     * moves the payload and fails closed `command_replay_conflict` instead of converging on a substitute.
      */
-    private static function correctionFacts(int $lessonId,int $snapshotId,mixed $rateId,mixed $rateVersion,mixed $derivedAmount,mixed $currency,string $reason):array{
-        return array('lesson_id'=>$lessonId,'snapshot_id'=>$snapshotId,'rate_id'=>$rateId,'version'=>$rateVersion,'amount'=>$derivedAmount,'currency'=>$currency,'reason'=>$reason,'operation'=>'correct_snapshot');
+    private static function correctionFacts(int $lessonId,int $snapshotId,mixed $rateId,mixed $rateVersion,mixed $rateAmount,mixed $derivedAmount,mixed $currency,string $reason):array{
+        return array('lesson_id'=>$lessonId,'snapshot_id'=>$snapshotId,'rate_id'=>$rateId,'version'=>$rateVersion,'rate_amount'=>$rateAmount,'derived_amount'=>$derivedAmount,'currency'=>$currency,'reason'=>$reason,'operation'=>'correct_snapshot');
     }
     /** A canonical exact-integer when the caller supplied one, otherwise the raw value (refused later). */
     private static function canonicalInt(mixed $value):mixed{

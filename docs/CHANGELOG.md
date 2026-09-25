@@ -9,8 +9,9 @@ Schema 30 / migration `030_finance_payability_rate_statement_authority` / build
 `phase2a2u-finance-payability-rate-statement-20260925.1`, additive on the Phase-T candidate tree at
 Schema 29 and explicitly scoped to that recorded base (contract §20 prerequisite 2). It implements the
 contract `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md` (SHA-256
-`dec2c93a7e763d14ca9bb2a8594cb62b88063a414f866a439f7110c53572b3a8`, whose §0g records correction
-round 2, whose §0h records correction round 3 and whose §0i records correction round 4).
+`402f1334dd169a62aea450929d3bee25a116930c3e93bf69fa175a41bed6d79b`, whose §0g records correction
+round 2, whose §0h records correction round 3, whose §0i records correction round 4 and whose §0j records
+correction round 5).
 
 **Independent review correction round 2** (the review of `86d57606cabcddba15d076edfe14fb4e7257e60f` /
 tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned FAIL — CORRECTION REQUIRED with six blocking
@@ -119,6 +120,34 @@ additively, with no reset, rebase, amend or force-push):
   passing**) scans the declarations, the helper, every family's shape re-proof, the absence of any replay
   that returns a recorded typed result without re-loading it, and the presence of every substitution
   probe. Contract §0i records the round in §15.3.
+
+**Independent review correction round 5** (the review of
+`f5138509a0a256df335015b1ef1d6f42dfd06b96` / tree `85db4f8afc99159e4d2f3c8e294d1247d820a899` returned
+FAIL — CORRECTION REQUIRED with one blocking finding on §15.3; it is closed on this descendant,
+additively, with no reset, rebase, amend or force-push):
+
+- The snapshot-correction command payload now carries **every** material correction fact. The corrected
+  rate amount is a canonical fact of `FinanceCorrectionService::correctionFacts()` beside the corrected
+  derived amount — `self::canonicalInt($input['corrected_rate_amount_minor']??null)` on the write path and
+  `(int)$correction->corrected_rate_amount_minor` on the replay path — so a second, self-consistent
+  correction of the same Lesson, snapshot, corrected rate row/version, corrected derived amount, currency
+  and reason that differed only in its corrected rate amount is refused `command_replay_conflict` by
+  `FinanceSupport::assertReplayPayload()` instead of converging on the substituted row (U-C11-BLOCK-001).
+  Contract §12.2's completeness rule and §15.3's payload clause now name the restated rate amount
+  explicitly, so the fact set is declared rather than implied.
+- The corruption suite's original correction probe corrupted the recorded `corrected_derived_amount_minor`
+  and asserted `snapshot_derivation_mismatch`, but the corrected derived amount is itself a payload fact
+  and §15.3's payload re-proof runs before the family's own derivation-digest re-proof, so that corruption
+  in fact fails closed `command_replay_conflict`. The probe now asserts the code the service produces, and
+  the family's own derivation-digest re-proof is kept covered by a third probe that moves a fact the
+  payload does not carry — the recorded `prior_snapshot_digest` — and asserts `snapshot_derivation_mismatch`.
+- Coverage: `tests/phase-2a2u-replay-unit.php` (**executed and passing**) proves through reflection that
+  the builder carries the corrected rate amount and the corrected derived amount as separate facts and
+  that a correction whose corrected rate amount alone differs is refused `command_replay_conflict`;
+  `tests/phase-2a2u-corruption-runtime.php` (written, **not executed**) carries the three correction replay
+  probes; and `tests/phase-2a2u-contract.php` (**executed and passing**) scans for both new probes. Every
+  461 candidate PHP file still parses cleanly under the PHP 8.5.8 WASM CLI. Contract §0j records the round
+  in §12.2 and §15.3.
 
 - **A versioned finance policy registry** with four declared keys and a single reason-code allowlist; a
   version is immutable in value with exactly one auditable `status` column that moves at most twice in one

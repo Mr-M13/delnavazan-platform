@@ -199,15 +199,34 @@ $replayProbe(
     'upstream_aggregate_invalid','payability',(int)$evaluateReplay['evaluation_id'],'evaluation_id'
 );
 
-// Correction (`correct_snapshot`): the recorded correction must still reproduce its §12.2 derivation
-// digest, name a corrected rate row/version that exists, and name the digest of the snapshot it corrected.
+// Correction (`correct_snapshot`): the recorded correction must still reproduce the exact command payload
+// the command recorded — including *every* material correction fact — and, independently, its §12.2
+// derivation digest, name a corrected rate row/version that exists and name the digest of the snapshot it
+// corrected. The first two probes move one payload fact each (the corrected rate amount, then the corrected
+// derived amount), so a materially different correction can only fail closed `command_replay_conflict`; the
+// third is the family's own probe, moving a fact the payload does not carry (the prior-snapshot digest) so
+// that it exercises the family's own derivation-digest re-proof instead.
 $correctionReplayKey=$replayKey('correction');
 $correctionReplay=$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey);
+$correctionRateAmount=(int)$wpdb->get_var($wpdb->prepare("SELECT corrected_rate_amount_minor FROM {$p}finance_snapshot_corrections WHERE id=%d",(int)$correctionReplay['correction_id']));
+$replayProbe(
+    static fn()=>$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_rate_amount_minor'=>$correctionRateAmount+1),array('id'=>(int)$correctionReplay['correction_id'])),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_rate_amount_minor'=>$correctionRateAmount),array('id'=>(int)$correctionReplay['correction_id'])),
+    'command_replay_conflict','correction substituted corrected rate amount',(int)$correctionReplay['correction_id'],'correction_id'
+);
 $correctionAmount=(int)$wpdb->get_var($wpdb->prepare("SELECT corrected_derived_amount_minor FROM {$p}finance_snapshot_corrections WHERE id=%d",(int)$correctionReplay['correction_id']));
 $replayProbe(
     static fn()=>$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey),
     static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_derived_amount_minor'=>$correctionAmount+1),array('id'=>(int)$correctionReplay['correction_id'])),
     static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_derived_amount_minor'=>$correctionAmount),array('id'=>(int)$correctionReplay['correction_id'])),
+    'command_replay_conflict','correction substituted corrected derived amount',(int)$correctionReplay['correction_id'],'correction_id'
+);
+$correctionPriorDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT prior_snapshot_digest FROM {$p}finance_snapshot_corrections WHERE id=%d",(int)$correctionReplay['correction_id']));
+$replayProbe(
+    static fn()=>$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('prior_snapshot_digest'=>str_repeat('f',64)),array('id'=>(int)$correctionReplay['correction_id'])),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('prior_snapshot_digest'=>$correctionPriorDigest),array('id'=>(int)$correctionReplay['correction_id'])),
     'snapshot_derivation_mismatch','correction',(int)$correctionReplay['correction_id'],'correction_id'
 );
 

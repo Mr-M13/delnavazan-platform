@@ -259,6 +259,39 @@ declarations, the shared helper, every family's shape re-proof, the absence of a
 recorded typed result without re-loading it, and the presence of every substitution probe, so the
 correction cannot silently regress.
 
+## 0j. Implementation-candidate review correction round 5 — finding and correction
+
+The independent review of the **implementation candidate** `f5138509a0a256df335015b1ef1d6f42dfd06b96`
+(tree `85db4f8afc99159e4d2f3c8e294d1247d820a899`) returned **FAIL — CORRECTION REQUIRED** with one
+blocking finding on §15.3. It is corrected on a descendant of that commit (never rewritten, never
+amended, never rebased, never force-pushed), and §15.3 — which already required that a replayed operation
+re-produce the recorded `command_payload_digest` exactly — is the operative section.
+
+| Finding | Correction |
+| --- | --- |
+| U-C11-BLOCK-001 — `corrected_rate_amount_minor` is a material correction fact but was omitted from `FinanceCorrectionService::correctionFacts()` and therefore from both the recorded `command_payload_digest` and the replay reconstitution, so a second, self-consistent correction of the same Lesson, snapshot, corrected rate row/version, corrected derived amount, currency and reason that differed only in its corrected rate amount could replace `result_correction_id` and replay successfully | The correction's canonical command facts now carry the **complete material correction fact set**: `correctionFacts()` takes the corrected rate amount as its own canonically validated fact (`self::canonicalInt($input['corrected_rate_amount_minor']??null)` on the write path, `(int)$correction->corrected_rate_amount_minor` on the replay path) beside the corrected derived amount, so a correction whose corrected rate amount alone differs moves the payload and is refused `command_replay_conflict` instead of converging on the substituted row. §12.2's completeness rule and §15.3's payload clause now name the restated rate amount explicitly, so the payload fact set is declared rather than implied. Coverage: `tests/phase-2a2u-replay-unit.php` adds a payload probe in which only the corrected rate amount differs, `tests/phase-2a2u-corruption-runtime.php` adds the matching runtime corruption probe (corrupt the recorded `corrected_rate_amount_minor`, prove the identical replay fails closed `command_replay_conflict`, restore the row exactly, prove the identical replay converges on the recorded correction id), and `tests/phase-2a2u-contract.php` scans for both so the omission cannot silently regress |
+
+**One further defect in the same probe family, found and corrected with this round.** The corruption
+suite's original correction probe corrupted the recorded `corrected_derived_amount_minor` and asserted
+`snapshot_derivation_mismatch`, but the correction's corrected derived amount is *also* a payload fact, and
+§15.3's payload re-proof runs **before** the family's own derivation-digest re-proof
+(`FinanceSupport::assertReplayPayload()` precedes the `FinanceRule::CORRECTION_DIGEST_FIELDS` comparison in
+`FinanceCorrectionService::replay()`), so that corruption in fact fails closed `command_replay_conflict`.
+The probe is corrected to assert the code the code produces, and the family's own derivation-digest
+re-proof is kept covered by a third correction probe that moves a fact the payload does not carry (the
+recorded `prior_snapshot_digest`) and asserts `snapshot_derivation_mismatch`.
+
+**Coverage added with the correction.** `tests/phase-2a2u-replay-unit.php` (**executed and passing**,
+WordPress-free and database-free) proves the corrected fact set through reflection: `correctionFacts()`
+carries the corrected rate amount and the corrected derived amount as separate facts, the facts rebuilt
+from a recorded correction row reproduce the recorded `command_payload_digest` exactly, and a correction
+whose corrected rate amount alone differs (or whose corrected derived amount, corrected rate row or
+version differs) is refused `command_replay_conflict`. `tests/phase-2a2u-corruption-runtime.php` (written,
+**not executed**) now carries three correction replay probes — corrected rate amount, corrected derived
+amount and prior-snapshot digest — alongside the substituted-secondary-result probes, so the correction
+family proves both its payload proof and its own derivation-digest proof. `tests/phase-2a2u-contract.php`
+(**executed and passing**) scans for both new probes.
+
 ## 1. Verified authoritative state
 
 | Fact | Verified value (this checkout) |
@@ -1448,7 +1481,8 @@ a `derivation_digest` over the corrected values.
 Additional locked rules:
 
 - A correction must be **complete**: it names the snapshot, the exact rate row and version it asserts,
-  the corrected amount and currency, and the **intro payability policy version in force at the snapshot
+  the **restated rate amount** (`corrected_rate_amount_minor`) alongside the corrected derived amount and
+  the currency, and the **intro payability policy version in force at the snapshot
   instant**, restated on the correction row exactly as the snapshot records it
   (`intro_policy_key`/`intro_policy_version`: both recorded for an `introductory` Lesson and both `NULL`
   for every other Lesson, §13.2). A partial correction — including a half-set policy pair — is refused
@@ -2225,7 +2259,12 @@ correction `correct_snapshot`, the policy `record`, the rate `record`/`close`/`w
 exactly
 (`FinanceSupport::assertReplayPayload()`), so an id that names a different but self-consistent row of the
 same aggregate and reason fails closed `command_replay_conflict` instead of converging on the
-substitution (§0h–§0i).
+substitution (§0h–§0j). For the correction `correct_snapshot` the canonical payload facts are the
+**complete material correction fact set** — its Lesson and snapshot, its corrected rate row, version and
+restated rate amount, its corrected derived amount and currency, and its operator reason
+(`FinanceCorrectionService::correctionFacts()`) — so a second self-consistent correction of the same
+Lesson, snapshot and reason that moves *any* of those facts, including the corrected rate amount alone, is
+refused `command_replay_conflict` (§0j).
 
 ### 15.4 Conditional supersession
 
