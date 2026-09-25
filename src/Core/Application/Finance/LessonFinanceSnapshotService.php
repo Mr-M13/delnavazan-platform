@@ -39,7 +39,7 @@ final class LessonFinanceSnapshotService {
         if(!$hint)throw new FinanceRefusalException('finance_parent_not_live','The canonical Lesson does not exist');
         $teacherId=(int)$hint->teacher_id;
         $payload=FinanceSupport::payload(array('lesson_id'=>$lessonId,'operation'=>'capture'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'capture','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'snapshot_id'=>null,'correction_id'=>null,'result_snapshot_id'=>null,'result_correction_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'capture','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'snapshot_id'=>null,'correction_id'=>null,'result_state'=>FinanceRule::commandSuccessState('capture'),'result_snapshot_id'=>null,'result_correction_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_snapshot_commands',$command,function()use($lessonId,$rawKey,$actor,$now,$payload,$digest,&$command){
             if($existing=$this->snapshots->command($digest))return $this->replay($existing,$payload,'capture');

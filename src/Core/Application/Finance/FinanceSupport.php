@@ -262,6 +262,10 @@ final class FinanceSupport {
                 $commandId=(int)$existing->id;
                 if((string)$existing->reason_code===$reasonCode)$reasonCode=(string)$existing->reason_code;
             }else{
+                // §15.8: a refused row carries the one declared refusal state, its exact reason code and a
+                // `NULL` typed result — never the success state of the attempt it just rolled back.
+                foreach(array_keys($commandRow) as $resultColumn)if(str_starts_with($resultColumn,'result_')&&$resultColumn!=='result_state')$commandRow[$resultColumn]=null;
+                $commandRow['result_state']=FinanceRule::COMMAND_REFUSAL_STATE;
                 $commandRow['reason_code']=$reasonCode;
                 self::insertRow($commandTable,$commandRow,'Finance refusal command persistence failed');
                 $commandId=(int)$wpdb->insert_id;

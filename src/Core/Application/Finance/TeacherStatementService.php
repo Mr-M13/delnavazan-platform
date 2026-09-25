@@ -36,7 +36,7 @@ final class TeacherStatementService {
         FinanceSupport::requireCapability(self::CAPABILITY);
         $actor=FinanceSupport::actor();$now=FinanceSupport::now();$digest=FinanceSupport::key($rawKey);
         $payload=FinanceSupport::payload(array('teacher_id'=>$teacherId,'start'=>$periodStartUtc,'end'=>$periodEndUtc,'operation'=>'draft'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'draft','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>null,'result_statement_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'draft','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>null,'result_state'=>FinanceRule::commandSuccessState('draft'),'result_statement_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_statement_commands',$command,function()use($teacherId,$periodStartUtc,$periodEndUtc,$actor,$now,$digest,$payload,&$command){
             if($existing=$this->statements->command($digest))return $this->replay($existing,$payload,'draft');
@@ -62,7 +62,7 @@ final class TeacherStatementService {
         if(!$hint)throw new FinanceRefusalException('finance_parent_not_live','The statement does not exist');
         $teacherId=(int)$hint->teacher_id;
         $payload=FinanceSupport::payload(array('statement_id'=>$statementId,'operation'=>'issue'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'issue','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_statement_id'=>$statementId,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'issue','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_state'=>FinanceRule::commandSuccessState('issue'),'result_statement_id'=>$statementId,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_statement_commands',$command,function()use($statementId,$actor,$now,$payload,$digest,&$command){
             if($existing=$this->statements->command($digest))return $this->replay($existing,$payload,'issue');
@@ -83,11 +83,17 @@ final class TeacherStatementService {
             $set=$this->periodLessons((int)$statement->teacher_id,(string)$statement->period_start_utc,(string)$statement->period_end_utc);
             $lines=$this->statements->lines($statementId,true);
             $stated=array();
-            foreach($lines as $line)$stated[(int)$line->lesson_id]=true;
+            foreach($lines as $line)$stated[(int)$line->lesson_id]=$line;
             if((int)$statement->excluded_archived_count!==count($set['archived']))throw new FinanceRefusalException('statement_derivation_mismatch','The recorded archive exclusion count no longer matches the period',$scope);
             foreach(array_keys($set['active']) as $lessonId){
                 if(!isset($stated[$lessonId]))throw new FinanceRefusalException('snapshot_missing_for_lesson','Every Lesson of the period must be stated or counted as an archive exclusion',$scope);
-                $this->assertLineFresh($lessonId,$scope);
+            }
+            // Gate 6: every stored line is compared with the *current* effective snapshot and payability
+            // evaluation — correction identity, disposition, basis, rate pair, currency and the exact
+            // recomputed amount — so a draft a later correction, override or re-derivation has out-covered
+            // is refused rather than issued with stale lines and totals (§10.5, §15.5).
+            foreach($stated as $lessonId=>$line){
+                $this->assertLineFresh($line,FinanceSnapshotIntegrity::effective($lessonId,$this->snapshots),FinancePayabilityIntegrity::effective($lessonId,$this->evaluations,$this->snapshots),$scope);
             }
             // Gate 5: no pending line.
             if((int)$statement->pending_line_count>0)throw new FinanceRefusalException('payability_pending','A pending payability blocks statement issuance',$scope);
@@ -114,7 +120,7 @@ final class TeacherStatementService {
         $teacherId=(int)$hint->teacher_id;
         $reason=FinanceSupport::operatorReason($input);
         $payload=FinanceSupport::payload(array('statement_id'=>$statementId,'reason'=>$reason,'operation'=>'withdraw'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'withdraw','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_statement_id'=>$statementId,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'withdraw','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_state'=>FinanceRule::commandSuccessState('withdraw'),'result_statement_id'=>$statementId,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_statement_commands',$command,function()use($statementId,$actor,$now,$digest,$payload,$reason,&$command){
             if($existing=$this->statements->command($digest))return $this->replay($existing,$payload,'withdraw');
@@ -140,7 +146,7 @@ final class TeacherStatementService {
         $teacherId=(int)$hint->teacher_id;
         $reason=FinanceSupport::operatorReason($input);
         $payload=FinanceSupport::payload(array('statement_id'=>$statementId,'reason'=>$reason,'operation'=>'supersede'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'supersede','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_statement_id'=>null,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'supersede','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'statement_id'=>$statementId,'result_state'=>FinanceRule::commandSuccessState('supersede'),'result_statement_id'=>null,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_statement_commands',$command,function()use($statementId,$actor,$now,$digest,$payload,$reason,&$command){
             if($existing=$this->statements->command($digest))return $this->replay($existing,$payload,'supersede');
@@ -289,13 +295,35 @@ final class TeacherStatementService {
         }
         return $context;
     }
-    /** §10.5 rule 6: a stated line's effective snapshot must re-verify and its amount must be reproducible. */
-    private function assertLineFresh(int $lessonId,array $scope):void{
-        $effective=FinanceSnapshotIntegrity::effective($lessonId,$this->snapshots);
-        $evaluation=FinancePayabilityIntegrity::effective($lessonId,$this->evaluations,$this->snapshots);
+    /**
+     * §10.5 rule 6: a stated line is compared, field by field, with the Lesson's *current* effective
+     * snapshot and payability evaluation.
+     *
+     * The line records the snapshot, the applicable snapshot correction, the payability evaluation, the
+     * disposition, the basis, the rate pair, the currency and the amount it was derived from. When any of
+     * them has moved since the draft was written — a correction, an override, a re-derivation — the
+     * recalled amount no longer equals the recorded one and the draft is refused: it is withdrawn and
+     * re-drafted through §10.6 rather than issued on stale lines and totals.
+     */
+    private function assertLineFresh(object $line,array $effective,?object $evaluation,array $scope):void{
         if(!$evaluation)throw new FinanceRefusalException('payability_pending','A Lesson of the period has no effective payability evaluation',$scope);
-        if((string)$evaluation->disposition==='pending')throw new FinanceRefusalException('payability_pending','A pending payability blocks statement issuance',$scope);
-        if($effective['amount_minor']<0)throw new FinanceRefusalException('finance_amount_not_exact','A statement line amount must be an exact integer',$scope);
+        $disposition=(string)$evaluation->disposition;
+        if($disposition==='pending')throw new FinanceRefusalException('payability_pending','A pending payability blocks statement issuance',$scope);
+        $correctionId=$effective['correction']===null?null:(int)$effective['correction']->id;
+        $lineCorrection=$line->snapshot_correction_id===null?null:(int)$line->snapshot_correction_id;
+        $recomputed=$disposition==='payable'?(int)$effective['amount_minor']:0;
+        if((int)$line->snapshot_id!==(int)$effective['snapshot']->id
+            ||$lineCorrection!==$correctionId
+            ||(int)$line->payability_evaluation_id!==(int)$evaluation->id
+            ||$disposition!==(string)$line->disposition
+            ||(string)$evaluation->basis_code!==(string)$line->basis_code
+            ||(int)$line->rate_id!==(int)$effective['rate_id']
+            ||(int)$line->rate_version!==(int)$effective['rate_version']
+            ||(string)$line->compensation_basis!==(string)$effective['compensation_basis']
+            ||(string)$line->currency!==(string)$effective['currency']
+            ||(int)$line->line_amount_minor!==$recomputed)
+            throw new FinanceRefusalException('statement_derivation_mismatch','A draft line no longer matches the current effective snapshot and payability evaluation, so the draft is withdrawn and re-drafted',$scope);
+        if($recomputed<0)throw new FinanceRefusalException('finance_amount_not_exact','A statement line amount must be an exact integer',$scope);
     }
     /** §10.1: the human-facing period label rendered in the recorded IANA zone. */
     private function renderPeriodLabel(string $startUtc,string $endUtc,string $timezone):string{

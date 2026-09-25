@@ -34,6 +34,36 @@ final class FinanceRule {
     public const FINANCE_TIMEZONE_SOURCE='recorded_policy';
     /** §6.3/U-D19: the single declared constant that binds the policy admissibility guard. */
     public const POLICY_ADMISSIBILITY_RULE='later_than_recorded_consumption';
+
+    /**
+     * §15.3/§15.6/§15.8: the declared `result_state` of every `finance_*_commands` row.
+     *
+     * Every command table's `result_state` is `NOT NULL`, so a command that inserts its result row
+     * without a declared state rolls back at insertion, and a refusal whose evidence row is written
+     * without the one declared refusal state cannot meet §15.8. One success state is therefore declared
+     * per mutating operation, plus the single declared refusal state every business refusal records.
+     */
+    public const COMMAND_SUCCESS_STATES=array(
+        'record'=>'recorded','capture'=>'recorded','correct_snapshot'=>'recorded','evaluate'=>'recorded',
+        'override'=>'recorded','draft'=>'recorded','resolve_exception'=>'recorded','run'=>'completed',
+        'close'=>'closed','issue'=>'issued','supersede'=>'superseded','withdraw'=>'withdrawn',
+    );
+    /** §15.8: the one declared state of a refused command row, with its `NULL` typed result and reason. */
+    public const COMMAND_REFUSAL_STATE='refused';
+    /** §15.8: a run that cannot hydrate its scope is recorded `failed` rather than silently skipped. */
+    public const COMMAND_FAILED_STATE='failed';
+    /** Every state a command table row may carry: the declared successes plus the two terminal states. */
+    public const COMMAND_RESULT_STATES=array('recorded','completed','closed','issued','superseded','withdrawn','failed','refused');
+
+    /** §15.3: the declared success state of one mutating Finance operation. */
+    public static function commandSuccessState(string $operation):string{
+        if(!isset(self::COMMAND_SUCCESS_STATES[$operation]))throw new \InvalidArgumentException('finance_vocabulary_member_not_allowed');
+        return self::COMMAND_SUCCESS_STATES[$operation];
+    }
+    /** §15.3/§15.8: a recorded command state is always one of the declared members. */
+    public static function commandResultState(string $state):bool{
+        return in_array($state,self::COMMAND_RESULT_STATES,true);
+    }
     /** U-D18: the evidence channels a Finance command may record. */
     public const EVIDENCE_CHANNELS=array('staff_record','authenticated_platform','document_reference');
     /** §11.2: reconciliation finding severities. */

@@ -35,6 +35,17 @@ final class FinanceSnapshotRepository extends FinanceRepository {
         if($changed===false)throw new \RuntimeException('Snapshot correction supersession failed: '.$wpdb->last_error);
         return (int)$changed;
     }
+    /**
+     * §15.4: the appended correction claims the snapshot's one applicable slot, after its predecessor
+     * released it. `UNIQUE snapshot_applicable` admits exactly one non-NULL slot per snapshot, so the
+     * append writes `applicable_slot = NULL` and this second conditional statement performs the claim.
+     */
+    public function claimApplicable(int $correctionId):int{
+        global $wpdb;$table=$this->declared('finance_snapshot_corrections');
+        $changed=$wpdb->query($wpdb->prepare("UPDATE {$table} SET applicable_slot=1 WHERE id=%d AND applicable_slot IS NULL AND superseded_by_correction_id IS NULL",$correctionId));
+        if($changed===false)throw new \RuntimeException('Snapshot correction slot claim failed: '.$wpdb->last_error);
+        return (int)$changed;
+    }
     public function correctionsForLesson(int $lessonId):array{
         return $this->many("SELECT * FROM {$this->p}finance_snapshot_corrections WHERE lesson_id=%d ORDER BY id",$lessonId);
     }

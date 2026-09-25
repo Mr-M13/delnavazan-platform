@@ -56,7 +56,12 @@ switch($mode){
     case 'concurrent_policy_record':
     case 'policy_record_vs_snapshot_capture':
     case 'refusal_evidence_convergence':
-        $result['attempts']['policy']=dzn_uc_attempt(fn()=>$policies->record('INTERRUPTION_COMPENSATION_POLICY',array('policy_value'=>$worker==='w1'?'payable':'non_payable','value_type'=>'policy_reference','effective_from'=>gmdate('Y-m-d H:i:s',time()-86400*30),'evidence_channel'=>'staff_record','evidence_reference'=>'race-policy2-'.$worker,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_u_fix_key($mode==='refusal_evidence_convergence'?'race-refusal':'race-policy2-'.$worker)));
+        // `concurrent_policy_record` races two competing versions of one key, so its instant must be
+        // admissible for the winner (strictly later than the seeded version and than the key's recorded
+        // consumption); the two refusal modes deliberately record into time already claimed, which the
+        // declared monotonicity rule refuses for both workers so their refusals converge on one row.
+        $policyEffectiveFrom=$mode==='concurrent_policy_record'?gmdate('Y-m-d H:i:s',time()+600):gmdate('Y-m-d H:i:s',time()-86400*30);
+        $result['attempts']['policy']=dzn_uc_attempt(fn()=>$policies->record('INTERRUPTION_COMPENSATION_POLICY',array('policy_value'=>$worker==='w1'?'payable':'non_payable','value_type'=>'policy_reference','effective_from'=>$policyEffectiveFrom,'evidence_channel'=>'staff_record','evidence_reference'=>'race-policy2-'.$worker,'evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_u_fix_key($mode==='refusal_evidence_convergence'?'race-refusal':'race-policy2-'.$worker)));
         $result['attempts']['capture']=dzn_uc_attempt(fn()=>$snapshots->capture((int)$state['lesson_a'],dzn_u_fix_key('race-capture4-'.$worker)));
         break;
     case 'concurrent_reconciliation_run':

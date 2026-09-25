@@ -84,6 +84,9 @@ try{
 }catch(\Throwable$e){$refused=$e;}
 dzn_u_fix_assert($refused!==null&&$refused->getMessage()==='policy_effective_from_precedes_recorded_consumption','the admissibility refusal must surface with its exact code');
 dzn_u_fix_assert(dzn_u_fix_count('finance_policy_commands','reason_code=%s',array('policy_effective_from_precedes_recorded_consumption'))===1,'a refusal commits exactly one refused command row');
+// §15.8: that row is the declared refusal state with a NULL typed result and the exact reason code — a
+// refusal whose evidence row kept the attempt's success state could never satisfy the refusal contract.
+dzn_u_fix_assert(dzn_u_fix_count('finance_policy_commands','reason_code=%s AND result_state=\'refused\' AND result_policy_id IS NULL',array('policy_effective_from_precedes_recorded_consumption'))===1,'a refusal commits its command row as refused with a NULL typed result');
 dzn_u_fix_assert(dzn_u_fix_count('finance_exceptions','reason_code=%s',array('policy_effective_from_precedes_recorded_consumption'))===1,'a refusal commits exactly one matching exception row');
 dzn_u_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}platform_audit_events WHERE reason_code=%s",'policy_effective_from_precedes_recorded_consumption'))>=1,'a refusal commits its digest-only audit evidence');
 dzn_u_fix_assert(dzn_u_fix_count('platform_outbox')===$outboxBefore,'a refusal raises no notification intent');
@@ -98,4 +101,10 @@ dzn_u_fix_assert($failed!==null,'a failed refusal-evidence write must fail the c
 dzn_u_fix_assert(dzn_u_fix_count('finance_policies','policy_key=%s',array('INTRO_PAYABILITY_POLICY'))===1,'a failed command leaves no Finance row');
 remove_action('dzn_phase_2a2u_write',$writeHook,10);
 remove_action('dzn_phase_2a2u_evidence',$evidenceHook,10);
+// §15.3/§15.6: both declared outcome classes leave a declared result state behind — a success state for a
+// committed command and the one declared refusal state for a business refusal — and never an omitted one.
+foreach(array('finance_policy_commands','finance_teacher_rate_commands','finance_snapshot_commands','finance_payability_commands','finance_statement_commands','finance_reconciliation_commands') as $commandTable){
+    dzn_u_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}{$commandTable} WHERE result_state IS NULL OR result_state=''")===0,'no '.$commandTable.' row may omit its result_state');
+    foreach((array)$wpdb->get_col("SELECT DISTINCT result_state FROM {$p}{$commandTable}") as $recordedState)dzn_u_fix_assert(\Delnavazan\Platform\Core\Application\Finance\FinanceRule::commandResultState((string)$recordedState),'a recorded '.$commandTable.' state is a declared member: '.(string)$recordedState);
+}
 echo "phase-2a2u-failure-runtime: OK (injected failures leave no partial state; refusals commit exactly their evidence)\n";

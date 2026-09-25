@@ -8,7 +8,7 @@
 if(getenv('DZN_PHASE_2A2U_STATEMENT_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-U statement runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2u-fixture.php';
 use Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityService;
-use Delnavazan\Platform\Core\Application\Finance\{FinancePolicyService,LessonFinanceSnapshotService,LessonPayabilityService,TeacherStatementService};
+use Delnavazan\Platform\Core\Application\Finance\{FinanceCorrectionService,FinancePolicyService,FinanceRule,LessonFinanceSnapshotService,LessonPayabilityService,TeacherStatementService};
 use Delnavazan\Platform\Core\Application\Finance\Integrity\FinanceStatementIntegrity;
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 $fixture=get_option('dzn_phase_2a2j_fixture');
@@ -109,4 +109,50 @@ dzn_u_fix_assert((int)$excluded['totals']['excluded_archived_count']===1,'an arc
 dzn_u_fix_assert((int)$excluded['totals']['total_line_count']===2,'the remaining members are stated');
 $wpdb->update($p.'lessons',array('archived_at'=>null),array('id'=>$archivedLesson));
 dzn_u_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT total_line_count FROM {$p}finance_statements WHERE id=%d",$statementId))===(int)$issuedRow->total_line_count,'archiving a Lesson never changes an issued statement');
-echo "phase-2a2u-statement-runtime: OK (draft, totals, issuance evidence, gate, timezone triple, archive exclusion, supersession)\n";
+
+// §12.2/§15.4/§10.5: the second correction of one snapshot supersedes the first and leaves exactly one
+// applicable row, and a draft the correction has out-covered is refused at issuance (§10.5 rule 6) instead
+// of issuing stale lines and totals — the operator withdraws it (§10.6) and re-drafts.
+$staleChain=dzn_u_fix_chain($fixture);
+$staleTeacher=(int)$staleChain['teacher_id'];
+$staleRate=dzn_u_fix_rate($staleTeacher,array('scope_kind'=>'teacher','course_scope_id'=>0,'amount_minor'=>12000,'currency'=>'AUD','effective_from'=>gmdate('Y-m-d H:i:s',time()-3600),'compensation_basis'=>'per_session'),'stale');
+$staleLesson=dzn_u_fix_occurrence($staleChain,$fixture,'stale-1',2,1);
+dzn_u_fix_settle(array($staleLesson));
+dzn_u_fix_outcome($staleLesson,'delivered','stale-1','authorised');
+dzn_u_fix_complete($staleLesson,'stale-1');
+$staleCapture=dzn_u_fix_accepted(fn()=>$snapshots->capture((int)$staleLesson['lesson_id'],dzn_u_fix_key('stale-capture')),'the stale-gate capture');
+$payability->evaluate((int)$staleLesson['lesson_id'],dzn_u_fix_key('stale-evaluate'));
+$staleStart=gmdate('Y-m-d H:i:s',strtotime((string)$staleLesson['starts_at_utc'])-3600);
+$staleEnd=gmdate('Y-m-d H:i:s',strtotime((string)$staleLesson['ends_at_utc'])+60);
+$staleDraft=$statements->draft($staleTeacher,$staleStart,$staleEnd,dzn_u_fix_key('stale-draft'));
+$staleStatementId=(int)$staleDraft['statement_id'];
+$draftCommand=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_statement_commands WHERE operation='draft' AND result_statement_id=%d ORDER BY id DESC LIMIT 1",$staleStatementId));
+dzn_u_fix_assert($draftCommand!==null&&(string)$draftCommand->result_state===FinanceRule::commandSuccessState('draft'),'a drafted statement command row carries its declared success state');
+$corrections=new FinanceCorrectionService();
+$correctionOne=$corrections->correctSnapshot((int)$staleLesson['lesson_id'],array('corrected_rate_id'=>(int)$staleRate['rate_id'],'corrected_rate_version'=>1,'corrected_rate_amount_minor'=>10000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>10000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-stale-correction-1','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_u_fix_key('stale-correction-1'));
+$correctionTwo=$corrections->correctSnapshot((int)$staleLesson['lesson_id'],array('corrected_rate_id'=>(int)$staleRate['rate_id'],'corrected_rate_version'=>1,'corrected_rate_amount_minor'=>11000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>11000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-stale-correction-2','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_u_fix_key('stale-correction-2'));
+dzn_u_fix_assert((int)$correctionOne['correction_id']!==(int)$correctionTwo['correction_id'],'a second correction of one snapshot appends a second row');
+dzn_u_fix_assert(dzn_u_fix_count('finance_snapshot_corrections','snapshot_id=%d AND applicable_slot=1',array((int)$staleCapture['snapshot_id']))===1,'exactly one applicable correction survives the second correction');
+$firstCorrectionRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_snapshot_corrections WHERE id=%d",(int)$correctionOne['correction_id']));
+dzn_u_fix_assert($firstCorrectionRow->applicable_slot===null&&(int)$firstCorrectionRow->superseded_by_correction_id===(int)$correctionTwo['correction_id'],'the superseded correction releases its slot and names its successor');
+$correctionCommand=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_snapshot_commands WHERE operation='correct_snapshot' AND result_correction_id=%d ORDER BY id DESC LIMIT 1",(int)$correctionTwo['correction_id']));
+dzn_u_fix_assert($correctionCommand!==null&&(string)$correctionCommand->result_state===FinanceRule::commandSuccessState('correct_snapshot'),'a recorded correction command row carries its declared success state');
+dzn_u_fix_refused(fn()=>$statements->issue($staleStatementId,dzn_u_fix_key('stale-issue')),'statement_derivation_mismatch','issuance of a draft a correction has out-covered');
+dzn_u_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT payable_amount_minor FROM {$p}finance_statements WHERE id=%d",$staleStatementId))===12000,'a refused issuance never rewrites the stale draft\'s totals');
+$statements->withdraw($staleStatementId,array('reason_code'=>'operator_decision','evidence_channel'=>'staff_record','evidence_reference'=>'u-stale-withdraw','evidence_at'=>gmdate('Y-m-d H:i:s')),dzn_u_fix_key('stale-withdraw'));
+$withdrawCommand=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_statement_commands WHERE operation='withdraw' AND statement_id=%d ORDER BY id DESC LIMIT 1",$staleStatementId));
+dzn_u_fix_assert($withdrawCommand!==null&&(string)$withdrawCommand->result_state===FinanceRule::commandSuccessState('withdraw'),'a withdrawn statement command row carries its declared success state');
+$staleGateException=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}finance_exceptions WHERE reason_code='statement_derivation_mismatch' AND state='open' AND teacher_id=%d ORDER BY id DESC LIMIT 1",$staleTeacher));
+dzn_u_fix_assert($staleGateException>0,'a refused issuance records its blocking exception');
+$reconciliationForStale=new \Delnavazan\Platform\Core\Application\Finance\FinanceReconciliationService();
+$reconciliationForStale->resolveException($staleGateException,array('resolution_note'=>'correction recorded and stale draft withdrawn'),dzn_u_fix_key('resolve-stale-gate'));
+$reDraft=$statements->draft($staleTeacher,$staleStart,$staleEnd,dzn_u_fix_key('stale-redraft'));
+$reDraftLine=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_statement_lines WHERE statement_id=%d ORDER BY line_sequence LIMIT 1",(int)$reDraft['statement_id']));
+dzn_u_fix_assert((int)$reDraftLine->line_amount_minor===11000&&(int)$reDraftLine->snapshot_correction_id===(int)$correctionTwo['correction_id'],'the re-draft records the current effective correction and its exact recomputed amount');
+$reIssued=$statements->issue((int)$reDraft['statement_id'],dzn_u_fix_key('stale-reissue'));
+dzn_u_fix_assert((string)$reIssued['state']==='issued','the re-draft issues once its stale lines are replaced');
+$issueCommand=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_statement_commands WHERE operation='issue' AND statement_id=%d ORDER BY id DESC LIMIT 1",(int)$reDraft['statement_id']));
+dzn_u_fix_assert($issueCommand!==null&&(string)$issueCommand->result_state===FinanceRule::commandSuccessState('issue'),'an issued statement command row carries its declared success state');
+foreach(array('finance_policy_commands','finance_teacher_rate_commands','finance_snapshot_commands','finance_payability_commands','finance_statement_commands','finance_reconciliation_commands') as $commandTable)
+    dzn_u_fix_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}{$commandTable} WHERE result_state IS NULL OR result_state=''")===0,'no '.$commandTable.' row may omit its result_state');
+echo "phase-2a2u-statement-runtime: OK (draft, totals, issuance evidence, gate, timezone triple, archive exclusion, supersession, stale-draft correction gate)\n";

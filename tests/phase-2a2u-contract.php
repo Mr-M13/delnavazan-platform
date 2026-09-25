@@ -185,7 +185,7 @@ foreach ( $capabilities as $capability ) {
 	if ( ! str_contains( $application . $readServices . $controllers, "'" . $capability . "'" ) ) throw new RuntimeException( 'No Phase U surface uses the capability: ' . $capability );
 }
 if ( ! str_contains( $migration, 'Finance authority capability installation failed: Teacher least privilege' ) ) throw new RuntimeException( 'No Teacher role may hold a Finance capability' );
-if ( ! str_contains( $migration, 'Finance authority capability installation failed: '. '$capability' ) ) throw new RuntimeException( 'Finance capabilities must be repaired per capability' );
+if ( ! str_contains( $migration, "Finance authority capability installation failed: '.\$capability" ) ) throw new RuntimeException( 'Finance capabilities must be repaired per capability' );
 
 // ---- No route, provider call, schedule or credential under the Finance layer. --------------------
 foreach ( array( 'register_rest_route', 'wp_remote_', 'curl_', 'wp_schedule_event', 'wp_schedule_single_event', 'wp_cron', 'Stripe', 'client_secret', 'api_key' ) as $forbidden )

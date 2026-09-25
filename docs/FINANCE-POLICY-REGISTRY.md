@@ -43,6 +43,10 @@ null-valued row.** There are four keys and no others.
   successor exists) and then `superseded → withdrawn`, or `active → withdrawn` directly. `withdrawn` is
   terminal; each move is its own audited compare-and-swap with its own affected-row count and its own
   `finance_teacher_rate_events`-style audit evidence.
+- **The two moves belong to two declared commands.** `record()` inserts one version and moves nothing —
+  the version it replaces stays `active` until the operator runs `supersede()`, which is the only command
+  that performs the conditional `active → superseded` move, with its own `finance_policy_commands` row and
+  its own audit evidence (contract §6.2, §0g). `record()`'s own command row names the version it wrote.
 - Resolution is by the covered instant, never by live status: `superseded` is normal history, `withdrawn`
   resolves to unset *and reports its version*, and a key with no version at or before the instant is
   "never set" — never a nearest-version guess and never a default.

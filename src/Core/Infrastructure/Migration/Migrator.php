@@ -1399,9 +1399,16 @@ final class Migrator {
 			if ( $row->policy_value === null || $row->value_type === null || (string) $row->policy_value === '' || (string) $row->value_type === '' ) throw new \RuntimeException('Migration verification failed: a null-valued policy version is not a legal unset representation');
 			if ( (string) $row->reason_code !== 'phase_u_declared_default' && $row->reason_code !== null && ! self::finance_reason_code( (string) $row->policy_key, (string) $row->reason_code ) ) throw new \RuntimeException('Migration verification failed: a finance policy reason code outside its declared set');
 		}
-		if ( (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$p}finance_policies WHERE policy_key='FINANCE_STATEMENT_TIMEZONE'" ) !== 0 ) throw new \RuntimeException('Migration verification failed: the statement timezone key is never seeded');
+		// §13.5: the only rows migration 030 itself writes are the three declared seed versions — each the
+		// migration's own (`recorded_by = 0`) version 1 of a declared seed key. A migration-authored row
+		// outside that shape is a fourth seed, and a migration-authored row for the statement timezone key
+		// means the deliberately unset key was seeded. A version an administrator records through §6.2's
+		// commands — including the timezone key `record()` is the declared way to set (§10.5) — carries that
+		// administrator as its author, is ordinary recorded history and is never counted as a seed.
+		$seededShape = "policy_key IN ('INTRO_PAYABILITY_POLICY','STUDENT_NO_SHOW_COMPENSATION_POLICY','INTERRUPTION_COMPENSATION_POLICY') AND policy_version=1";
+		if ( (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$p}finance_policies WHERE recorded_by=0 AND NOT ({$seededShape})" ) !== 0 ) throw new \RuntimeException('Migration verification failed: a fourth seeded finance policy row');
+		if ( (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$p}finance_policies WHERE recorded_by=0 AND policy_key='FINANCE_STATEMENT_TIMEZONE'" ) !== 0 ) throw new \RuntimeException('Migration verification failed: the statement timezone key is never seeded');
 		foreach ( $seededPolicies as $key ) if ( (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$p}finance_policies WHERE policy_key=%s AND policy_version=1", $key ) ) !== 1 ) throw new \RuntimeException('Migration verification failed: the declared default policy version is missing: '.$key);
-		if ( (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$p}finance_policies" ) > 4 ) throw new \RuntimeException('Migration verification failed: a fourth seeded finance policy row');
 		$duplicateInstant = $wpdb->get_results( "SELECT policy_key,effective_from,COUNT(*) AS total FROM {$p}finance_policies GROUP BY policy_key,effective_from HAVING total>1" );
 		if ( $duplicateInstant ) throw new \RuntimeException('Migration verification failed: two finance policy versions share one effective instant');
 		// Rule 8: rate scope, state and interval invariants.

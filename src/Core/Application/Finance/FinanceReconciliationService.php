@@ -40,11 +40,11 @@ final class FinanceReconciliationService {
         $actor=FinanceSupport::actor();$now=FinanceSupport::now();$digest=FinanceSupport::key($rawKey);
         $teacherId=$teacherId===null?null:FinanceSupport::positiveInt($teacherId,'Valid Teacher required');
         $payload=FinanceSupport::payload(array('start'=>$periodStartUtc,'end'=>$periodEndUtc,'teacher_id'=>$teacherId,'operation'=>'run'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'run','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'run_id'=>null,'exception_id'=>null,'result_run_id'=>null,'result_exception_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'run','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'run_id'=>null,'exception_id'=>null,'result_state'=>FinanceRule::commandSuccessState('run'),'result_run_id'=>null,'result_exception_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         // §15.1 role 3: a period-wide run has no Teacher of its own, so it takes the global policy root
         // shared; a Teacher-scoped run takes that Teacher's root and no policy root at all.
         $lock=$teacherId===null?static fn()=>FinanceSupport::lockPolicyRoot(false):static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
-        return FinanceSupport::runCommand($lock,'finance_reconciliation_commands',$command,function()use($periodStartUtc,$periodEndUtc,$teacherId,$actor,$now,$digest,$input,&$command){
+        return FinanceSupport::runCommand($lock,'finance_reconciliation_commands',$command,function()use($periodStartUtc,$periodEndUtc,$teacherId,$actor,$now,$digest,$payload,$input,&$command){
             if($existing=$this->reconciliation->command($digest))return $this->replay($existing,$payload,'run');
             if(!FinanceRule::utc($periodStartUtc)||!FinanceRule::utc($periodEndUtc)||$periodEndUtc<=$periodStartUtc)throw new FinanceRefusalException('finance_vocabulary_member_not_allowed','A reconciliation run needs a half-open UTC period',array('teacher_id'=>$teacherId));
             $scope=$teacherId===null?$this->scopeTeachers($periodStartUtc,$periodEndUtc):array($teacherId);
@@ -56,7 +56,7 @@ final class FinanceReconciliationService {
                 $runId=$this->reconciliation->insertRun(array('uid'=>Identifier::uid(),'reference_code'=>null,'period_start_utc'=>$periodStartUtc,'period_end_utc'=>$periodEndUtc,'teacher_id'=>$teacherId,'rule_version'=>FinanceRule::RECONCILIATION_RULE_VERSION,'state'=>'failed','failure_reason_code'=>'upstream_aggregate_invalid','line_count'=>0,'matched_count'=>0,'mismatch_count'=>0,'unresolved_count'=>0,'findings_digest'=>FinanceReconciliationIntegrity::findingsDigest(array()),'created_at'=>$now,'created_by'=>$actor));
                 $this->reconciliation->assignPublicHandle($runId);
                 FinanceSupport::audit('finance_reconciliation_runs',$runId,'run',$actor,$digest,'upstream_aggregate_invalid',$now,null);
-                $command['run_id']=$runId;$command['result_run_id']=$runId;$command['reason_code']='upstream_aggregate_invalid';
+                $command['run_id']=$runId;$command['result_state']=FinanceRule::COMMAND_FAILED_STATE;$command['result_run_id']=$runId;$command['reason_code']='upstream_aggregate_invalid';
                 $commandId=$this->reconciliation->insertCommand($command);
                 return array('run_id'=>$runId,'state'=>'failed','failure_reason_code'=>'upstream_aggregate_invalid','findings'=>0,'command_id'=>$commandId);
             }
@@ -110,7 +110,7 @@ final class FinanceReconciliationService {
         if(!$hint)throw new FinanceRefusalException('finance_parent_not_live','The exception does not exist');
         $teacherId=$hint->teacher_id===null?null:(int)$hint->teacher_id;
         $payload=FinanceSupport::payload(array('exception_id'=>$exceptionId,'operation'=>'resolve_exception'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'resolve_exception','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'run_id'=>null,'exception_id'=>$exceptionId,'result_run_id'=>null,'result_exception_id'=>$exceptionId,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'resolve_exception','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'run_id'=>null,'exception_id'=>$exceptionId,'result_state'=>FinanceRule::commandSuccessState('resolve_exception'),'result_run_id'=>null,'result_exception_id'=>$exceptionId,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=$teacherId===null?static fn()=>FinanceSupport::lockPolicyRoot(false):static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_reconciliation_commands',$command,function()use($exceptionId,$input,$actor,$now,$payload,$digest,&$command){
             if($existing=$this->reconciliation->command($digest))return $this->replay($existing,$payload,'resolve_exception');

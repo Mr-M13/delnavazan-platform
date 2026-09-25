@@ -7,7 +7,7 @@
 if(getenv('DZN_PHASE_2A2U_RECONCILIATION_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-U reconciliation runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2u-fixture.php';
 use Delnavazan\Platform\Core\Application\CanonicalLessonAuthorityService;
-use Delnavazan\Platform\Core\Application\Finance\{FinancePolicyService,FinanceReconciliationService,LessonFinanceSnapshotService,LessonPayabilityService,TeacherRateService,TeacherStatementService};
+use Delnavazan\Platform\Core\Application\Finance\{FinancePolicyService,FinanceReconciliationService,FinanceRule,LessonFinanceSnapshotService,LessonPayabilityService,TeacherRateService,TeacherStatementService};
 use Delnavazan\Platform\Core\Application\Finance\Read\FinanceReconciliationReadService;
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 $fixture=get_option('dzn_phase_2a2j_fixture');
@@ -46,6 +46,19 @@ dzn_u_fix_assert(in_array('legacy_flag_differs',$codes,true),'a controlled legac
 dzn_u_fix_assert((int)$run['mismatch_count']===count($findings['findings']),'the run mismatches its own findings exactly');
 dzn_u_fix_assert(dzn_u_fix_count('finance_lesson_snapshots')===$snapshotCountBefore,'a run repairs nothing: the snapshot set is unchanged');
 dzn_u_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT payable_amount_minor FROM {$p}finance_statements WHERE id=%d",$statementId))===$statementTotalsBefore,'a run repairs nothing: the statement totals are unchanged');
+// §15.3: a run's command row carries its declared success state and typed result, an identical replay
+// converges on the recorded run, and a materially different replay of one key is refused.
+$runCommand=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_reconciliation_commands WHERE operation='run' AND result_run_id=%d ORDER BY id DESC LIMIT 1",(int)$run['run_id']));
+dzn_u_fix_assert($runCommand!==null&&(string)$runCommand->result_state===FinanceRule::commandSuccessState('run')&&(int)$runCommand->result_run_id===(int)$run['run_id'],'a completed run command row carries its declared success state and typed result');
+$replayKey=dzn_u_fix_key('run-replay');
+$replayedRun=$reconciliation->run($periodStart,$periodEnd,$teacherId,$replayKey);
+$runsBeforeReplay=dzn_u_fix_count('finance_reconciliation_runs');
+$convergedRun=$reconciliation->run($periodStart,$periodEnd,$teacherId,$replayKey);
+dzn_u_fix_assert((int)$convergedRun['run_id']===(int)$replayedRun['run_id'],'an identical reconciliation replay converges on the recorded run');
+dzn_u_fix_assert(dzn_u_fix_count('finance_reconciliation_runs')===$runsBeforeReplay,'an identical reconciliation replay appends no second run');
+dzn_u_fix_assert(dzn_u_fix_count('finance_reconciliation_commands','result_run_id=%d',array((int)$replayedRun['run_id']))===1,'an identical reconciliation replay writes exactly one command row');
+dzn_u_fix_refused(fn()=>$reconciliation->run(gmdate('Y-m-d H:i:s',strtotime($periodStart)-86400),$periodEnd,$teacherId,$replayKey),'command_replay_conflict','a materially different replay of one reconciliation key');
+dzn_u_fix_assert(dzn_u_fix_count('finance_reconciliation_commands','result_run_id=%d',array((int)$replayedRun['run_id']))===1,'a conflicting replay preserves the recorded run command');
 // No tolerance: a one-minor-unit difference is a finding with both exact values.
 $line=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_statement_lines WHERE statement_id=%d ORDER BY line_sequence LIMIT 1",$statementId));
 $wpdb->update($p.'finance_statement_lines',array('line_amount_minor'=>(int)$line->line_amount_minor+1),array('id'=>(int)$line->id));

@@ -77,10 +77,11 @@ final class FinancePolicyService {
                 'evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],
                 'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,'updated_at'=>$now,
             ));
-            $moved=$latest?(int)$latest->id:null;
-            if($moved!==null&&$this->policies->supersede($moved,$now,$actor)===1)FinanceSupport::audit('finance_policies',$moved,'supersede',$actor,$digest,'finance_policy_version_conflict',$now,null);
+            // §6.2: `record()` inserts one version and moves nothing. The predecessor's `active → superseded`
+            // transition belongs to the separate, audited `supersede()` command, so an auto-supersession here
+            // would consume that command's only transition and leave it with no result of its own.
             FinanceSupport::audit('finance_policies',$policyId,'record',$actor,$digest,null,$now,null);
-            $command['policy_version']=$version;$command['policy_id']=$moved;$command['result_policy_id']=$policyId;
+            $command['policy_version']=$version;$command['policy_id']=$policyId;$command['result_policy_id']=$policyId;
             $commandId=$this->policies->insertCommand($command);
             return array('policy_id'=>$policyId,'policy_key'=>$policyKey,'policy_version'=>$version,'policy_value'=>$value,'value_type'=>$valueType,'recorded'=>true,'command_id'=>$commandId);
         });

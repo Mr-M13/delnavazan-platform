@@ -101,7 +101,7 @@ final class LessonPayabilityService {
         if(!$hint)throw new FinanceRefusalException('finance_parent_not_live','The canonical Lesson does not exist');
         $teacherId=(int)$hint->teacher_id;
         $payload=FinanceSupport::payload(array('lesson_id'=>$lessonId,'operation'=>'evaluate'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'evaluate','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'evaluation_id'=>null,'override_id'=>null,'result_evaluation_id'=>null,'result_override_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'evaluate','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'evaluation_id'=>null,'override_id'=>null,'result_state'=>FinanceRule::commandSuccessState('evaluate'),'result_evaluation_id'=>null,'result_override_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_payability_commands',$command,function()use($lessonId,$actor,$now,$payload,$digest,&$command){
             if($existing=$this->evaluations->command($digest))return $this->replay($existing,$payload,'evaluate');
@@ -121,8 +121,11 @@ final class LessonPayabilityService {
             $proof=FinanceSupport::evidence(array('evidence_channel'=>'authenticated_platform','evidence_reference'=>'finance-evaluate-'.$digest,'evidence_at'=>$now));
             if($current&&(string)$current->derivation_digest===$recomputed&&$current->override_id===null)return array('evaluation_id'=>(int)$current->id,'lesson_id'=>$lessonId,'disposition'=>(string)$current->disposition,'appended'=>false,'idempotent'=>true);
             $sequence=$this->evaluations->nextEvaluationSequence($lessonId);
+            // §15.4: the appended evaluation carries an empty slot until its predecessor has released the
+            // Lesson's one applicable slot — the declared `UNIQUE lesson_applicable` admits exactly one
+            // non-NULL slot, so the append must not pre-claim the slot it is about to replace.
             $evaluationId=$this->evaluations->insertEvaluation(array(
-                'lesson_id'=>$lessonId,'evaluation_sequence'=>$sequence,'applicable_slot'=>1,
+                'lesson_id'=>$lessonId,'evaluation_sequence'=>$sequence,'applicable_slot'=>null,
                 'disposition'=>$derived['disposition'],'basis_code'=>$derived['basis_code'],'lesson_kind'=>$context['kind'],
                 'delivery_outcome_id'=>$values['delivery_outcome_id'],'delivery_state'=>$values['delivery_state'],
                 'attendance_state'=>$values['attendance_state'],'remedy_class'=>$values['remedy_class'],
@@ -139,6 +142,7 @@ final class LessonPayabilityService {
                 if($this->evaluations->supersedeEvaluation((int)$current->id,$evaluationId,$now)!==1)throw new FinanceRefusalException('payability_supersession_conflict','The previous applicable evaluation was already replaced',array('teacher_id'=>(int)$context['teacher_id'],'lesson_id'=>$lessonId));
                 FinanceSupport::audit('finance_payability_evaluations',(int)$current->id,'supersede',$actor,$digest,null,$now,null);
             }
+            if($this->evaluations->claimApplicable($evaluationId)!==1)throw new FinanceRefusalException('payability_supersession_conflict','The appended evaluation could not claim the Lesson\'s one applicable slot',array('teacher_id'=>(int)$context['teacher_id'],'lesson_id'=>$lessonId));
             $command['evaluation_id']=$evaluationId;$command['result_evaluation_id']=$evaluationId;
             $commandId=$this->evaluations->insertCommand($command);
             return array('evaluation_id'=>$evaluationId,'lesson_id'=>$lessonId,'disposition'=>$derived['disposition'],'basis_code'=>$derived['basis_code'],'appended'=>true,'command_id'=>$commandId);
@@ -153,7 +157,7 @@ final class LessonPayabilityService {
         if(!$hint)throw new FinanceRefusalException('finance_parent_not_live','The canonical Lesson does not exist');
         $teacherId=(int)$hint->teacher_id;
         $payload=FinanceSupport::payload(array('lesson_id'=>$lessonId,'disposition'=>$disposition,'reason'=>$reasonCode,'operation'=>'override'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'override','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'evaluation_id'=>null,'override_id'=>null,'result_evaluation_id'=>null,'result_override_id'=>null,'reason_code'=>$reasonCode,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'override','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'evaluation_id'=>null,'override_id'=>null,'result_state'=>FinanceRule::commandSuccessState('override'),'result_evaluation_id'=>null,'result_override_id'=>null,'reason_code'=>$reasonCode,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockPolicyRootThenTeacher($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_payability_commands',$command,function()use($lessonId,$disposition,$reasonCode,$input,$actor,$now,$payload,$digest,&$command){
             if($existing=$this->evaluations->command($digest))return $this->replay($existing,$payload,'override');
@@ -177,7 +181,7 @@ final class LessonPayabilityService {
             $values=array('lesson_id'=>$lessonId,'disposition'=>$disposition,'basis_code'=>'administrator_override','lesson_kind'=>(string)$current->lesson_kind,'delivery_outcome_id'=>$current->delivery_outcome_id===null?null:(int)$current->delivery_outcome_id,'delivery_state'=>$current->delivery_state===null?null:(string)$current->delivery_state,'attendance_state'=>$current->attendance_state===null?null:(string)$current->attendance_state,'remedy_class'=>$current->remedy_class===null?null:(string)$current->remedy_class,'academy_obligation_id'=>$current->academy_obligation_id===null?null:(int)$current->academy_obligation_id,'schedule_version_id'=>$current->schedule_version_id===null?null:(int)$current->schedule_version_id,'snapshot_id'=>(int)$current->snapshot_id,'override_id'=>$overrideId,'policy_key'=>null,'policy_version'=>null);
             $digestValue=FinancePayabilityIntegrity::digest($values);
             $evaluationId=$this->evaluations->insertEvaluation(array(
-                'lesson_id'=>$lessonId,'evaluation_sequence'=>$this->evaluations->nextEvaluationSequence($lessonId),'applicable_slot'=>1,
+                'lesson_id'=>$lessonId,'evaluation_sequence'=>$this->evaluations->nextEvaluationSequence($lessonId),'applicable_slot'=>null,
                 'disposition'=>$disposition,'basis_code'=>'administrator_override','lesson_kind'=>$values['lesson_kind'],
                 'delivery_outcome_id'=>$values['delivery_outcome_id'],'delivery_state'=>$values['delivery_state'],
                 'attendance_state'=>$values['attendance_state'],'remedy_class'=>$values['remedy_class'],
@@ -193,6 +197,7 @@ final class LessonPayabilityService {
             FinanceSupport::audit('finance_payability_evaluations',$evaluationId,'override',$actor,$digest,$reasonCode,$now,null);
             if($this->evaluations->supersedeEvaluation((int)$current->id,$evaluationId,$now)!==1)throw new FinanceRefusalException('payability_supersession_conflict','The previous applicable evaluation was already replaced',array('teacher_id'=>(int)$context['teacher_id'],'lesson_id'=>$lessonId));
             FinanceSupport::audit('finance_payability_evaluations',(int)$current->id,'supersede',$actor,$digest,null,$now,null);
+            if($this->evaluations->claimApplicable($evaluationId)!==1)throw new FinanceRefusalException('payability_supersession_conflict','The appended override evaluation could not claim the Lesson\'s one applicable slot',array('teacher_id'=>(int)$context['teacher_id'],'lesson_id'=>$lessonId));
             $command['evaluation_id']=(int)$current->id;$command['override_id']=$overrideId;$command['result_evaluation_id']=$evaluationId;$command['result_override_id']=$overrideId;
             $commandId=$this->evaluations->insertCommand($command);
             return array('evaluation_id'=>$evaluationId,'override_id'=>$overrideId,'lesson_id'=>$lessonId,'disposition'=>$disposition,'appended'=>true,'command_id'=>$commandId);

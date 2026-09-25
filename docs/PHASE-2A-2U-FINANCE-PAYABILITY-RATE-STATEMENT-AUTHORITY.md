@@ -1,11 +1,15 @@
 # Phase 2A.2-U — Finance, Payability, Effective-Dated Teacher Rates, Statements & Audited Corrections (Schema 30)
 
-**Status:** implementation candidate. Not authoritative until independently reviewed and merged; not
-deployed, not merged and not exercised against a runtime in the implementation environment.
+**Status:** implementation candidate — **independent review correction round 2 applied** (the review of
+`86d57606cabcddba15d076edfe14fb4e7257e60f` / tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned
+FAIL — CORRECTION REQUIRED with six blocking findings; all six are closed, plus two declared adjacent
+corrections and two suite defects — see §6). Not authoritative until independently reviewed and merged;
+not deployed and not merged.
 **Schema:** 30 / migration `030_finance_payability_rate_statement_authority`.
 **Build:** `phase2a2u-finance-payability-rate-statement-20260925.1`.
 **Contract:** `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md`
-(SHA-256 `bacd87afc1f0435716163d64d1b3ed9401ef529201bdde78cc974df7fbbe4900`).
+(SHA-256 `9893bbd935aad4a66908340ca6e3a91546be65b4cc80e7a334ed5f3473b8cd07`; correction round 2 adds
+§0g and the §6.2/§7.2/§9.2/§9.3/§10.5/§12.2/§13.5/§15.3/§15.4/§15.5 amendments).
 **Base:** `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279` — the materialised Phase 2A.2-T candidate tree at
 Schema 29. Phase T (and R2, V) remain unmerged candidates; this candidate is therefore **explicitly
 scoped to that recorded base**, exactly as contract §20 prerequisite 2 allows, and it consumes no
@@ -98,19 +102,21 @@ is implemented conservatively and is flagged here rather than left implicit.
 
 | Evidence | Status |
 | --- | --- |
-| Source contract suite (`tests/phase-2a2u-contract.php`) | **Written, not executed** — PHP is absent in the implementation environment (`php: command not found`), so no PHP file in this candidate has been linted or run |
+| Source contract suite (`tests/phase-2a2u-contract.php`) | **Executed and passing** under a PHP 8.5.8 WASM CLI (`php-wasm`, PHP 8.5.8, no WordPress and no database): `phase-2a2u-contract: OK`. Two defects in the suite itself were found and corrected with it — a malformed `str_contains()` needle for the per-capability repair and a closure `use` clause carrying a default value in `tests/phase-2a2u-corruption-runtime.php` |
+| PHP syntax of the whole candidate | **Executed and passing**: all 460 `.php` files of `src/`, `tests/`, `delnavazan-platform.php` and `uninstall.php` tokenise and parse cleanly under PHP 8.5.8 (`token_get_all(..., TOKEN_PARSE)`) |
 | Migration/verifier at all three call sites | Implemented; **not executed** |
 | Runtime, statement, reconciliation, corruption, failure suites | Written; **not executed** |
 | Concurrency runner (`phase-2a2u-concurrency-runner.sh` + setup/worker/verify) | Written; **not executed** |
 | Adjacent L/M/M0/N/O/P/Q/R1/R2/T regressions | **Not re-run** |
 
-The implementation environment has no PHP interpreter, no MariaDB and no reachable Docker daemon (the
-container socket is denied by the sandbox), so no migration, authority, corruption, failure or
-concurrency evidence exists yet. The static checks that *were* run are the source-level proofs the suite
-encodes (declared table set, vocabulary and reason-code literals, digest-only/append-only discipline,
-parent and index contract, root discipline, allowlisted writes, intents, docs). Executing every §18
-suite on the disposable WordPress + MariaDB runtime is a mandatory acceptance gate before this candidate
-may be merged.
+The implementation environment has no MariaDB and no reachable Docker daemon (the container socket is
+denied by the sandbox), so no migration, authority, corruption, failure or concurrency evidence exists
+yet: those suites need the disposable WordPress + MariaDB runtime, and executing every §18 suite on it is
+a mandatory acceptance gate before this candidate may be merged. The static half of the gate is now
+executed: the source contract suite passes (including its source scans over
+`src/Core/Application/Finance/**` for the declared command result states, the reason-code allowlist, the
+typed command results, the root discipline, the §15.7 write allowlist and the §17 intent shape) and every
+PHP file in the candidate parses.
 
 ## 5. Deliberate non-authorisations preserved
 
@@ -119,3 +125,49 @@ provider call, credential, notification delivery, public/Portal route, Theme cha
 deployment or production access exists in this candidate. Student pricing, obligations, settlements,
 funding, collection and refund facts stay with R1/R2/T and are read-only here. Every open owner decision
 of contract §21 remains open.
+
+## 6. Independent review correction round 2 (implementation candidate)
+
+The independent review of `86d57606cabcddba15d076edfe14fb4e7257e60f` (tree
+`6010181bfbf66e01fa49154c9ba266d1dd4888c4`) returned **FAIL — CORRECTION REQUIRED** with six blocking
+findings. All six are closed on this descendant (additive history only: no reset, no rebase, no amend, no
+force-push), and contract §0g records them in the sections that govern them.
+
+| # | Finding | Where the correction lives |
+| --- | --- | --- |
+| 1 | Command rows omitted the `NOT NULL` `result_state`, and refusal evidence kept the attempt's success state | `FinanceRule::COMMAND_SUCCESS_STATES`/`COMMAND_REFUSAL_STATE`/`COMMAND_FAILED_STATE`/`COMMAND_RESULT_STATES` + `FinanceRule::commandSuccessState()`; one declared success state on every `capture`/`correct_snapshot`/`evaluate`/`override`/`draft`/`issue`/`withdraw`/`supersede`/`run`/`resolve_exception` command row; `FinanceSupport::commitRefusal()` writes `result_state = 'refused'` with `NULL` typed results. Runtime, statement, reconciliation and failure suites now prove both paths on all six command tables |
+| 2 | A successor rate claimed the scope's live slot before its predecessor released it (`UNIQUE teacher_scope_slot`) | `TeacherRateService::record()` closes and supersedes the predecessor first, each move a conditional statement requiring an affected-row count of `1`, inside the same transaction; `withdraw()` measures the interval-free proof only where it writes a closure. Contract §7.2 states the order |
+| 3 | An appended evaluation/correction pre-claimed the one applicable slot (`UNIQUE lesson_applicable`/`snapshot_applicable`) | The declared two-statement protocol of contract §15.4: append with `applicable_slot = NULL`, release the predecessor, then claim the slot with its own conditional statement (`FinancePayabilityRepository::claimApplicable()`, `FinanceSnapshotRepository::claimApplicable()`), both counts checked. Runtime + statement suites prove re-evaluation, override and a second correction |
+| 4 | `record()` silently superseded the predecessor, so the declared `supersede()` command could never succeed | `FinancePolicyService::record()` inserts one version and moves nothing (`policy_id`/`result_policy_id` both name the row it wrote); `supersede()` performs the single conditional `active → superseded` move with its own command row, audit evidence and affected-row count. The runtime suite proves the two-command lifecycle and the refusal of a second supersession |
+| 5 | Issuance never compared the stored line with the current effective snapshot/evaluation | `TeacherStatementService::assertLineFresh()` compares snapshot id, applicable correction id, payability-evaluation id, disposition, basis code, rate row/version, compensation basis, currency and the exact recomputed amount; a stale draft is refused `statement_derivation_mismatch` with its recorded totals untouched and is withdrawn + re-drafted (§10.5 rule 6, §15.5). The statement suite proves refusal, withdrawal, re-draft and re-issuance against a corrected amount |
+| 6 | The reconciliation `run()` closure never captured `$payload` | `$payload` is captured; the reconciliation suite adds the identical replay (one run, one command row, no second run) and the conflicting replay refused `command_replay_conflict` |
+
+Two further corrections are declared in contract §0g rather than left implicit, because the corrected
+policy lifecycle and the declared issuance gate are only coherent with them:
+
+- **The policy verifier refused a live installation.** The seed assertions were implemented against the
+  *fresh* state ("no row for `FINANCE_STATEMENT_TIMEZONE`", "at most four rows in total"), which the
+  declared `record()`/`supersede()` lifecycle necessarily leaves behind — the verifier runs on every
+  current-schema verification, so the first recorded timezone policy would have failed closed on every
+  subsequent request. It now asserts the seed **shape**: the only migration-authored (`recorded_by = 0`)
+  rows are the three declared keys' version 1, and no migration-authored row names the timezone key.
+- **The rate-withdrawal guard judged time it does not write.** Withdrawing a rate a successor already
+  closed wrote no interval yet was measured against the successor's interval, so a superseded rate could
+  not be retracted. The proof now runs only where a closure write happens.
+
+Two defects in the suites themselves are corrected with this round: a closure `use` clause carrying a
+default value (a syntax error that made `tests/phase-2a2u-corruption-runtime.php` unparseable) and a
+malformed `str_contains()` needle in `tests/phase-2a2u-contract.php`; the concurrency fixture's
+`concurrent_policy_record` mode also raced an instant its own seeded predecessor already claimed, so
+neither contender could succeed and the mode's declared "one succeeds, the loser refuses
+`finance_policy_timeline_overlap`" outcome was unreachable — its competing instant is now admissible for
+the winner.
+
+**Still outstanding, and flagged rather than silently rewritten:** the §18 *runtime* suites need the
+disposable WordPress + MariaDB runtime to be executed, and they require fixture-flow work before they can
+pass — their occurrence helper schedules then releases the canonical schedule version (so a capture has
+no applicable anchor unless an outcome is recorded) and leaves the Lesson `authorised` (so §8.2's
+`snapshot_lesson_not_finalised` gate refuses the capture), the outcome helpers require an occurrence that
+has already ended, and several calls pass a 60 *minute* duration where the suite's own comment intends one
+minute. Those are test-fixture defects, not candidate behaviour, and they are recorded here so the
+runtime gate is executed against a corrected fixture rather than assumed green.

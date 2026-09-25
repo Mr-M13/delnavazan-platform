@@ -180,6 +180,45 @@ insert metadata, which carries no Finance meaning and is already the shape the e
 state the same split; the wider prohibitions on business facts and payload columns throughout §0a–§0e are
 unchanged.
 
+## 0g. Implementation-candidate review correction round 2 — findings and corrections
+
+The independent review of the **implementation candidate** `86d57606cabcddba15d076edfe14fb4e7257e60f`
+(tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4`) returned **FAIL — CORRECTION REQUIRED** with six
+blocking findings. All six are corrected on descendants of that commit (never rewritten, never amended,
+never rebased, never force-pushed), each in the section it governs; the sections below are the operative
+contract, and where an earlier round's prose is narrower than this round's, this round's sections govern.
+
+| Finding | Correction |
+| --- | --- |
+| U-C8-BLOCK-001 — the command tables' `NOT NULL` `result_state` was never written | Every `finance_*_commands` insert now supplies its declared state. §15.3/§15.6/§15.8 add the one declared success state per mutating operation (`FinanceRule::COMMAND_SUCCESS_STATES`), the one declared refusal state `refused`, and the declared `failed` run state (`COMMAND_RESULT_STATES`): snapshot `capture`/correction `correct_snapshot`/payability `evaluate`/`override`/statement `draft`/exception `resolve_exception` record `recorded`, a reconciliation `run` records `completed` (or `failed` for a run that cannot hydrate its scope), rate `close` records `closed`, and the three conditional moves record `issued`/`superseded`/`withdrawn`. `FinanceSupport::commitRefusal()` now writes the refused row as `result_state = 'refused'` with a `NULL` typed result and the exact `reason_code` for every command table, so the §15.8 refusal-evidence row can no longer keep the attempt's success state. The runtime, statement, reconciliation and failure suites now prove both paths — a declared state on every recorded command row of all six tables, and a refused row with its `NULL` typed result — for `capture`, `evaluate`, `draft`, `run` and refusals alike. |
+| U-C8-BLOCK-002 — a successor rate claimed the live slot before its predecessor released it | `TeacherRateService::record()` now closes and supersedes the predecessor **before** the successor claims the scope's live slot: the closure and the status move are each a conditional statement whose affected-row count must be `1`, both run in the command's single transaction, and the successor is inserted afterwards. The declared `UNIQUE teacher_scope_slot` therefore admits exactly one live row per scope and a second rate in a scope closes and supersedes the first instead of colliding with it. §7.2 states the order. The same lifecycle now also refuses nothing it should accept: withdrawing a rate a successor has already closed rewrites no interval, so the interval-free proof runs only when this command is about to write the closure (§7.2 rule 1). |
+| U-C8-BLOCK-003 — an appended chain row pre-claimed the one applicable slot | Both append-only chains now use the declared **two-statement protocol** of §15.4: the successor is appended with `applicable_slot = NULL`, the §15.4 supersession statement releases the predecessor (affected-row count `1`), and a second conditional statement claims the successor's slot (`SET applicable_slot = 1 WHERE id = ? AND applicable_slot IS NULL AND superseded_by_<child>_id IS NULL`, affected-row count `1`). `UNIQUE lesson_applicable` / `UNIQUE snapshot_applicable` therefore admit exactly one applicable row per Lesson and per snapshot, and a re-evaluation, an override or a second correction appends instead of colliding. §9.2, §9.3, §12.2 and §15.4 state the protocol; the runtime and statement suites prove it. |
+| U-C8-BLOCK-004 — `record()` consumed the `supersede()` command's only transition | `FinancePolicyService::record()` now inserts its version and performs **no** status move: the version it writes (`policy_id`/`result_policy_id` both name that row) is recorded, and the predecessor's conditional `active → superseded` transition belongs to the separate, audited `supersede()` command, which keeps its own command row, its own audit evidence and its own affected-row count (§6.2). `record()`'s own command row is therefore no longer the only place a status move is evidenced, and `supersede()` can succeed exactly once per row. The runtime suite proves the two-command lifecycle, including the refusal of a second supersession. |
+| U-C8-BLOCK-005 — issuance revalidated the snapshot but never the stored line | §10.5 rule 6 is now implemented line by line: the issuance gate compares **every stored line** with the Lesson's *current* effective snapshot and payability evaluation — the snapshot id, the applicable correction id, the payability evaluation id, the disposition, the basis code, the rate row and version, the compensation basis, the currency, and the exact recomputed amount (`payable ⇒ the effective snapshot's amount`, otherwise `0`). A draft a correction, an override or a re-derivation has out-covered is refused `statement_derivation_mismatch`, its totals are left exactly as recorded, and the operator withdraws and re-drafts it under §10.6. §15.5 states the same. |
+| U-C8-BLOCK-006 — the reconciliation `run()` closure never captured its payload | `FinanceReconciliationService::run()` now captures `$payload` in its attempt closure, so a replayed run converges through the §15.3 digest invariant instead of raising an undefined variable. The reconciliation suite adds the required identical replay (one run, one command row, no second run) and the materially different replay refused `command_replay_conflict`. |
+
+**Two further corrections this round, declared here rather than left implicit.** (a) *The policy verifier
+refused a live installation.* §13.4's seed assertions were implemented as "no `finance_policies` row for
+`FINANCE_STATEMENT_TIMEZONE`" and "at most four `finance_policies` rows in total", which is the *fresh*
+state §18 asserts but not a state a live installation can keep: `record()` is the declared way the
+statement timezone policy is set (§10.5) and every successor version adds a row, so the verifier — which
+runs on every current-schema verification, i.e. on every request through `Migrator::maybe_upgrade()` —
+would have failed closed as soon as the operator performed a declared operation. The verifier now asserts
+the **seed shape** instead: the only migration-authored (`recorded_by = 0`) rows are the three declared
+seed keys' version 1, and no migration-authored row names the statement timezone key. Recorded versions
+(authored by the acting administrator) are ordinary recorded history and are never counted as seeds.
+(b) *The rate-withdrawal guard judged time that is not written.* Withdrawing an already-closed rate wrote
+no interval, yet the interval-free proof still measured the withdrawal instant against a later
+successor's interval and refused the retraction of a superseded row. The proof now runs exactly where a
+closure write happens (§7.2, U-C8-BLOCK-002's row).
+
+The concurrency fixture's `concurrent_policy_record` mode also raced two versions at an instant its own
+seeded predecessor already claimed, so neither contender could succeed and the mode's declared "one
+succeeds, the loser refuses `finance_policy_timeline_overlap`" outcome was unreachable; its competing
+instant is now admissible for the winner while the two refusal modes keep recording into claimed time.
+One syntax error in `tests/phase-2a2u-corruption-runtime.php` (a closure `use` clause carrying a default
+value) and one malformed `str_contains()` needle in `tests/phase-2a2u-contract.php` are corrected with it.
+
 ## 1. Verified authoritative state
 
 | Fact | Verified value (this checkout) |
@@ -599,15 +638,20 @@ writes under a serialisation root (§15.1). Because a policy row has **no `teach
 root cannot serialise them: they take the **global policy serialisation root** `finance_policy_roots`,
 the single immutable row of §13.2, which is also the first element of the fixed lock order (§15.2).
 
-- `record()` inserts one version and refuses every structural defect named above before any write, and it
-  refuses **every instant that is not admissible under §6.3's temporal admissibility rule**
+- `record()` inserts one version — and **nothing else**: it performs no status move of its own, because
+  the version it replaces stays `active` until the operator runs `supersede()`, and its recorded
+  `policy_id`/`result_policy_id` both name the row it wrote. It refuses every structural defect named
+  above before any write, and it refuses **every instant that is not admissible under §6.3's temporal
+  admissibility rule**
   (`policy_effective_from_precedes_recorded_consumption`). It takes the global policy root **exclusively**
   for the whole transaction, reads the key's recorded consumption maximum inside that transaction, and only
   then inserts — so two competing versions of one key can never interleave, can never share an instant
   (§15.2), and can never steal the coverage of a fact that a consumer committed while the command was in
   flight (§6.3, U-D19).
 - `supersede()` is the single conditional `active → superseded` statement on the row a newly recorded
-  successor replaces; its affected-row count is the outcome. It takes the global policy root
+  successor replaces; its affected-row count is the outcome, and it is the **only** command that performs
+  that move, so the `record()`/`supersede()` pair is the declared two-command lifecycle rather than one
+  command that hides the transition (§0g, U-C8-BLOCK-004). It takes the global policy root
   **exclusively**, like every mutating policy command of §15.1.
 - `withdraw()` is the single conditional `active|superseded → withdrawn` statement; it never edits
   `policy_value`, `value_type` or `effective_from`, and it retracts rather than repairs (the affected
@@ -809,6 +853,16 @@ which reports its affected-row count as the outcome and each of which writes its
 `effective_from`, `rate_version`, `reason_code` and every audit column are **never** updated after
 insert. The verifier proves this by rejecting any implementation whose repository exposes an update
 path for those columns (§13.4).
+
+**The write order is declared, not incidental.** A successor is inserted **after** its predecessor has
+released the scope's live slot, because `UNIQUE teacher_scope_slot` admits exactly one live row per scope
+(§13.2): `record()` closes the predecessor's interval and moves its `status`/`active_slot` first — each
+move a conditional statement whose affected-row count must be `1` — and inserts the successor, all inside
+one transaction, so a failure after the predecessor moved rolls the whole command back instead of leaving
+a closed gap or two live rows (§0g, U-C8-BLOCK-002). Symmetrically, `withdraw()` writes a closure only
+when the row still carries an open interval, so the interval-free proof is measured exactly where a
+closure is written and a rate a successor already closed is retractable without re-judging its own past
+instant.
 
 An interval is half-open `[effective_from, effective_until)`. An interval that is closed at or before
 its own start covers no instant at all: it is retained as history and is never a resolution candidate.
@@ -1029,6 +1083,10 @@ treated as authoritative.
   `FinanceRule::PAYABILITY_DERIVATION_VERSION`;
 - appends a new evaluation **only** when it differs from the effective one, or when the effective one
   is absent; an identical re-derivation is a no-op convergence, not a duplicate row;
+- appends the new row with an **empty** applicable slot and moves the Lesson's one applicable slot through
+  §15.4's two-statement protocol — the predecessor's supersession statement first, the successor's slot
+  claim second — so the declared `UNIQUE lesson_applicable` never sees two non-NULL slots in one Lesson
+  (§0g, U-C8-BLOCK-003);
 - writes digest-only evidence in `finance_payability_commands`.
 
 An evaluation requires the Lesson's **effective snapshot**: a Lesson with no snapshot cannot be
@@ -1049,7 +1107,8 @@ existing one and **never** rewrites a statement.
    `derivation_digest`, the actor, reason code, evidence channel, keyed evidence digest and observed
    time; the reason code is chosen from the declared vocabulary of §5.2.1 (never free text, §5.4);
 2. appends a new evaluation with basis `administrator_override` carrying that override id;
-3. supersedes the previous applicable evaluation through the single conditional statement of §15.4.
+3. supersedes the previous applicable evaluation and claims the Lesson's one applicable slot for the
+   appended row through the two-statement protocol of §15.4 (§0g, U-C8-BLOCK-003).
 
 An override may move a disposition in **any** direction, including resolving a `pending`. It always
 leaves the derivation it replaced intact and visible, always appears in reconciliation
@@ -1209,7 +1268,16 @@ serialisation root and then the Teacher finance root in the fixed order of §15.
    silently omitted;
 5. `pending_line_count = 0` (every `pending` payability was resolved by Phase O or by an audited
    override);
-6. every line's effective snapshot re-verifies and the line amount equals the recomputation;
+6. every line's effective snapshot re-verifies **and every stored line is compared, field by field, with
+   the Lesson's current effective snapshot and payability evaluation** — the snapshot id, the applicable
+   snapshot-correction id, the payability-evaluation id, the disposition, the basis code, the rate row
+   and version, the compensation basis, the currency and the exact recomputed amount (a `payable` line
+   equals the effective snapshot's amount, every other disposition is `0`). A line a later correction,
+   override or re-derivation has out-covered is refused `statement_derivation_mismatch` — a declared
+   §10.5 gate refusal — the draft stays `draft` with its recorded lines and totals untouched, and the
+   operator withdraws and re-drafts it under §10.6 (a draft can never be re-labelled in place). A stale
+   draft is therefore never issued and a corrected amount can never disagree with an issued statement
+   (§0g, U-C8-BLOCK-005; §15.5);
 7. all lines carry one currency, and `statement.currency` equals it;
 8. the timezone triple of §10.1 is **fully and consistently recorded and still in force**:
    `period_timezone`, `period_label` and `timezone_policy_version` are all non-null, `period_timezone`
@@ -1353,6 +1421,11 @@ Additional locked rules:
   assertion; the exception is recorded on the correction row and appears in reconciliation.
 - A correction never deletes, hides or downgrades the snapshot it corrects. Both rows remain readable in
   `lessonFinanceTimeline()`.
+- A correction is appended with an **empty** applicable slot and becomes the snapshot's effective
+  correction only through §15.4's two-statement protocol — the previous applicable correction's
+  supersession statement first, this row's slot claim second — so `UNIQUE snapshot_applicable` admits
+  exactly one applicable correction per snapshot and a second correction supersedes the first instead of
+  colliding with it (§0g, U-C8-BLOCK-003).
 - A correction that would change the totals of an `issued` statement must be paired, in the same
   authorisation, with a `statement_supersession` for every affected issued statement. A correction
   without that pairing fails closed with `statement_supersession_required`, so a difference
@@ -1848,6 +1921,12 @@ sites every other phase verifier uses — and rejects:
   null-valued row (§6.1, §10.1). The verifier rejects any fourth seeded row, any seed inside a different
   policy version and any `finance_policies` row whose `policy_value`/`value_type` pair is not fully
   recorded.
+  **"Seeded" means authored by the migration.** The verifier's seed assertions are asserted of the
+  migration's own rows — the three declared keys' version 1, authored by the migration rather than an
+  administrator — and never of recorded history: a version an operator records through §6.2's commands,
+  including the statement timezone policy `record()` is the declared way to set (§10.5), is ordinary
+  recorded history that no seed rule may refuse, so the verifier can be re-run on a live installation
+  (§0g).
 - **The one declared structural row.** The installer additionally writes exactly one
   `finance_policy_roots` row, `root_key = 'finance_policy'` (never NULL, §13.2), inserted with
   insert-or-resolve semantics on `UNIQUE root_key` so a repeat migration converges on the existing row.
@@ -2073,19 +2152,43 @@ is arbitrated without a durable result row. For the global policy registry the s
 key can never slip between each other's duplicate check and write, because only one of them holds the
 global policy root at a time.
 
+**`result_state` is declared, never implied.** Every command table's `result_state` column is `NOT NULL`
+and the command's *outcome* is exactly one of its declared members (`FinanceRule::COMMAND_RESULT_STATES`):
+the one declared success state of the operation the row records
+(`FinanceRule::COMMAND_SUCCESS_STATES` — `recorded`, `completed`, `closed`, `issued`, `superseded` or
+`withdrawn`), the declared `failed` state of a reconciliation run that could not hydrate its scope, or
+the one declared refusal state `refused` with a `NULL` typed result and the exact `reason_code` (§15.8).
+A row that omits its state, or a refusal that keeps the attempt's success state, is not a recordable
+command outcome: the insert fails closed and the command rolls back (§0g, U-C8-BLOCK-001).
+
 ### 15.4 Conditional supersession
 
-Each append-only chain has exactly one conditional supersession statement:
+Each append-only chain has exactly one applicable slot (`applicable_slot`, `UNIQUE <parent>_applicable`)
+and exactly one conditional supersession statement:
 
 ```text
 UPDATE <chain table>
    SET superseded_at = <now>, superseded_by_<child>_id = <new id>, applicable_slot = NULL
- WHERE <parent id> = ? AND applicable_slot = 1 AND superseded_by_<child>_id IS NULL
+WHERE <parent id> = ? AND applicable_slot = 1 AND superseded_by_<child>_id IS NULL
 ```
 
-The affected-row count is the only proof of ownership. A second concurrent appender affects `0` rows,
-writes nothing and converges on the winner's row; a chain with an applicable row but no live edge is an
-integrity fault and fails closed.
+**The slot is claimed in a declared order, and the order is part of the contract.** Because the declared
+uniqueness index admits exactly one non-NULL `applicable_slot` per parent, an appended row cannot carry
+`applicable_slot = 1` while its predecessor still holds the slot. One appended row therefore moves through
+three statements, all inside the command's single transaction:
+
+1. the successor is inserted with `applicable_slot = NULL` and no supersession edge;
+2. the statement above releases the predecessor — `superseded_at`, `superseded_by_<child>_id` and
+   `applicable_slot = NULL` — and its affected-row count must be `1`;
+3. a second conditional statement claims the slot for the successor —
+   `UPDATE <chain table> SET applicable_slot = 1 WHERE id = ? AND applicable_slot IS NULL AND
+   superseded_by_<child>_id IS NULL` — and its affected-row count must be `1`;
+
+so exactly one applicable row exists before the command and exactly one after it, and no reader can ever
+observe a committed chain with zero or two applicable rows. The affected-row counts are the only proof of
+ownership: a second concurrent appender affects `0` rows, writes nothing and converges on the winner's
+row; a chain with an applicable row but no live edge is an integrity fault and fails closed
+(§0g, U-C8-BLOCK-003).
 
 ### 15.5 Statement concurrency
 
@@ -2098,6 +2201,11 @@ integrity fault and fails closed.
 - A statement may not be issued while a snapshot correction or override for one of its Lessons is
   mid-flight: both take the same root, and the loser re-reads and either re-derives the draft
   (if still `draft`) or refuses with `statement_supersession_required` (if already `issued`).
+- A draft whose lines no longer match the current effective snapshot and payability evaluation is
+  **stale**, never re-labelled in place: `issue` refuses it `statement_derivation_mismatch` (a §10.5 gate
+  refusal, recorded as a business refusal with its blocking exception), the draft keeps its recorded lines
+  and totals, and the operator withdraws it and re-drafts under §10.6 (§10.5 rule 6, §0g,
+  U-C8-BLOCK-005).
 - `lesson_stated_twice` is prevented structurally (`UNIQUE statement_lesson` inside one statement) and
   behaviourally (the cross-statement Lesson guard under the root).
 

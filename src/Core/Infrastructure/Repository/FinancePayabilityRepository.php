@@ -26,6 +26,19 @@ final class FinancePayabilityRepository extends FinanceRepository {
         if($changed===false)throw new \RuntimeException('Payability supersession failed: '.$wpdb->last_error);
         return (int)$changed;
     }
+    /**
+     * §15.4: the successor claims the Lesson's one applicable slot, after its predecessor released it.
+     *
+     * The append writes `applicable_slot = NULL` because `UNIQUE lesson_applicable` admits exactly one
+     * non-NULL slot per Lesson: the slot is only free once the §15.4 supersession statement has released
+     * it, so the claim is its own conditional statement with its own affected-row count.
+     */
+    public function claimApplicable(int $evaluationId):int{
+        global $wpdb;$table=$this->declared('finance_payability_evaluations');
+        $changed=$wpdb->query($wpdb->prepare("UPDATE {$table} SET applicable_slot=1 WHERE id=%d AND applicable_slot IS NULL AND superseded_by_evaluation_id IS NULL",$evaluationId));
+        if($changed===false)throw new \RuntimeException('Payability slot claim failed: '.$wpdb->last_error);
+        return (int)$changed;
+    }
     public function overrides(int $lessonId,bool $lock=false):array{
         return $this->many("SELECT * FROM {$this->p}finance_payability_overrides WHERE lesson_id=%d ORDER BY override_sequence,id".($lock?' FOR UPDATE':''),$lessonId);
     }

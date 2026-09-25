@@ -42,7 +42,7 @@ final class FinanceCorrectionService {
         $teacherId=(int)$snapshot->teacher_id;
         $reason=FinanceSupport::operatorReason($input);
         $payload=FinanceSupport::payload(array('lesson_id'=>$lessonId,'snapshot_id'=>(int)$snapshot->id,'rate_id'=>(int)($input['corrected_rate_id']??0),'version'=>(int)($input['corrected_rate_version']??0),'amount'=>$input['corrected_derived_amount_minor']??null,'currency'=>(string)($input['corrected_currency']??''),'reason'=>$reason,'operation'=>'correct_snapshot'));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'correct_snapshot','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'snapshot_id'=>(int)$snapshot->id,'correction_id'=>null,'result_snapshot_id'=>(int)$snapshot->id,'result_correction_id'=>null,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'correct_snapshot','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'snapshot_id'=>(int)$snapshot->id,'correction_id'=>null,'result_state'=>FinanceRule::commandSuccessState('correct_snapshot'),'result_snapshot_id'=>(int)$snapshot->id,'result_correction_id'=>null,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_snapshot_commands',$command,function()use($lessonId,$snapshot,$input,$actor,$now,$digest,$payload,$reason,&$command){
             if($existing=$this->snapshots->command($digest))return $this->replay($existing,$payload,'correct_snapshot');
@@ -65,8 +65,11 @@ final class FinanceCorrectionService {
             $applicable=$this->snapshots->applicableCorrection((int)$snapshot->id,true);
             if($applicable&&!hash_equals((string)$applicable->derivation_digest,(string)$input['prior_correction_digest']??'')&&array_key_exists('prior_correction_digest',$input))throw new FinanceRefusalException('command_replay_conflict','The named prior correction does not match the applicable one',$scope);
             $values=array('snapshot_id'=>(int)$snapshot->id,'lesson_id'=>$lessonId,'corrected_rate_id'=>$rateId,'corrected_rate_version'=>$rateVersion,'corrected_rate_amount_minor'=>$rateAmount,'corrected_currency'=>$currency,'corrected_derived_amount_minor'=>$derivedAmount,'intro_policy_key'=>$introKey,'intro_policy_version'=>$introVersion,'prior_snapshot_digest'=>(string)$snapshot->derivation_digest);
+            // §15.4: the appended correction carries an empty slot until the applicable one has released
+            // the snapshot's single `UNIQUE snapshot_applicable` slot; it claims it afterwards, under the
+            // same conditional-statement discipline, so a snapshot never carries two applicable rows.
             $correctionId=$this->snapshots->insertCorrection(array(
-                'snapshot_id'=>(int)$snapshot->id,'lesson_id'=>$lessonId,'correction_sequence'=>$sequence,'applicable_slot'=>1,
+                'snapshot_id'=>(int)$snapshot->id,'lesson_id'=>$lessonId,'correction_sequence'=>$sequence,'applicable_slot'=>null,
                 'corrected_rate_id'=>$rateId,'corrected_rate_version'=>$rateVersion,'corrected_rate_amount_minor'=>$rateAmount,
                 'corrected_currency'=>$currency,'corrected_derived_amount_minor'=>$derivedAmount,
                 'intro_policy_key'=>$introKey,'intro_policy_version'=>$introVersion,
@@ -76,6 +79,7 @@ final class FinanceCorrectionService {
                 'superseded_at'=>null,'superseded_by_correction_id'=>null,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
             ));
             if($applicable&&$this->snapshots->supersedeCorrection((int)$applicable->id,$correctionId,$now)!==1)throw new FinanceRefusalException('snapshot_correction_incomplete','The previous applicable correction was already replaced',$scope);
+            if($this->snapshots->claimApplicable($correctionId)!==1)throw new FinanceRefusalException('snapshot_correction_incomplete','The appended correction could not claim the snapshot\'s one applicable slot',$scope);
             FinanceSupport::audit('finance_snapshot_corrections',$correctionId,'correct_snapshot',$actor,$digest,$reason,$now,null);
             if($applicable)FinanceSupport::audit('finance_snapshot_corrections',(int)$applicable->id,'supersede',$actor,$digest,null,$now,null);
             // §12.2: an asserted rate that does not cover the snapshot instant is admitted only with explicit

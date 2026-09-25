@@ -35,7 +35,7 @@ final class TeacherRateService {
         $effectiveFrom=(string)($input['effective_from']??'');
         $basis=(string)($input['compensation_basis']??'per_session');
         $payload=FinanceSupport::payload(array('teacher_id'=>$teacherId,'scope_kind'=>$scopeKind,'course_scope_id'=>$courseScopeId,'amount_minor'=>$amount,'currency'=>$currency,'effective_from'=>$effectiveFrom,'compensation_basis'=>$basis));
-        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'record','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'rate_id'=>null,'scope_kind'=>$scopeKind,'course_scope_id'=>$courseScopeId,'result_state'=>'recorded','result_rate_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
+        $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'record','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'rate_id'=>null,'scope_kind'=>$scopeKind,'course_scope_id'=>$courseScopeId,'result_state'=>FinanceRule::commandSuccessState('record'),'result_rate_id'=>null,'reason_code'=>null,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_teacher_rate_commands',$command,function()use($teacherId,$input,$scopeKind,$courseScopeId,$amount,$currency,$effectiveFrom,$basis,$actor,$now,$payload,$digest,&$command){
             $this->facts->teacher($teacherId,true);
@@ -52,6 +52,21 @@ final class TeacherRateService {
             $proof=FinanceSupport::evidence($input);
             $predecessor=$this->rates->liveForScope($teacherId,$scopeKind,$courseScopeId,true);
             $version=$this->rates->maxVersion($teacherId,$scopeKind,$courseScopeId)+1;
+            // §7.2 rules 1–2: the predecessor relinquishes the scope's live slot *before* the successor
+            // claims it, because the declared `UNIQUE teacher_scope_slot` admits exactly one live row per
+            // scope. The closure and the status move are each a conditional statement whose affected-row
+            // count is checked, and both run inside this command's single transaction, so a failure after
+            // the predecessor moved rolls the whole command back instead of leaving a closed gap.
+            $moved=null;
+            if($predecessor){
+                $moved=(int)$predecessor->id;
+                if($this->rates->closeInterval($moved,$effectiveFrom,$now,$actor)!==1)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','The successor could not close its predecessor\'s open interval',array('teacher_id'=>$teacherId,'rate_id'=>$moved));
+                if($this->rates->moveStatus($moved,'active','superseded',$now,$actor)!==1)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','The supersession lost its compare-and-swap against the predecessor\'s live status',array('teacher_id'=>$teacherId,'rate_id'=>$moved));
+                $sequence=$this->rates->eventCount($moved)+1;
+                $this->rates->insertEvent(array('rate_id'=>$moved,'event_sequence'=>$sequence,'event_type'=>'closed','from_status'=>'active','to_status'=>'active','effective_until'=>$effectiveFrom,'reason_code'=>'operator_decision','evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
+                $this->rates->insertEvent(array('rate_id'=>$moved,'event_sequence'=>$sequence+1,'event_type'=>'superseded','from_status'=>'active','to_status'=>'superseded','effective_until'=>$effectiveFrom,'reason_code'=>'operator_decision','evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
+                FinanceSupport::audit('finance_teacher_rates',$moved,'supersede',$actor,$digest,null,$now,null);
+            }
             $rateId=$this->rates->insertRate(array(
                 'uid'=>Identifier::uid(),'reference_code'=>null,'teacher_id'=>$teacherId,'scope_kind'=>$scopeKind,
                 'course_scope_id'=>$courseScopeId,'compensation_basis'=>$basis,'amount_minor'=>$amount,'currency'=>$currency,
@@ -61,16 +76,6 @@ final class TeacherRateService {
             ));
             $this->rates->insertEvent(array('rate_id'=>$rateId,'event_sequence'=>1,'event_type'=>'recorded','from_status'=>null,'to_status'=>'active','effective_until'=>null,'reason_code'=>'operator_decision','evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
             FinanceSupport::audit('finance_teacher_rates',$rateId,'record',$actor,$digest,null,$now,null);
-            $moved=null;
-            if($predecessor){
-                $moved=(int)$predecessor->id;
-                if($this->rates->closeInterval($moved,$effectiveFrom,$now,$actor)===1){
-                    $sequence=$this->rates->eventCount($moved)+1;
-                    $this->rates->insertEvent(array('rate_id'=>$moved,'event_sequence'=>$sequence,'event_type'=>'closed','from_status'=>'active','to_status'=>'active','effective_until'=>$effectiveFrom,'reason_code'=>'operator_decision','evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
-                    if($this->rates->moveStatus($moved,'active','superseded',$now,$actor)===1)$this->rates->insertEvent(array('rate_id'=>$moved,'event_sequence'=>$sequence+1,'event_type'=>'superseded','from_status'=>'active','to_status'=>'superseded','effective_until'=>$effectiveFrom,'reason_code'=>'operator_decision','evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
-                    FinanceSupport::audit('finance_teacher_rates',$moved,'supersede',$actor,$digest,null,$now,null);
-                }
-            }
             $command['rate_id']=$moved;$command['result_rate_id']=$rateId;
             $commandId=$this->rates->insertCommand($command);
             return array('rate_id'=>$rateId,'teacher_id'=>$teacherId,'rate_version'=>$version,'scope_kind'=>$scopeKind,'course_scope_id'=>$courseScopeId,'amount_minor'=>$amount,'currency'=>$currency,'effective_from'=>$effectiveFrom,'superseded_rate_id'=>$moved,'recorded'=>true,'command_id'=>$commandId);
@@ -118,10 +123,15 @@ final class TeacherRateService {
             $row=$this->rates->byId($rateId,true);
             if(!$row||(string)$row->status==='withdrawn')throw new FinanceRefusalException('teacher_rate_state_not_resolvable','Only an active or superseded row may be withdrawn');
             if($this->rates->referencedBySnapshot($rateId)>0)throw new FinanceRefusalException('rate_referenced_by_snapshot','A rate referenced by a snapshot can never be withdrawn or rewritten',array('teacher_id'=>(int)$row->teacher_id));
-            $this->assertIntervalFree((int)$row->teacher_id,(string)$row->scope_kind,(int)$row->course_scope_id,$now,$rateId);
             $proof=FinanceSupport::evidence($input);
             if((int)$row->active_slot!==1&&$row->effective_until===null)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','A withdrawn row always carries a closed interval');
-            if($row->effective_until===null&&$this->rates->closeInterval($rateId,$now,$now,$actor)!==1)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','The retraction closure lost its compare-and-swap');
+            // §7.2 rule 1: only a still-open interval is closed here, and only then must the withdrawal
+            // instant be free of another interval — a row a successor already closed is rewritten by
+            // nothing, so its own past instant is never re-judged against a later successor's interval.
+            if($row->effective_until===null){
+                $this->assertIntervalFree((int)$row->teacher_id,(string)$row->scope_kind,(int)$row->course_scope_id,$now,$rateId);
+                if($this->rates->closeInterval($rateId,$now,$now,$actor)!==1)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','The retraction closure lost its compare-and-swap');
+            }
             $from=(string)$row->status;
             if($this->rates->moveStatus($rateId,$from,'withdrawn',$now,$actor)!==1)throw new FinanceRefusalException('teacher_rate_state_not_resolvable','The withdrawal lost its compare-and-swap');
             $this->rates->insertEvent(array('rate_id'=>$rateId,'event_sequence'=>$this->rates->eventCount($rateId)+1,'event_type'=>'withdrawn','from_status'=>$from,'to_status'=>'withdrawn','effective_until'=>$row->effective_until===null?$now:(string)$row->effective_until,'reason_code'=>$reason,'evidence_channel'=>$proof['channel'],'evidence_reference_digest'=>$proof['digest'],'evidence_at'=>$proof['at'],'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));

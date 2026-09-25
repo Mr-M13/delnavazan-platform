@@ -69,7 +69,7 @@ $failsClosed(fn()=>FinanceRateIntegrity::validate($wpdb->get_row($wpdb->prepare(
 $wpdb->update($p.'finance_teacher_rates',array('status'=>$originalStatus),array('id'=>(int)$rate['rate_id']));
 $wpdb->query($wpdb->prepare("INSERT INTO {$p}finance_teacher_rates (uid,teacher_id,scope_kind,course_scope_id,compensation_basis,amount_minor,currency,effective_from,status,rate_version,active_slot,recorded_at,recorded_by,created_at,created_by,updated_at) VALUES (%s,%d,'teacher',0,'per_session',1,'AUD',%s,'superseded',99,NULL,%s,1,%s,1,%s)",wp_generate_uuid4(),$teacherId,gmdate('Y-m-d H:i:s',time()-1800),gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s')));
 $overlapId=(int)$wpdb->insert_id;
-$failsClosed(function()use($rates,$teacherId,$chain,$rates2=null){
+$failsClosed(function()use($rates,$teacherId){
     $rows=$rates->timeline($teacherId);
     unset($rows);
     FinanceRateIntegrity::timeline((new Delnavazan\Platform\Core\Infrastructure\Repository\TeacherRateRepository())->ratesForTeacher($teacherId));

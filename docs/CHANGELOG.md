@@ -9,7 +9,49 @@ Schema 30 / migration `030_finance_payability_rate_statement_authority` / build
 `phase2a2u-finance-payability-rate-statement-20260925.1`, additive on the Phase-T candidate tree at
 Schema 29 and explicitly scoped to that recorded base (contract §20 prerequisite 2). It implements the
 contract `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md` (SHA-256
-`bacd87afc1f0435716163d64d1b3ed9401ef529201bdde78cc974df7fbbe4900`).
+`9893bbd935aad4a66908340ca6e3a91546be65b4cc80e7a334ed5f3473b8cd07`, whose §0g records correction
+round 2).
+
+**Independent review correction round 2** (the review of `86d57606cabcddba15d076edfe14fb4e7257e60f` /
+tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned FAIL — CORRECTION REQUIRED with six blocking
+findings; all six are closed on this descendant, additively, with no reset, rebase, amend or force-push):
+
+- Every `finance_*_commands` row now records the declared `result_state` of its operation, and
+  `FinanceSupport::commitRefusal()` writes a refusal as `result_state = 'refused'` with `NULL` typed
+  results and the exact reason code, so the §15.8 refusal-evidence row is durable for every command table
+  (U-C8-BLOCK-001).
+- A successor teacher rate now closes and supersedes its predecessor **before** claiming the scope's live
+  slot, so a second rate in one scope supersedes the first instead of colliding with
+  `UNIQUE teacher_scope_slot`; a rate a successor already closed is retractable without re-judging its own
+  past instant (U-C8-BLOCK-002).
+- Both append-only chains now use §15.4's declared two-statement protocol — append with an empty
+  `applicable_slot`, release the predecessor, then claim the slot — so exactly one applicable evaluation
+  per Lesson and one applicable correction per snapshot survive a re-evaluation, an override or a second
+  correction (U-C8-BLOCK-003).
+- `FinancePolicyService::record()` now inserts only its version: the predecessor's conditional
+  `active → superseded` move belongs to the separate, audited `supersede()` command, which therefore
+  keeps its own command row, audit evidence and affected-row count (U-C8-BLOCK-004).
+- The issuance gate now compares **every stored line** with the Lesson's current effective snapshot and
+  payability evaluation — correction identity, evaluation identity, disposition, basis, rate pair,
+  currency and the exact recomputed amount — and refuses a stale draft `statement_derivation_mismatch`
+  for withdrawal and re-drafting instead of issuing stale lines and totals (U-C8-BLOCK-005).
+- `FinanceReconciliationService::run()` captures its payload, so a replayed run converges through the
+  §15.3 digest invariant, with the required identical- and conflicting-replay proofs added to the
+  reconciliation suite (U-C8-BLOCK-006).
+
+Two further corrections are declared in contract §0g: the policy verifier now asserts the *seed shape*
+(the only migration-authored rows are the three declared seed keys' version 1, and the statement timezone
+key is never migration-seeded) instead of the fresh-state row counts, which a live installation using the
+declared `record()`/`supersede()` lifecycle could never satisfy — a fail-closed verifier on every request
+was the consequence; and the rate-withdrawal interval proof now runs only where a closure write happens.
+Two suite defects are corrected with it (a closure `use` clause carrying a default value in
+`tests/phase-2a2u-corruption-runtime.php`, which made that file unparseable, and a malformed
+`str_contains()` needle in `tests/phase-2a2u-contract.php`), the concurrency fixture's
+`concurrent_policy_record` competing instant is now admissible for its declared winner, and the source
+contract suite is **executed and passing** under a PHP 8.5.8 WASM CLI together with a clean parse of all
+460 candidate PHP files. The §18 runtime suites remain unexecuted (no MariaDB and no Docker daemon in the
+implementation environment) and, as recorded in the phase document, need fixture-flow work before they
+can run.
 
 - **A versioned finance policy registry** with four declared keys and a single reason-code allowlist; a
   version is immutable in value with exactly one auditable `status` column that moves at most twice in one
