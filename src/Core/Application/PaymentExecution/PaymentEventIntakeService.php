@@ -633,20 +633,28 @@ final class PaymentEventIntakeService {
      * writes no decision and converges on whatever the successor recorded.
      *
      * [C12-1] The append is the last step the claim's bounded window covers, so the transition requires the
-     * worker's own live slot and an unexpired lease as well as its generation and token. A window that lapsed
-     * after the final R1/R2 work unit but before this transaction therefore appends nothing here; the owner
-     * releases the live claim it appended nothing to and converges, so the event is completed by the next
-     * delivery instead of being held behind a lease nobody is working inside.
+     * worker's own live slot and an unexpired lease as well as its generation and token — and it requires
+     * them of the window as it stands at the instant the statement runs, never as the worker last read it. A
+     * window that lapsed after the final R1/R2 work unit but before this transaction — because the seam
+     * between them held for longer than the lease, whether a hook callback delayed it or the statement simply
+     * reached its row lock late — therefore appends nothing here; the owner releases the live claim it
+     * appended nothing to and converges, so the event is completed by the next delivery instead of being held
+     * behind a lease nobody is working inside.
      */
     private function appendDecisionUnderClaim(object $event,array $decision,array $claim,string $context):array{
-        $now=PaymentExecutionSupport::now();
         // [C12-1] Observable seam of the contract's last bounded step: every R1/R2 work unit has finished and
         // the decision is about to be published under the claim's fence. It fires outside the §9.7 worker
         // context and outside any transaction, and carries ids only — never a token, payload or reference.
         PaymentExecutionSupport::hook('dzn_phase_2a2t_before_provider_event_decision_append',(int)$event->id,(int)$claim['generation']);
+        // [C12-1] The instants the appended row records are read only *after* that seam, so they can never
+        // predate the fence. The fence itself trusts no instant read here or anywhere else: the conditional
+        // `claimed → settled` transition of the repository judges the claim's window with the database's own
+        // clock, inside the statement that runs it, so a seam that outlives the lease is refused there rather
+        // than published through here.
+        $now=PaymentExecutionSupport::now();
         $this->repository->begin();
         try{
-            if($this->repository->settleDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$now)!==1){
+            if($this->repository->settleDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'])!==1){
                 $this->repository->rollback();
                 // [C12-1] The append was refused — the bounded window closed before this statement, either
                 // because the lease lapsed after the last work unit or because exactly one successor

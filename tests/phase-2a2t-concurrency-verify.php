@@ -100,12 +100,20 @@ if($mode==='stale_owner_at_decision_append'){
     dzn_tcv_assert(is_file($gate.'/w1.work'),'the stale generation must have reached the R1/R2 work boundaries: its window closed at the append, never before the work');
     dzn_tcv_assert(is_file($gate.'/w1.expired_at_append'),'the stale generation must let the window it still owns lapse at the append seam');
     $claimRows=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d ORDER BY id ASC",$prepared))?:array();
-    $released=0;$settledClaims=0;$successors=0;
+    $released=0;$settledClaims=0;$successors=0;$releasedRow=null;
     foreach($claimRows as $claimRow){
-        if((string)$claimRow->claim_state==='released')$released++;
+        if((string)$claimRow->claim_state==='released'){$released++;$releasedRow=$claimRow;}
         if((string)$claimRow->claim_state==='settled')$settledClaims++;
         if((int)$claimRow->claim_generation>1)$successors++;
     }
+    // [C12-1] The window the stale generation held must have been let lapse *in real time*, never written into
+    // the past: the instant the owner read from its own live claim row at the append seam is that claim's own
+    // structural window — at least the full 120-second decision-claim lease forward of the instant the claim
+    // was taken — and the release that follows the refused append lands strictly after it.
+    $lapsedAt=trim((string)file_get_contents($gate.'/w1.expired_at_append'));
+    dzn_tcv_assert($releasedRow!==null&&$releasedRow->settled_at!==null,'the released claim must record the instant its owner freed it');
+    dzn_tcv_assert(strtotime($lapsedAt.' UTC')!==false&&strtotime((string)$releasedRow->claimed_at.' UTC')!==false&&strtotime($lapsedAt.' UTC')-strtotime((string)$releasedRow->claimed_at.' UTC')>=(int)\Delnavazan\Platform\Core\Application\PaymentExecution\PaymentExecutionRule::DECISION_CLAIM_LEASE_SECONDS,'the append race must let the owner window lapse by real elapsed time, never by writing it into the past');
+    dzn_tcv_assert(strtotime((string)$releasedRow->settled_at.' UTC')>strtotime($lapsedAt.' UTC'),'the append race must refuse the append only once the window the owner held had genuinely lapsed');
     dzn_tcv_assert($released===1,'the stale generation must release the live claim it appended nothing to');
     dzn_tcv_assert($settledClaims===1,'exactly one claim may end settled, and it belongs to the generation that appended the decision');
     dzn_tcv_assert($successors===0,'no successor generation may have replaced the stale generation: the lapsed lease, never a take-over, must be what refuses the append');

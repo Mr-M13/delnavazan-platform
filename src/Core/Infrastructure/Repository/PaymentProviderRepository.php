@@ -162,17 +162,21 @@ final class PaymentProviderRepository {
      * derive at the same time.
      *
      * [C12-1] The append is bounded by the same window that bounded the work: the transition requires the
-     * worker's own live generation, its live slot and token **and** an unexpired `lease_expires_at`, judged
-     * against the very `$now` that stamps the row. A lease that lapsed after the final R1/R2 work unit but
-     * before this transaction therefore settles nothing and appends nothing, exactly like a replaced
-     * generation. The caller releases the claim it appended nothing to (fenced by its own generation and
-     * token) and converges, so an expired-but-not-yet-taken-over claim never strands the event.
+     * worker's own live generation, its live slot and token **and** an unexpired `lease_expires_at`, and it
+     * takes that verdict at the instant the statement itself runs rather than at any instant a caller read
+     * before the append seam. One database-time expression — `UTC_TIMESTAMP()` — both fences the predicate
+     * and stamps the settlement, so a hook callback, or any other delay between the seam and this statement
+     * acquiring its row lock, can never settle a claim whose window closed in the meantime: a decision
+     * operation that outlives its 120-second lease settles nothing and appends nothing here, exactly like a
+     * replaced generation, even when the caller captured its own clock before the delay. The caller releases
+     * the claim it appended nothing to (fenced by its own generation and token) and converges, so an
+     * expired-but-not-yet-taken-over claim never strands the event.
      */
-    public function settleDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $now):int{
+    public function settleDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest):int{
         global $wpdb;
         return (int)$wpdb->query($wpdb->prepare(
-            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s",
-            $now,$now,$claimId,$expectedGeneration,$tokenDigest,$now
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=UTC_TIMESTAMP()",
+            $claimId,$expectedGeneration,$tokenDigest
         ));
     }
     /** [C9-2] Fenced `claimed → released`: the owner appended no decision and frees the event's live slot. */

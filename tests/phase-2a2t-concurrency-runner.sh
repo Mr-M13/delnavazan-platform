@@ -59,7 +59,9 @@ case $mode in
     # lets its own window lapse *after* its last R1/R2 work unit — the append seam of the decision operation —
     # with no successor having taken its claim over, and the second worker delivers only once the first has
     # returned, so the append fence (never a take-over) is what refuses the stale generation and the next
-    # delivery is what completes the event.
+    # delivery is what completes the event. The claim row is never written for this mode: the window lapses in
+    # real elapsed time, so this one mode runs for the structural 120-second decision-claim lease before the
+    # second worker is released.
     waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
     ;;
   unrelated_students)

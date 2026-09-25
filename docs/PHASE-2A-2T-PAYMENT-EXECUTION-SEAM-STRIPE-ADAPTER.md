@@ -2,12 +2,12 @@
 
 **Status:** candidate — awaiting independent review. Not merged, not deployed, not production-authorised.
 **Schema:** 029 / migrations `028_payment_execution_seam_provider_adapter` and `029_payment_event_decision_claim_authority`
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.12`
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.13`
 **Base:** `main` at the Phase-V candidate tree (Schema 27), strictly additive on top of R1 (Schema 25, authoritative) and R2 (Schema 26, candidate).
 
 This record documents the implementation of the contract in
 [PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md](PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md)
-(correction round 12, SHA-256 `bf7602e09eb9bc4c44d35e36645a6a9697e6e550372b1388119725cda159e139`). The contract
+(correction round 13, SHA-256 `079e0967042852e1b92dcdba230a1d218ad78b48092ea8f6e38f444b86f48113`). The contract
 is normative; this record states what was built, what could be executed in this environment, and what
 remains deliberately unresolved.
 
@@ -270,6 +270,36 @@ next delivery is the one that completes the event with its single decision, whil
 generation committed inside its window stands exactly once (one R1 evidence, one R1 settlement, one
 confirmed collection intent, one collected renewal cycle).
 
+## 5D. Correction round 13 (independent review of `e92a627` / tree `0f4ab9b6`)
+
+The independent review of the round-12 candidate returned **FAIL — CORRECTION REQUIRED** on one blocking
+finding. It is closed additively here; no authority, capability, policy, provider call or table is added,
+no previous commit is rewritten, and the recorded event row stays immutable.
+
+| # | Blocking finding | Correction in this candidate |
+| --- | --- | --- |
+| C13-1 | `PaymentEventIntakeService.php:642-649`: the round-12 append fence captured `$now` **before** it fired the observable append seam `dzn_phase_2a2t_before_provider_event_decision_append`, and passed that captured instant to `settleDecisionClaim()`, which compared `lease_expires_at >= $now` and stamped `settled_at`/`updated_at` from it. A hook callback on that seam — or any delay before the statement acquired the claim row's lock — could therefore outlive the 120-second lease while the update still compared the lease against the instant read before the seam, settling the live claim and appending the decision after the window had closed. That violates C10-2, which makes the lease the bounded window the *whole* decision operation, the append included, runs inside, and requires the append to be fenced at the moment it runs. | The conditional transition now takes its verdict **at statement execution**, from one database-time expression. `settleDecisionClaim()` requires the owner's own `claim_state = 'claimed'`, its `claim_generation`, its `claim_token_digest`, its `active_claim_slot = 1` **and** a non-null `lease_expires_at >= UTC_TIMESTAMP()`, and stamps `settled_at`/`updated_at` with that same `UTC_TIMESTAMP()` — so the window verdict and the settlement can never be derived from two different clock readings. The transition takes **no** instant parameter at all, so no caller can supply an instant it read before the seam, and `appendDecisionUnderClaim()` now reads the instants it records on the appended row only *after* the seam. A seam delay therefore changes the verdict itself: an append that runs after the lease has lapsed affects zero rows and publishes nothing — exactly as a replaced generation — and the owner releases the live claim it appended nothing to and converges, so the event is completed by the next delivery instead of being stranded behind a lease nobody was working inside. |
+
+`tests/phase-2a2t-contract.php` asserts the corrected source contract (the database-time lease predicate and
+its matching settlement stamp inside the one conditional statement, the absent instant parameter, the
+claim-identity-only call site and the intake's post-seam read of its own row instants);
+`tests/phase-2a2t-failure-runtime.php` proves the transition behaviourally with a **real** delay — a claim
+taken with a short, still-live window is settled only after the clock has genuinely passed that window, and
+the statement settles nothing and leaves the claim live; and `tests/phase-2a2t-concurrency-runner.sh`'s
+`stale_owner_at_decision_append` no longer writes the claim row at all: the owner's own window is let lapse
+**in real elapsed time** at the append seam, so that mode runs for the structural 120-second
+decision-claim lease. The verifier proves the lapse was a real one — the instant the owner read from its own
+live claim at the seam is that claim's structural window, at least the full
+`DECISION_CLAIM_LEASE_SECONDS` forward of the instant the claim was taken, and the release that follows the
+refused append lands strictly after it — beside the existing proof that no successor generation replaced the
+stale one, that the stale generation appended nothing and reported the event as still owing its decision,
+and that the next delivery is the one that completes the event exactly once.
+
+This round supersedes the round-12 mechanism recorded in §5C in two places. The append no longer judges the
+window against an instant its caller captured before the seam (the transition judges it inside its own
+statement, from the database's own clock), and the append race no longer ages its own claim row to simulate
+the lapse (the lapse is produced by real elapsed time, with the row untouched).
+
 ## 6. Evidence executed in this environment
 
 | Check | Result |
@@ -286,6 +316,9 @@ confirmed collection intent, one collected renewal cycle).
 | Correction round 11: extended re-emulation of `tests/phase-2a2t-contract.php`'s static assertions, now covering its `foreach` needle lists — the required-mode list, the vocabulary lists and the required-absence scans — as well as its direct `str_contains`/`substr_count`/`strpos` assertions (254 literal sites, each needle-list assertion also polarity-checked by hand) | pass — every literal assertion holds on this tree, including the three runtime-suite vocabulary needles the previous round's narrower re-emulation had missed and the two new concurrency modes. The assertions that remain unresolved by name in the emulation (`$interceptBody`, interpolated needles, `&&`/`\|\|` pairs where the other operand holds) are the review of the unchanged controller and are unaffected by this round |
 | Correction round 12: full AST parse of every changed PHP file and every changed test file with a real PHP 8 parser (`php-parser` 3.7.0), plus `sh -n` on the concurrency runner | pass — no syntax error in any changed file (a parser acceptance check, **not** `php -l`, which this environment cannot run) |
 | Correction round 12: replay of the new `[C12-1]` assertions of `tests/phase-2a2t-contract.php`, and of the pre-existing assertions this round could disturb (the release-call count, the settlement-before-sequence-allocation order, the claim-before-decide order and the earlier stale-owner/in-unit needles), against the changed sources and the whole concurrency suite | pass — every replayed predicate holds on this tree (PHP cannot run here, so this is a faithful re-implementation of its string and ordering predicates, not the suite itself) |
+| Correction round 13: replay of the new `[C13-1]` assertions of `tests/phase-2a2t-contract.php` — the database-time lease predicate (`lease_expires_at >= UTC_TIMESTAMP()`), its matching `settled_at`/`updated_at` stamp, the absence of any instant parameter on the transition, the claim-identity-only call site and the intake's post-seam read of its own row instants — plus every pre-existing assertion this round could disturb (the single-`settleDecisionClaim` count and order checks inside the append body, the settlement-before-sequence-allocation order, the append-seam-before-fence order, the release-then-converge order, the C9-1 claim-fence-before-sequence order and the stale-owner/in-unit concurrency needles), re-implemented faithfully against the changed sources and the whole concurrency suite | pass — all 25 replayed predicates hold on this tree (PHP cannot run here, so this is a faithful re-implementation of its string and ordering predicates, not the suite itself) |
+| Correction round 13: `php -l` and a `php-parser` AST parse of the changed PHP sources and test files | **not executed — neither PHP nor a PHP-parser runtime is reachable in this environment**; every changed hunk was read in full and the suite's own assertions were re-emulated instead |
+| Correction round 13: runtime horizon of the changed `stale_owner_at_decision_append` mode — it now lets the owner's own structural 120-second window lapse in real time, with the claim row never written, so it is the longest mode in the matrix | noted and bounded, not executed — the contender's gate wait inside the worker was widened from 90 s to 360 s for that mode; the runner's own `waitfor` markers are written before the work and are unaffected, and the runner waits for both workers without a timeout |
 | `tests/phase-2a2t-contract.php` | **not executed — PHP is unavailable in this environment** |
 | `tests/phase-2a2t-migration-runtime.php`, `-runtime.php`, `-webhook-runtime.php`, `-secret-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php` | **not executed — PHP and the disposable WordPress + MariaDB runtime are unavailable in this environment** |
 | `tests/phase-2a2t-concurrency-runner.sh` (all twenty-three modes) | **not executed — the disposable container runtime is unreachable in this environment** |
@@ -308,9 +341,14 @@ no code path can store a Stripe credential — not even through the capability-a
 1. Execute every §17 suite on the disposable runtime and record the results.
 2. Confirm the Schema 027/028 ledger assumption is recorded either way (Phase S owning 027, or 027
    deliberately skipped) as the contract's §19 prerequisite requires.
-3. Independent review of the corrected candidate commit and tree (correction round 12 closes the one
-   blocking finding the review of `09c4134381ba31c8332a0561bec96c9cbd5238e9` raised: the decision append
-   itself is now bounded by the claim's window — the `claimed → settled` transition requires the owner's
-   own live slot and an unexpired lease as well as its generation and token — so a lease that lapses after
-   the final R1/R2 work unit publishes nothing, the owner releases the live claim it appended nothing to
-   and converges instead of stranding the event, and the next delivery completes it).
+3. Independent review of the corrected candidate commit and tree. Correction round 12 closed the one
+   blocking finding the review of `09c4134381ba31c8332a0561bec96c9cbd5238e9` raised — the decision append
+   is bounded by the claim's window: the `claimed → settled` transition requires the owner's own live slot
+   and an unexpired lease as well as its generation and token, so a lease that lapses after the final R1/R2
+   work unit publishes nothing, the owner releases the live claim it appended nothing to and converges
+   instead of stranding the event, and the next delivery completes it. Correction round 13 closes the one
+   blocking finding the review of `e92a62747b82f8a37838f886a1034eb770f65e37` raised on top of it: that
+   window is judged **at the instant the transition itself runs**, from one database-time expression that
+   fences the predicate and stamps the settlement alike, and the transition takes no instant parameter — so
+   a hook callback at the append seam, or any delay before the statement acquires the claim row's lock, can
+   never settle a window that has already closed and publish a decision the contract does not let it own.

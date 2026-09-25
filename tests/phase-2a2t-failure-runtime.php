@@ -53,15 +53,24 @@ $wpdb->query($wpdb->prepare("INSERT INTO {$p}payment_provider_event_receipts (ui
 $failureReceipt=(int)$wpdb->insert_id;
 $wpdb->query($wpdb->prepare("INSERT INTO {$p}payment_provider_events (uid,receipt_id,provider_key,payment_provider_account_id,event_reference_digest,event_fact_digest,event_type,raw_type_digest,payload_digest,received_at,created_at) VALUES (%s,%d,'stripe',1,%s,%s,'payment_succeeded',%s,%s,%s,%s)",wp_generate_uuid4(),$failureReceipt,str_repeat('9',64),str_repeat('a',64),str_repeat('b',64),str_repeat('c',64),gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s')));
 $failureEvent=(int)$wpdb->insert_id;
+// [C12-1] The append is bounded by the same window that bounded the work, and the fenced transition now
+// judges that window at the instant the statement itself runs. The proof is a *real* delay at the append
+// seam: the claim is taken with a short, still-live window (never an instant aged into the past) and the
+// statement runs only once the clock has genuinely passed that window — exactly what a hook callback that
+// delays the seam produces. The refusal can therefore only come from the statement reading the window
+// itself: a caller that captured its own clock before the seam would have settled this claim and published
+// a decision the contract does not let it own.
+$seamToken=str_repeat('9',64);
+$seamDeadline=time()+2;
+$seamClaim=$providerRepository->insertDecisionClaim(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'claim_state'=>'claimed','claim_generation'=>1,'claim_token_digest'=>$seamToken,'lease_expires_at'=>gmdate('Y-m-d H:i:s',$seamDeadline),'claimed_at'=>gmdate('Y-m-d H:i:s'),'settled_at'=>null,'active_claim_slot'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'updated_at'=>gmdate('Y-m-d H:i:s')));
+while(time()<=$seamDeadline+2)sleep(1);
+dzn_tf_assert($providerRepository->settleDecisionClaim($seamClaim,1,$seamToken)===0,'an append that runs after a real delay past its claim\'s live window must settle nothing');
+$seamState=$providerRepository->decisionClaim($seamClaim);
+dzn_tf_assert($seamState!==null&&(string)$seamState->claim_state==='claimed'&&(int)$seamState->active_claim_slot===1&&$seamState->lease_expires_at!==null,'a refused append must leave the claim exactly as it stood, for this generation to release or for exactly one successor to take over');
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decision_claims WHERE id=%d",$seamClaim));
 $failureClaim=$providerRepository->insertDecisionClaim(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'claim_state'=>'claimed','claim_generation'=>1,'claim_token_digest'=>str_repeat('d',64),'lease_expires_at'=>gmdate('Y-m-d H:i:s',time()+60),'claimed_at'=>gmdate('Y-m-d H:i:s'),'settled_at'=>null,'active_claim_slot'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'updated_at'=>gmdate('Y-m-d H:i:s')));
 $providerRepository->begin();
-// [C12-1] The append is bounded by the same window that bounded the work: the fenced transition is judged
-// against the instant the append itself runs, so an append that runs after the claim's lease has lapsed
-// settles nothing — the stale generation appends nothing rather than publishing a decision the contract
-// does not let it own. (The race suite proves the same refusal against a row whose lease is aged in the
-// database: `stale_owner_at_decision_append`.)
-dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64),gmdate('Y-m-d H:i:s',time()+3600))===0,'a claim whose window has already lapsed must never be settled by the append');
-dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64),gmdate('Y-m-d H:i:s'))===1,'the owner must settle its own live decision claim');
+dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64))===1,'the owner must settle its own live decision claim');
 $providerRepository->insertDecision(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'decision_sequence'=>$providerRepository->maxDecisionSequence($failureEvent),'decision_state'=>'refused','reason_code'=>'provider_event_not_authoritative','r2_consequence_state'=>'not_applicable','decided_at'=>gmdate('Y-m-d H:i:s'),'recorded_at'=>gmdate('Y-m-d H:i:s'),'created_at'=>gmdate('Y-m-d H:i:s')));
 $providerRepository->rollback();
 $unsettled=$providerRepository->decisionClaim($failureClaim);
