@@ -302,7 +302,7 @@ final class NotificationDispatchService {
             if($acknowledged){
                 // §6.5: the hand-off acknowledgement moves the notification to `dispatched`; delivery itself
                 // is only ever written from a verified, normalised delivery fact.
-                $this->attempts->closeAttempt($attemptId,array('state'=>'acknowledged','finished_at'=>$now,'outcome_code'=>'acknowledged','failure_class'=>null,'updated_at'=>$now,'updated_by'=>$actor));
+                $this->attempts->closeAttempt($attemptId,array('state'=>'acknowledged','finished_at'=>$now,'outcome_code'=>NotificationRule::ACKNOWLEDGED_OUTCOME,'failure_class'=>null,'updated_at'=>$now,'updated_by'=>$actor));
                 $this->attempts->insertEvent($this->attemptEvent($attemptId,'acknowledged',(string)$attempt->state,'acknowledged','acknowledged',$now,$actor));
                 $this->repository->transition((int)$notification->id,(string)$notification->state,array('state'=>'dispatched','updated_at'=>$now,'updated_by'=>$actor));
                 $this->repository->insertEvent($this->eventRow((int)$notification->id,'dispatched',(string)$notification->state,'dispatched','acknowledged',$evidence,$now,$actor));
@@ -331,6 +331,9 @@ final class NotificationDispatchService {
                 'workflow_version'=>(int)$row->workflow_version,
             ));
             if($closure['re_arm']===true){
+                // §9: one digest-only retry evidence proves the re-arm on **both** append-only histories, so
+                // it is derived once, here, from the schedule this transaction persists.
+                $retryEvidence=$this->retryEvidence($notification,$attempt,$closure);
                 $this->attempts->closeAttempt($attemptId,array(
                     'state'=>'failed','finished_at'=>$now,'outcome_code'=>$outcome,'failure_class'=>$failureClass,
                     'applied_jitter_bp'=>$closure['applied_jitter_bp'],'base_backoff_seconds'=>$closure['base_backoff_seconds'],
@@ -341,11 +344,15 @@ final class NotificationDispatchService {
                 $this->attempts->insertEvent(array(
                     'uid'=>NotificationSupport::uid(),'attempt_id'=>$attemptId,'event_sequence'=>$this->attempts->nextSequence($attemptId),
                     'event_type'=>NotificationRule::RETRY_SCHEDULED_EVENT,'from_state'=>'failed','to_state'=>'failed','reason_code'=>$outcome,
-                    'evidence_reference_digest'=>NotificationSupport::retryEvidenceDigest((string)$notification->notification_key_digest,(int)$attempt->attempt_sequence,(int)$closure['applied_jitter_bp'],(int)$closure['backoff_seconds']),
+                    'evidence_reference_digest'=>$retryEvidence,
                     'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
                 ));
                 $this->repository->transition((int)$notification->id,(string)$notification->state,array('state'=>'queued','updated_at'=>$now,'updated_by'=>$actor));
                 $this->repository->insertEvent($this->eventRow((int)$notification->id,'queued',(string)$notification->state,'queued',$outcome,$evidence,$now,$actor));
+                // §9: the notification's own append-only history records the same digest-only retry evidence,
+                // appended in the same transaction as the schedule, the transition and the re-arm, as the
+                // audit companion of the `queued` row the re-arm just produced.
+                $this->repository->insertEvent($this->eventRow((int)$notification->id,NotificationRule::RETRY_SCHEDULED_EVENT,'queued','queued',$outcome,$evidence,$now,$actor,$retryEvidence));
                 // Only a closure that re-arms moves `available_at`: the mirrored `scheduled_for` follows the
                 // aggregate and is never rewritten by a retry.
                 $this->outbox->rearm((int)$row->id,(string)$closure['next_available_at']);
@@ -432,6 +439,7 @@ final class NotificationDispatchService {
                     'workflow_version'=>(int)$row->workflow_version,
                 ));
                 if($closure['re_arm']===true){
+                    $retryEvidence=$this->retryEvidence($notification,$attempt,$closure);
                     // A repeated recovery pass over an already-closed attempt replays the persisted values.
                     $this->attempts->closeAttempt($attemptId,array(
                         'state'=>'expired','finished_at'=>$now,'outcome_code'=>NotificationRule::LEASE_EXPIRED_OUTCOME,'failure_class'=>NotificationRule::LEASE_EXPIRED_CLASS,
@@ -443,11 +451,14 @@ final class NotificationDispatchService {
                     $this->attempts->insertEvent(array(
                         'uid'=>NotificationSupport::uid(),'attempt_id'=>$attemptId,'event_sequence'=>$this->attempts->nextSequence($attemptId),
                         'event_type'=>NotificationRule::RETRY_SCHEDULED_EVENT,'from_state'=>'expired','to_state'=>'expired','reason_code'=>NotificationRule::LEASE_EXPIRED_OUTCOME,
-                        'evidence_reference_digest'=>NotificationSupport::retryEvidenceDigest((string)$notification->notification_key_digest,(int)$attempt->attempt_sequence,(int)$closure['applied_jitter_bp'],(int)$closure['backoff_seconds']),
+                        'evidence_reference_digest'=>$retryEvidence,
                         'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
                     ));
                     $this->repository->transition((int)$notification->id,(string)$notification->state,array('state'=>'queued','updated_at'=>$now,'updated_by'=>$actor));
                     $this->repository->insertEvent($this->eventRow((int)$notification->id,'queued',(string)$notification->state,'queued',NotificationRule::LEASE_EXPIRED_OUTCOME,$evidence,$now,$actor));
+                    // §9: the notification's own history records the same digest-only retry evidence, so the
+                    // lease-expiry re-arm is proved on both histories exactly like a port-reported one.
+                    $this->repository->insertEvent($this->eventRow((int)$notification->id,NotificationRule::RETRY_SCHEDULED_EVENT,'queued','queued',NotificationRule::LEASE_EXPIRED_OUTCOME,$evidence,$now,$actor,$retryEvidence));
                     $this->outbox->rearm((int)$row->id,(string)$closure['next_available_at']);
                     $this->recordDispatchCommand(NotificationSupport::keyDigest($key.'-'.$attemptId),'recover_expired_leases',(int)$notification->id,'queued',$now,$actor);
                     $this->repository->commit();
@@ -658,6 +669,15 @@ final class NotificationDispatchService {
             'evidence_reference_digest'=>$evidenceDigest??$evidence['digest'],'evidence_at'=>$evidence['at'],
             'occurred_at'=>$now,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
         );
+    }
+    /**
+     * §9 — the one digest-only retry evidence of a re-arm, shared by the closing attempt's audit companion
+     * and the notification's own `retry_scheduled` row so both histories prove the identical persisted
+     * schedule: the immutable notification identity, the attempt sequence and the persisted jittered
+     * back-off are its only inputs.
+     */
+    private function retryEvidence(object $notification,object $attempt,array $closure):string{
+        return NotificationSupport::retryEvidenceDigest((string)$notification->notification_key_digest,(int)$attempt->attempt_sequence,(int)$closure['applied_jitter_bp'],(int)$closure['backoff_seconds']);
     }
     private function recordDispatchCommand(string $digest,string $operation,int $notificationId,string $resultState,string $now,int $actor):void{
         $this->repository->insertCommand(array(

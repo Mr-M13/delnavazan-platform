@@ -32,6 +32,14 @@ $attemptEvents=static function(int $id)use($wpdb,$p):array{
     if($id<1)return array();
     return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}notification_attempt_events WHERE attempt_id=%d ORDER BY event_sequence",$id))?:array();
 };
+$policyFor=static function(int $versionId)use($wpdb,$p):array{
+    $rows=array();
+    foreach((array)$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}notification_workflow_rules WHERE workflow_version_id=%d AND rule_kind='retry' ORDER BY ordinal",$versionId)) as $rule)$rows[]=array(
+        'rule_kind'=>'retry','rule_code'=>(string)$rule->rule_code,'ordinal'=>(int)$rule->ordinal,
+        'parameter_a'=>$rule->parameter_a,'parameter_b'=>$rule->parameter_b,'parameter_c'=>$rule->parameter_c,'parameter_d'=>$rule->parameter_d,
+    );
+    return Delnavazan\Platform\Core\Application\NotificationRetry::validatePolicy($rows);
+};
 $portCalls=static fn():int=>dzn_s_fix_port_calls();
 $frozen=static function(int $id)use($wpdb,$p):array{
     $row=$wpdb->get_row($wpdb->prepare("SELECT notification_key_digest,schedule_anchor_at,scheduled_for,expires_at,deferral_count,timezone FROM {$p}notifications WHERE id=%d",$id));
@@ -67,12 +75,14 @@ $assert((int)$wpdb->get_var("SELECT COUNT(*) FROM (SELECT notification_id FROM {
 $assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}platform_outbox WHERE notification_id IS NOT NULL AND scheduled_for IS NOT NULL AND (expires_at IS NULL OR deferral_count IS NULL)")===0,'a dispatchable mirror must carry the complete derived triple');
 
 // §6.6/§7.3: whatever the workers won, the persisted attempt history of the raced notification must
-// reproduce — contiguous from attempt 1, a legal event chain ending on the persisted state, and at most one
-// open attempt, which may only exist beside a `dispatching` notification.
+// reproduce against the version's own frozen ceiling — contiguous from attempt 1 inside `retry_max_attempts`,
+// a legal event chain ending on the persisted state, matched `retry_scheduled` evidence on both histories,
+// and exactly one open attempt, which may only exist beside a `dispatching` notification.
 foreach(array_values(array_unique(array_filter(array($notificationId,(int)($fixture['second_notification_id']??0))))) as $racedId){
     $raced=$row('notifications',(int)$racedId);
     if($raced===null)continue;
-    Delnavazan\Platform\Core\Application\NotificationIntegrity::attemptHistoryIntegrity($raced,$attemptRows((int)$racedId));
+    Delnavazan\Platform\Core\Application\NotificationIntegrity::attemptHistoryIntegrity($raced,$attemptRows((int)$racedId),$policyFor((int)$raced->workflow_version_id));
+    Delnavazan\Platform\Core\Application\NotificationIntegrity::retryEvidenceIntegrity($raced,$attemptRows((int)$racedId));
     $open=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notification_attempts WHERE notification_id=%d AND finished_at IS NULL",(int)$racedId));
     $assert($open<=1,'a notification must never keep two open attempts');
     if($open===1)$assert((string)$raced->state==='dispatching','only a dispatching notification may hold an open attempt');

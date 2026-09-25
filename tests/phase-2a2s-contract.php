@@ -246,9 +246,9 @@ $closeOutbox=strpos($terminalCommand,'$this->outbox->closeAny(');
 if($liveLease===false||$closeOutbox===false||$liveLease>$closeOutbox)throw new RuntimeException('The live lease must be resolved before the terminal command closes its outbox row');
 if(!str_contains($integrity,'if((string)$failureClass===NotificationRule::LEASE_CANCELLED_CLASS)'))throw new RuntimeException('The closure partition must judge the lease-cancellation class');
 if(!str_contains($integrity,"throw new \RuntimeException('lease_cancellation_invalid');"))throw new RuntimeException('A malformed lease-cancellation closure must fail closed');
-if(!str_contains($integrity,'public static function attemptHistoryIntegrity(object $notification,array $attempts):void'))throw new RuntimeException('The persisted attempt history must be proved against the lifecycle');
-if(!str_contains($integrity,'self::attemptHistoryIntegrity($notification,$attempts);'))throw new RuntimeException('Aggregate integrity must prove the attempt history before it partitions the closures');
-if(!str_contains($integrity,"if((int)\$attempt->attempt_sequence!==\$expected)throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('The attempt sequence must be contiguous from one');
+if(!str_contains($integrity,'public static function attemptHistoryIntegrity(object $notification,array $attempts,array $policy):void'))throw new RuntimeException('The persisted attempt history must be proved against the lifecycle and the frozen ceiling');
+if(!str_contains($integrity,'self::attemptHistoryIntegrity($notification,$attempts,$policy);'))throw new RuntimeException('Aggregate integrity must prove the attempt history before it partitions the closures');
+if(!str_contains($integrity,'if($sequence!==$expected)throw new \RuntimeException(\'attempt_lifecycle_invalid\');'))throw new RuntimeException('The attempt sequence must be contiguous from one');
 if(!str_contains($privacyService,'$this->repository->begin();'))throw new RuntimeException('Erasure must open its transaction');
 if(!str_contains(substr($privacyService,strpos($privacyService,'function eraseRecipient')),'$notification=$this->notifications->find($notificationId,true);'))throw new RuntimeException('Erasure must take the aggregate root lock inside its own transaction');
 if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-fixture.php'),'implements NotificationTransportPort'))throw new RuntimeException('The concurrency fixture must drive hand-off through the channel-neutral port only');
@@ -303,4 +303,36 @@ if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','a cleared rec
 if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','a cleared reciprocal pair on one attempt projection'"))throw new RuntimeException('The corruption suite must prove a pair whose both reciprocal pointers were cleared fails the attempt projection');
 if(!str_contains($runtimeSuites,"'a cleared reciprocal pair must fail the S verifier'"))throw new RuntimeException('The corruption suite must prove a pair whose both reciprocal pointers were cleared fails the schema verifier');
 if(!str_contains($runtimeSuites,"'outbox pointer divergence'"))throw new RuntimeException('The corruption suite must prove the schema verifier fails closed on a split pointer');
+
+// 15. The closure partition and the attempt ceiling are total, and the `retry_scheduled` audit evidence is
+//     proved on both append-only histories: the sequence is validated against the frozen policy, exactly one
+//     live lease may exist, a class-less closed attempt is only ever the acknowledgement, and the digest-only
+//     retry row is required exactly where the closure persisted a schedule and absent everywhere else.
+foreach(array(
+    '$maxAttempts=NotificationRetry::maxAttempts($policy);',
+    "if(\$sequence>\$maxAttempts)throw new \RuntimeException('attempt_lifecycle_invalid');",
+    "if(\$open>1||(\$dispatching&&\$open!==1))throw new \RuntimeException('attempt_lifecycle_invalid');",
+) as $needle)if(!str_contains($integrity,$needle))throw new RuntimeException('The attempt ceiling and the live-lease count must be proved inside the lifecycle check: '.$needle);
+if(!str_contains($integrity,'if($sequence===$maxAttempts){'))throw new RuntimeException('The ceiling shape belongs to the sequence at the frozen ceiling alone');
+if(!str_contains($integrity,'$retryRows!==($schedule===null?0:1)'))throw new RuntimeException('The retry audit row must be present exactly where the closure persisted a schedule');
+if(!str_contains($integrity,"if((string)\$attempt->state!==NotificationRule::ACKNOWLEDGED_OUTCOME"))throw new RuntimeException('A class-less closed attempt must be refused unless it is the acknowledgement');
+if(!str_contains($integrity,"||\$outcome===null||\$outcome!==NotificationRule::ACKNOWLEDGED_OUTCOME"))throw new RuntimeException('The acknowledgement must carry its own shared outcome code');
+if(!str_contains($integrity,'public static function retryEvidenceIntegrity(object $notification,array $attempts):void'))throw new RuntimeException('The notification history must prove its own retry evidence');
+if(!str_contains($integrity,'self::retryEvidenceIntegrity($notification,$attempts);'))throw new RuntimeException('Aggregate integrity must prove the retry evidence on both append-only histories');
+if(!str_contains($integrity,'if(!$reArm){')||!str_contains($integrity,"if(\$schedule===null)throw new \RuntimeException('retry_schedule_divergence');"))throw new RuntimeException('The persisted retry schedule must agree with the §9 derivation in both directions');
+if(!str_contains($rule,"ACKNOWLEDGED_OUTCOME='acknowledged'"))throw new RuntimeException('The acknowledgement outcome code must be the one shared member');
+if(!str_contains($dispatch,'NotificationRule::ACKNOWLEDGED_OUTCOME'))throw new RuntimeException('The acknowledgement must write the shared outcome code');
+if(!str_contains($dispatch,'private function retryEvidence(object $notification,object $attempt,array $closure):string'))throw new RuntimeException('Both histories must share one digest-only retry evidence');
+if(substr_count($dispatch,"NotificationRule::RETRY_SCHEDULED_EVENT,'queued','queued'")<2)throw new RuntimeException('Both re-arm paths must record the notification-side retry evidence in the same transaction');
+foreach(array(
+    "'attempt_lifecycle_invalid','an attempt above the frozen retry ceiling'",
+    "'attempt_lifecycle_invalid','two open attempts on one dispatching notification'",
+    "'attempt_lifecycle_invalid','a forged failed closure that carries no failure class'",
+    "'attempt_lifecycle_invalid','a re-armed attempt whose attempt-side retry evidence was removed'",
+    "'attempt_lifecycle_invalid','a re-armed attempt whose notification-side retry evidence was removed'",
+    "'attempt_lifecycle_invalid','an exhausted closure that announced a retry schedule it never derived'",
+    "'retry_schedule_divergence','a re-arming closure whose persisted back-off disagrees with the §9 derivation'",
+) as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The corruption suite must prove the ceiling, the live lease and the retry audit evidence: '.$needle);
+foreach(array('above the frozen retry ceiling','two open attempts','without a failure class') as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The ceiling and class-less coverage must be explicit: '.$needle);
+if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-concurrency-verify.php'),'NotificationIntegrity::retryEvidenceIntegrity('))throw new RuntimeException('The concurrency verifier must prove the retry evidence on both append-only histories');
 echo "Phase 2A.2-S contract static test passed\n";

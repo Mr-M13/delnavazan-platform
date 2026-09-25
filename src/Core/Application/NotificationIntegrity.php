@@ -142,18 +142,40 @@ final class NotificationIntegrity {
      * re-arms must have persisted the deterministic quadruple.
      *
      * @throws \RuntimeException one of `terminal_reason_invalid`, `retry_exhaustion_invalid`,
-     *         `retry_window_exhaustion_invalid` or `retry_schedule_divergence`.
+     *         `retry_window_exhaustion_invalid`, `retry_schedule_divergence` or — for a class-less or
+     *         above-the-ceiling row, which no partition may read as a closure at all — `attempt_lifecycle_invalid`.
      */
     public static function closureIntegrity(object $notification,object $attempt,array $policy):void{
         $failureClass=$attempt->failure_class;
-        if($failureClass===null)return;
-        if(!NotificationRule::closureClass((string)$failureClass))throw new \RuntimeException('terminal_reason_invalid');
         $outcome=$attempt->outcome_code===null?null:(string)$attempt->outcome_code;
         $reason=$notification->failure_reason_code===null?null:(string)$notification->failure_reason_code;
         $sequence=(int)$attempt->attempt_sequence;
         $maxAttempts=NotificationRetry::maxAttempts($policy);
         $quadruple=array($attempt->applied_jitter_bp,$attempt->base_backoff_seconds,$attempt->backoff_seconds,$attempt->next_available_at);
         $persisted=array_filter($quadruple,static fn($value):bool=>$value!==null)!==array();
+        // §9: `retry_max_attempts` caps the total number of lease acquisitions, so the ceiling shape belongs
+        // to the sequence *at* the ceiling alone. A row above it is the attempt no path can produce, and it
+        // is refused here rather than accepted as "at or past the ceiling" — every sequence `>=` the maximum
+        // is not the same state.
+        if($sequence>$maxAttempts)throw new \RuntimeException('attempt_lifecycle_invalid');
+        // §6.6/§7.2: a `failure_class` is the closure's normalised class, and the acknowledgement is the one
+        // closed attempt that carries none: the port accepted the hand-off, so the attempt closes
+        // `acknowledged` with the acknowledgement code, derives and persists no retry schedule, and the
+        // notification moves to `dispatched`. Every other closed attempt without a class — a forged `failed`,
+        // `expired` or `abandoned` row with a legal event chain — carries no class for the partitions below to
+        // judge and no matching closure outcome, so it is refused as an unclassifiable closure instead of
+        // being read as an acknowledgement or leaving the partition unproved.
+        if($failureClass===null){
+            if((string)$attempt->state!==NotificationRule::ACKNOWLEDGED_OUTCOME
+                ||$outcome===null||$outcome!==NotificationRule::ACKNOWLEDGED_OUTCOME)throw new \RuntimeException('attempt_lifecycle_invalid');
+            if($persisted)throw new \RuntimeException('attempt_lifecycle_invalid');
+            return;
+        }
+        // The member is unique to that shape, so no closure class may borrow it: a `retryable`, `defer`,
+        // `terminal`, abort or cancellation closure that reports the acknowledgement code is the same forged
+        // pair read the other way round.
+        if($outcome===NotificationRule::ACKNOWLEDGED_OUTCOME)throw new \RuntimeException('attempt_lifecycle_invalid');
+        if(!NotificationRule::closureClass((string)$failureClass))throw new \RuntimeException('terminal_reason_invalid');
         // §6.6 — the fourth partition: an eligibility abort is an audited, controlled refusal of an
         // already-open attempt, never a retry closure. It carries its own closed refusal code identically on
         // the attempt and the notification, closes the notification in the controlled state that code maps
@@ -186,7 +208,7 @@ final class NotificationIntegrity {
         }
         $expectedClosure=NotificationRule::nonTerminalClosureCode((string)$failureClass);
         if($outcome!==null&&(NotificationRule::terminalReason($outcome)||$outcome===NotificationRule::CEILING_EXHAUSTION_CODE))throw new \RuntimeException('retry_exhaustion_invalid');
-        if($sequence>=$maxAttempts){
+        if($sequence===$maxAttempts){
             if((string)$notification->state!=='failed'||$reason!==NotificationRule::CEILING_EXHAUSTION_CODE)throw new \RuntimeException('retry_exhaustion_invalid');
             if($persisted)throw new \RuntimeException('retry_exhaustion_invalid');
             return;
@@ -316,14 +338,21 @@ final class NotificationIntegrity {
      *
      * @throws \RuntimeException `schedule_derivation_divergence`, `eligibility_expired`,
      *         `tier_f_instant_unavailable`, `terminal_reason_invalid`, `retry_exhaustion_invalid`,
-     *         `retry_window_exhaustion_invalid` or `retry_schedule_divergence`.
+     *         `retry_window_exhaustion_invalid`, `retry_schedule_divergence`, `eligibility_abort_invalid`,
+     *         `lease_cancellation_invalid` or `attempt_lifecycle_invalid`.
      */
     public static function aggregateIntegrity(object $notification,array $composition,array $policy,?string $subjectInstant,?object $row,array $attempts,int $workflowVersion,array $identity=array()):void{
         self::notificationSchedule($notification,$composition,$subjectInstant,$identity);
         // §6.6/§7.3: the attempt lifecycle is proved before the closures are partitioned — an attempt whose
-        // state vocabulary, event chain, sequence or open/closed shape does not reproduce, or a terminal
-        // notification that still holds an open attempt, refuses the read whole.
-        self::attemptHistoryIntegrity($notification,$attempts);
+        // state vocabulary, event chain, sequence, ceiling or open/closed shape does not reproduce, a
+        // notification that holds other than exactly one live attempt, a `retry_scheduled` audit row that
+        // disagrees with the closure that persisted its schedule, or a terminal notification that still holds
+        // an open attempt, refuses the read whole.
+        self::attemptHistoryIntegrity($notification,$attempts,$policy);
+        // §9/§7.3: the notification's own append-only history must carry the same digest-only retry evidence
+        // for every closure that re-armed — and none for a closure that derived nothing — so the audit trail
+        // is proved on both histories, not only on the closing attempt.
+        self::retryEvidenceIntegrity($notification,$attempts);
         // §6.5/§7.1/§8.4: the mirror is part of the same proof, never an optional extra — every notification
         // is 1:1 with its outbox row, so a pair whose row was not supplied at all is as unproved as one whose
         // row disagrees, and an absent row can never be read as "no mirror to check".
@@ -338,32 +367,45 @@ final class NotificationIntegrity {
         }
     }
     /**
-     * §6.6/§7.3 — prove one notification's persisted attempt history against the locked lifecycle.
+     * §6.6/§9/§7.3 — prove one notification's persisted attempt history against the locked lifecycle.
      *
-     * Every attempt is accepted only when its `attempt_sequence` is contiguous from 1, its state is in the
-     * closed vocabulary, its append-only history is a contiguous chain of legal transitions that ends on
-     * that state, its open/closed marker agrees with its state, and no open attempt sits behind a terminal
-     * notification. A history that disagrees with the lifecycle is reported as `attempt_lifecycle_invalid`
-     * rather than read as authority, so an attempt can never be acknowledged from `leased`, re-handed-off
-     * or left open behind a cancelled, expired, suppressed, failed or closed notification.
+     * Every attempt is accepted only when its `attempt_sequence` is contiguous from 1 **and inside the
+     * frozen policy's ceiling**, its state is in the closed vocabulary, its append-only history is a
+     * contiguous chain of legal transitions that ends on that state, its open/closed marker agrees with its
+     * state, exactly one attempt is open (and only while the aggregate is `dispatching`), each closure's
+     * persisted retry schedule and its `retry_scheduled` audit row agree in both directions, and no open
+     * attempt sits behind a terminal notification. A history that disagrees with the lifecycle is reported
+     * as `attempt_lifecycle_invalid` rather than read as authority, so an attempt can never be acknowledged
+     * from `leased`, re-handed-off, counted past `retry_max_attempts` or left open behind a cancelled,
+     * expired, suppressed, failed or closed notification.
      *
      * @throws \RuntimeException `attempt_lifecycle_invalid`.
      */
-    public static function attemptHistoryIntegrity(object $notification,array $attempts):void{
+    public static function attemptHistoryIntegrity(object $notification,array $attempts,array $policy):void{
         global $wpdb;$table=$wpdb->prefix.'dzn_notification_attempt_events';
         $terminal=NotificationRule::terminalNotificationState((string)$notification->state);
-        $expected=1;
+        $dispatching=(string)$notification->state==='dispatching';
+        // §9: the ceiling is the frozen policy's own attempt budget, so the ceiling check reads the policy
+        // the version froze rather than whatever an attempt row claims.
+        $maxAttempts=NotificationRetry::maxAttempts($policy);
+        $expected=1;$open=0;
         foreach($attempts as $attempt){
-            if((int)$attempt->attempt_sequence!==$expected)throw new \RuntimeException('attempt_lifecycle_invalid');
+            $sequence=(int)$attempt->attempt_sequence;
+            if($sequence!==$expected)throw new \RuntimeException('attempt_lifecycle_invalid');
             $expected++;
+            // §9: `retry_max_attempts` caps the **total number of lease acquisitions** one notification may
+            // make, and attempt `retry_max_attempts + 1` is unrepresentable on every path, so a persisted
+            // history that carries an attempt above the frozen ceiling is a forged attempt — it is never
+            // read as an extra retry nor as a second ceiling closure.
+            if($sequence>$maxAttempts)throw new \RuntimeException('attempt_lifecycle_invalid');
             $state=(string)$attempt->state;
             if(!in_array($state,NotificationRule::ATTEMPT_STATES,true))throw new \RuntimeException('attempt_lifecycle_invalid');
-            $open=$attempt->finished_at===null;
-            if($open&&!in_array($state,NotificationRule::ATTEMPT_OPEN_STATES,true))throw new \RuntimeException('attempt_lifecycle_invalid');
-            if(!$open&&!in_array($state,NotificationRule::ATTEMPT_CLOSED_STATES,true))throw new \RuntimeException('attempt_lifecycle_invalid');
+            $isOpen=$attempt->finished_at===null;
+            if($isOpen&&!in_array($state,NotificationRule::ATTEMPT_OPEN_STATES,true))throw new \RuntimeException('attempt_lifecycle_invalid');
+            if(!$isOpen&&!in_array($state,NotificationRule::ATTEMPT_CLOSED_STATES,true))throw new \RuntimeException('attempt_lifecycle_invalid');
             $events=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} WHERE attempt_id=%d ORDER BY event_sequence",(int)$attempt->id))?:array();
             if($events===array())throw new \RuntimeException('attempt_lifecycle_invalid');
-            $previous=null;$index=0;
+            $previous=null;$index=0;$total=count($events);$retryRows=0;$retryEvent=null;
             foreach($events as $event){
                 $index++;
                 if((int)$event->event_sequence!==$index)throw new \RuntimeException('attempt_lifecycle_invalid');
@@ -373,32 +415,141 @@ final class NotificationIntegrity {
                 $to=(string)$event->to_state;
                 if($from!==$previous)throw new \RuntimeException('attempt_lifecycle_invalid');
                 // A `retry_scheduled` row is the digest-only audit companion of the closure that re-armed:
-                // it never moves the attempt, so it may only restate the state it was written in.
+                // it never moves the attempt, so it may only restate the state it was written in, and it is
+                // the closure's own last history row — the placement the re-arm appended it in.
                 if($type===NotificationRule::RETRY_SCHEDULED_EVENT){
-                    if($to!==$from)throw new \RuntimeException('attempt_lifecycle_invalid');
+                    if($to!==$from||$index!==$total)throw new \RuntimeException('attempt_lifecycle_invalid');
+                    $retryRows++;$retryEvent=$event;
                 }elseif(!NotificationRule::legalAttemptTransition($from,$to)){
                     throw new \RuntimeException('attempt_lifecycle_invalid');
                 }
                 $previous=$to;
             }
             if($previous!==$state)throw new \RuntimeException('attempt_lifecycle_invalid');
-            if(!$open)continue;
-            // §6.6/§10: exactly one attempt may be open, and only while the aggregate is `dispatching` — a
-            // terminal notification keeps no live lease.
+            // §9/§7.3: presence and absence are proved against the closure's own re-arm result. The persisted
+            // quadruple *is* that result — `retryScheduleIntegrity()` proves it reproduces the §9 derivation
+            // and that a closure the derivation exhausts persisted none — so a re-armed attempt must carry
+            // exactly one `retry_scheduled` row, and a closure that derived nothing must carry none.
+            $schedule=self::persistedRetrySchedule($attempt);
+            if($retryRows!==($schedule===null?0:1))throw new \RuntimeException('attempt_lifecycle_invalid');
+            if($schedule!==null){
+                // The row's reason is the closure's own normalised outcome, and its evidence is the
+                // digest-only retry evidence of exactly this persisted schedule.
+                if($retryEvent===null||$attempt->outcome_code===null||$retryEvent->reason_code===null
+                    ||(string)$retryEvent->reason_code!==(string)$attempt->outcome_code)throw new \RuntimeException('attempt_lifecycle_invalid');
+                $digest=$retryEvent->evidence_reference_digest===null?'':(string)$retryEvent->evidence_reference_digest;
+                if($digest===''||!hash_equals(self::retryEvidence($notification,$attempt,$schedule),$digest))throw new \RuntimeException('attempt_lifecycle_invalid');
+            }
+            if(!$isOpen)continue;
+            // §6.6/§10: an open attempt exists only while the aggregate is `dispatching` — a terminal
+            // notification keeps no live lease.
+            $open++;
             if($terminal||(string)$notification->state!=='dispatching')throw new \RuntimeException('attempt_lifecycle_invalid');
         }
+        // §6.6: **exactly one** attempt row may be open per notification. The claim writes the lease and the
+        // `dispatching` transition in one transaction and every closure closes both together, so a
+        // `dispatching` notification with no live lease — and any notification holding two open rows — is a
+        // forged open/closed shape rather than a dispatch in flight.
+        if($open>1||($dispatching&&$open!==1))throw new \RuntimeException('attempt_lifecycle_invalid');
     }
     /**
-     * §9 — a closure that persisted a retry schedule must reproduce the deterministic derivation exactly.
-     * A closure that persisted nothing (the two exhaustion shapes, and every terminal closure) reproduces
-     * nothing; the closure partition has already proved which shape is admissible.
+     * §9/§7.3 — prove the notification's own half of the `retry_scheduled` audit evidence.
+     *
+     * §9 requires the re-arm to be recorded on **both** append-only histories: the closing attempt keeps the
+     * persisted quadruple and its digest-only companion row, and the notification's history records the same
+     * digest-only retry evidence in the same transaction, before the outbox row is re-armed. Exactly one such
+     * row may exist for each re-arming attempt — one per persisted schedule, each directly after the `queued`
+     * row that re-arm appended, restating the state it produced and carrying the closure's own code — and
+     * none may exist for a closure that derived nothing, so the notification's audit trail can neither omit a
+     * re-arm nor announce one that never happened.
+     *
+     * @throws \RuntimeException `attempt_lifecycle_invalid`.
+     */
+    public static function retryEvidenceIntegrity(object $notification,array $attempts):void{
+        global $wpdb;$table=$wpdb->prefix.'dzn_notification_events';
+        $expected=array();
+        foreach($attempts as $attempt){
+            $schedule=self::persistedRetrySchedule($attempt);
+            if($schedule===null)continue;
+            $evidence=self::retryEvidence($notification,$attempt,$schedule);
+            if(array_key_exists($evidence,$expected))throw new \RuntimeException('attempt_lifecycle_invalid');
+            $expected[$evidence]=$attempt->outcome_code===null?'':(string)$attempt->outcome_code;
+        }
+        $events=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} WHERE notification_id=%d ORDER BY event_sequence",(int)$notification->id))?:array();
+        $previous=null;$seen=array();
+        foreach($events as $event){
+            if((string)$event->event_type===NotificationRule::RETRY_SCHEDULED_EVENT){
+                // The row is the audit companion of the re-arm the `queued` row just recorded, and carries
+                // that closure's own outcome code — never a state of its own and never a stray row.
+                if($previous===null||(string)$previous->event_type!=='queued'||(string)$previous->to_state!=='queued'
+                    ||$event->reason_code===null)throw new \RuntimeException('attempt_lifecycle_invalid');
+                $digest=$event->evidence_reference_digest===null?'':(string)$event->evidence_reference_digest;
+                if($digest===''||!array_key_exists($digest,$expected)||isset($seen[$digest]))throw new \RuntimeException('attempt_lifecycle_invalid');
+                if((string)$event->reason_code!==$expected[$digest]||(string)$previous->reason_code!==$expected[$digest])throw new \RuntimeException('attempt_lifecycle_invalid');
+                $seen[$digest]=true;
+            }
+            $previous=$event;
+        }
+        if(count($seen)!==count($expected))throw new \RuntimeException('attempt_lifecycle_invalid');
+    }
+    /**
+     * §7.2/§9 — the deterministic retry schedule one attempt persisted, or null when its closure derived
+     * nothing. The four columns are written exactly once, on the closing transition that re-armed, so their
+     * presence *is* the persisted re-arm result; a partially written quadruple is no schedule at all.
+     */
+    private static function persistedRetrySchedule(object $attempt):?array{
+        foreach(array('applied_jitter_bp','base_backoff_seconds','backoff_seconds','next_available_at') as $column)
+            if(($attempt->{$column}??null)===null)return null;
+        return array(
+            'applied_jitter_bp'=>(int)$attempt->applied_jitter_bp,
+            'base_backoff_seconds'=>(int)$attempt->base_backoff_seconds,
+            'backoff_seconds'=>(int)$attempt->backoff_seconds,
+            'next_available_at'=>(string)$attempt->next_available_at,
+        );
+    }
+    /** §9 — the digest-only retry evidence of one attempt's persisted schedule, from immutable inputs. */
+    private static function retryEvidence(object $notification,object $attempt,array $schedule):string{
+        return NotificationSupport::retryEvidenceDigest(
+            (string)$notification->notification_key_digest,(int)$attempt->attempt_sequence,
+            $schedule['applied_jitter_bp'],$schedule['backoff_seconds']
+        );
+    }
+    /**
+     * §9 — a closure that persisted a retry schedule must reproduce the deterministic derivation exactly,
+     * and a closure the derivation exhausts must have persisted none.
+     *
+     * The result is proved in both directions against the §9 derivation rather than against the persisted
+     * values alone: an attempt that closed `retryable` — or, through the same bounded path, an attempt-level
+     * `defer` closure or a lease-expiry recovery — while an attempt remained **and** the clamp left a usable
+     * window must carry the quadruple the derivation produces, and a closure at the retry ceiling or one
+     * whose clamp leaves no usable window is exhaustion and must carry no quadruple at all. The terminal,
+     * abort and cancellation classes derive nothing by rule. Nothing is ever silently rescheduled.
      */
     public static function retryScheduleIntegrity(object $notification,object $attempt,array $policy,int $workflowVersion):void{
-        $quadruple=array($attempt->applied_jitter_bp,$attempt->base_backoff_seconds,$attempt->backoff_seconds,$attempt->next_available_at);
-        if(array_filter($quadruple,static fn($value):bool=>$value!==null)===array())return;
+        $schedule=self::persistedRetrySchedule($attempt);
+        // Only the bounded non-terminal path can derive a schedule at all: a `terminal` class, an audited
+        // eligibility abort and a resolved lease all derive nothing, so any quadruple beside them is a
+        // schedule that must never have been derived.
+        if(!in_array((string)$attempt->failure_class,array('retryable','defer'),true)){
+            if($schedule!==null)throw new \RuntimeException('retry_schedule_divergence');
+            return;
+        }
         // The closure instant is deterministic: the persisted `lease_expires_at` for a lease-expiry closure,
         // the persisted `finished_at` for every other closure, never a fresh clock read.
         $instant=(string)$attempt->outcome_code==='lease_expired'?(string)$attempt->lease_expires_at:(string)$attempt->finished_at;
+        $derived=NotificationRetry::closure($policy,array(
+            'attempt_sequence'=>(int)$attempt->attempt_sequence,
+            'finished_at'=>$instant,
+            'expires_at'=>$notification->expires_at,
+            'notification_key_digest'=>(string)$notification->notification_key_digest,
+            'workflow_version'=>$workflowVersion,
+        ));
+        $reArm=($derived['re_arm']??false)===true;
+        if(!$reArm){
+            if($schedule!==null)throw new \RuntimeException('retry_schedule_divergence');
+            return;
+        }
+        if($schedule===null)throw new \RuntimeException('retry_schedule_divergence');
         NotificationRetry::verifyPersisted($policy,array(
             'attempt_sequence'=>(int)$attempt->attempt_sequence,
             'finished_at'=>$instant,

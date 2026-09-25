@@ -83,10 +83,19 @@ $notificationRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}notifications 
 $ceilingAttempt=(object)array('attempt_sequence'=>3,'failure_class'=>'retryable','outcome_code'=>'retryable','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
 $ceilingNotification=(object)array_merge((array)$notificationRow,array('state'=>'failed','failure_reason_code'=>'retry_exhausted'));
 NotificationIntegrity::closureIntegrity($ceilingNotification,$ceilingAttempt,$baseline);
-$forgedAttempt=(object)array('attempt_sequence'=>2,'failure_class'=>'retryable','outcome_code'=>'retryable','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
+// The forged attempt sits at the ceiling, so the ceiling rule is the one that must judge it: the same shape
+// below the ceiling is the window's business, and its own diagnostic covers it further down.
+$forgedAttempt=(object)array('attempt_sequence'=>3,'failure_class'=>'retryable','outcome_code'=>'retryable','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
 dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'failed','failure_reason_code'=>'contact_unusable')),$forgedAttempt,$baseline),'retry_exhaustion_invalid','a ceiling closure whose reason code was replaced by a vocabulary member');
 dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'failed','failure_reason_code'=>'retry_window_exhausted')),$forgedAttempt,$baseline),'retry_exhaustion_invalid','a ceiling closure carrying the window code');
 dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'failed','failure_reason_code'=>'retry_exhausted')),(object)array_merge((array)$forgedAttempt,array('failure_class'=>'terminal','outcome_code'=>'retry_exhausted')),$baseline),'terminal_reason_invalid','a ceiling closure whose attempt was rewritten to a terminal class');
+// The ceiling is the *final permitted attempt*: a sequence above it is the attempt no path can produce, and
+// it is refused as a lifecycle violation rather than read as a further ceiling closure.
+dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity($ceilingNotification,(object)array_merge((array)$ceilingAttempt,array('attempt_sequence'=>4)),$baseline),'attempt_lifecycle_invalid','an attempt above the frozen retry ceiling');
+// A closed attempt may carry no `failure_class` only as the acknowledgement — never as a forged closure.
+$acknowledgedAttempt=(object)array('attempt_sequence'=>1,'state'=>'acknowledged','failure_class'=>null,'outcome_code'=>'acknowledged','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
+NotificationIntegrity::closureIntegrity((object)array_merge((array)$notificationRow,array('state'=>'dispatched','failure_reason_code'=>null)),$acknowledgedAttempt,$baseline);
+foreach(array('failed','expired','abandoned') as $forgedState)dzn_s_fix_rejected(fn()=>NotificationIntegrity::closureIntegrity($ceilingNotification,(object)array_merge((array)$acknowledgedAttempt,array('state'=>$forgedState)),$baseline),'attempt_lifecycle_invalid','a closed attempt persisted as '.$forgedState.' without a failure class');
 $windowAttempt=(object)array('attempt_sequence'=>2,'failure_class'=>'retryable','outcome_code'=>'retryable','applied_jitter_bp'=>null,'base_backoff_seconds'=>null,'backoff_seconds'=>null,'next_available_at'=>null);
 $windowNotification=(object)array_merge((array)$notificationRow,array('state'=>'expired','failure_reason_code'=>'retry_window_exhausted'));
 NotificationIntegrity::closureIntegrity($windowNotification,$windowAttempt,$baseline);
@@ -203,7 +212,8 @@ dzn_s_fix_assert((string)$cancelledAttempt->failure_class===NotificationRule::LE
 dzn_s_fix_assert($cancelledAttempt->applied_jitter_bp===null&&$cancelledAttempt->base_backoff_seconds===null&&$cancelledAttempt->backoff_seconds===null&&$cancelledAttempt->next_available_at===null,'a resolved lease must persist no retry schedule');
 $cancelledNotification=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}notifications WHERE id=%d",(int)$observedLeased['notification_id']));
 NotificationIntegrity::closureIntegrity($cancelledNotification,$cancelledAttempt,$baseline);
-NotificationIntegrity::attemptHistoryIntegrity($cancelledNotification,$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}notification_attempts WHERE notification_id=%d ORDER BY attempt_sequence",(int)$observedLeased['notification_id']))?:array());
+NotificationIntegrity::attemptHistoryIntegrity($cancelledNotification,$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}notification_attempts WHERE notification_id=%d ORDER BY attempt_sequence",(int)$observedLeased['notification_id']))?:array(),$baseline);
+NotificationIntegrity::retryEvidenceIntegrity($cancelledNotification,$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}notification_attempts WHERE notification_id=%d ORDER BY attempt_sequence",(int)$observedLeased['notification_id']))?:array());
 dzn_s_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT status FROM {$p}platform_outbox WHERE notification_id=%d",(int)$observedLeased['notification_id']))==='cancelled','the outbox row must close consistently with the cancelled notification');
 dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notification_attempt_events WHERE attempt_id=%d AND event_type='abandoned' AND reason_code='cancelled'",(int)$claimedLeased['attempt_id']))===1,'a resolved lease must append its own audited attempt event');
 $cleanRead=(new Delnavazan\Platform\Core\Application\NotificationReadService())->one((int)$observedLeased['notification_id']);

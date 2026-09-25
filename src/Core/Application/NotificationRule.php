@@ -287,6 +287,13 @@ final class NotificationRule {
     /** The two exhaustion codes, written on the notification alone (§6.6/§9). */
     public const CEILING_EXHAUSTION_CODE='retry_exhausted';
     public const WINDOW_EXHAUSTION_CODE='retry_window_exhausted';
+    /**
+     * §6.6 — the acknowledgement's single normalised member: the closed attempt state `acknowledged` and,
+     * identically, the `outcome_code` the acknowledgement writes. It is the one closure that carries **no**
+     * `failure_class` at all — the port accepted the hand-off, so there is no failure to classify and no
+     * retry schedule to derive.
+     */
+    public const ACKNOWLEDGED_OUTCOME='acknowledged';
     /** The event type appended when a closure re-arms the outbox row (§9). */
     public const RETRY_SCHEDULED_EVENT='retry_scheduled';
 

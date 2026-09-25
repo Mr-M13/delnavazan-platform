@@ -183,6 +183,53 @@ Theme change is involved.
   closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
   which its §5 assertion referenced without the import (a latent fatal in the suite itself).
 
+### Implementation correction round 7 (host review `CORRECTION ROUND 4`, failed candidate `8c83d2f`, tree `f2a0dee5`)
+
+The host review refused the candidate with three blocking findings in the shared integrity proofs. This is
+the same review the host ledger numbers correction round 4 of the current implementation attempt; this
+record's own sequence continues at 7. The schema identity, table count, migration name and build identity
+are unchanged, no schema object is added, and no merge, deploy, provider activation, external send, Amelia
+or Theme change is involved.
+
+- **The retry ceiling and the single live lease are proved, not asserted.** `NotificationIntegrity::
+  attemptHistoryIntegrity()` now validates each `attempt_sequence` against the frozen `retry_max_attempts` —
+  a persisted attempt above the ceiling is refused whole with `attempt_lifecycle_invalid` instead of being
+  read as a further ceiling closure — and counts the live leases, so exactly one attempt may be open and
+  only while the aggregate is `dispatching`. `closureIntegrity()` reads the same frozen ceiling and refuses
+  an above-ceiling row itself: the ceiling shape belongs to the sequence **at** the ceiling alone, so `>=`
+  is not a spelling of `==`.
+- **A null `failure_class` is now allowed only for the acknowledgement.** The class-less shape is scoped to
+  the closed `acknowledged` attempt carrying the shared acknowledgement outcome code
+  (`NotificationRule::ACKNOWLEDGED_OUTCOME`, now written by the acknowledgement path as well) with no
+  persisted retry schedule; a forged `failed`, `expired` or `abandoned` closure with a legal event chain is
+  refused with `attempt_lifecycle_invalid`, and no closure class may borrow the acknowledgement member.
+- **The digest-only `retry_scheduled` audit evidence is proved on both append-only histories.** The
+  attempt-side row must be the closing attempt's own last history row, its `reason_code` must be that
+  closure's outcome code and its `evidence_reference_digest` must be exactly the retry evidence of the
+  persisted quadruple; the new `NotificationIntegrity::retryEvidenceIntegrity()` proves the notification's
+  own `retry_scheduled` row — exactly one per re-arming attempt, directly after the `queued` row the same
+  re-arm appended, carrying the same evidence, and none where no schedule was derived.
+  `NotificationDispatchService` writes that row on both re-arm paths (the port-reported/defer closure and
+  the lease-expiry recovery) from one shared `retryEvidence()` derivation, in the same transaction as the
+  schedule, the transition and the outbox re-arm, and `retryScheduleIntegrity()` now reads the §9
+  derivation in both directions (a closure that re-arms must carry the quadruple that reproduces it; a
+  closure the derivation exhausts must carry none).
+- Coverage: `tests/phase-2a2s-corruption-runtime.php` §8 walks a legitimate three-attempt ceiling and
+  proves a forged `retry_max_attempts + 1` attempt — and a second open attempt beside a live lease — fail
+  closed through the aggregate read, the attempt read seam and the schema verifier while the intact walk
+  reads clean; §9 proves the three class-less closures, the removed/forged/reused retry evidence on either
+  history, the evidence injected beside the exhausted closure, the legitimate acknowledgement that still
+  reads clean, and a re-arm whose persisted quadruple disagrees with the derivation even when both evidence
+  rows were recomputed to match it. `tests/phase-2a2s-retry-runtime.php` §6 asserts the above-ceiling
+  refusal beside the passing ceiling shape and the three class-less refusals (its ceiling forgeries now sit
+  **at** the ceiling, so the ceiling rule — not the window's — judges them, matching §7.3's scoping of the
+  two diagnostics), and the concurrency verifier passes each raced notification's own frozen policy and
+  proves the notification-side evidence.
+- Verification available here: `tests/phase-2a2s-contract.php` §15 asserts every new source rule and every
+  new runtime case label. This correction environment provides no PHP or WordPress runtime, so the runtime
+  suites are updated and reviewed by source but were **not executed here**; no migration was re-run and no
+  schema object, identity or build changed.
+
 ### Implementation correction round 6 (independent review of failed candidate `9fef9b9`, tree `301e359d`)
 
 The independent re-review of the previous correction candidate refused it with one blocking finding: a
