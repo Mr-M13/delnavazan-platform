@@ -4,10 +4,12 @@
 Describe how canonical schema evolves safely. Historical phase-by-phase migration narratives are archived.
 
 ## Current accepted line
-- Accepted baseline for this pass: Schema 26 / Phase R2.
+- Accepted baseline: Schema 27 / Phase V on Platform `main` at `1cb9d16b0beb5bec293b41a065b63ffa5f1318f6`.
 - Schema 25 introduced commercial purchase/funding/current-Term capacity authority.
-- Schema 26 extends this with renewal/recurring enrolment, collection-intent, recovery, protection and refund/reversal-review authority.
-- Schema 27 Notifications is in-flight only until independent review/acceptance.
+- Schema 26 extended this with renewal/recurring enrolment, collection-intent, recovery, protection and refund/reversal-review authority.
+- Schema 27 added the provider-neutral Google Calendar/Meet integration migration and verifier; it is accepted because the reviewed candidate was merged to `main`.
+- The completed Notifications candidate on `recovery/platform-s-notifications-3f67d3d` remains unmerged and still declares Schema 27 from the pre-Phase-V baseline. It must be reconciled and renumbered against current `main` before it can enter an acceptance gate.
+- Schema 28 Payment execution is in-flight only; its current candidate is not accepted until implementation, independent review and merge gates pass.
 
 ## Migration rules
 - Migrations are sequential, additive and repeat-safe.
