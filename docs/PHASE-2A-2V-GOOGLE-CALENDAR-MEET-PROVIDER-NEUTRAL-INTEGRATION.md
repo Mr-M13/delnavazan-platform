@@ -1,6 +1,6 @@
 # Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (implementation record)
 
-Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 2 APPLIED — NOT INDEPENDENTLY
+Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 3 APPLIED — NOT INDEPENDENTLY
 REVIEWED / NOT MERGED / NOT DEPLOYED.** No live credential, no provider traffic, no production data,
 no Theme change, no deployment and no public cutover is authorised by this document or by the code it
 describes.
@@ -19,16 +19,22 @@ describes.
 > returned FAIL / CORRECTION REQUIRED with five blocking findings. Section 9 records each finding and
 > the exact correction. History is additive: nothing was reset, rebased, amended or force-pushed, and
 > the corrections are a strictly additive change on top of that candidate.
+>
+> **Correction round 3.** Independent review of the round-2 candidate
+> `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree `5850a5a405800cd981c667d36d99328394af6b49`
+> returned FAIL / CORRECTION REQUIRED with two blocking findings. Section 10 records each finding and
+> the exact correction. History remains additive: nothing was reset, rebased, amended or force-pushed,
+> and this round is a strictly additive change on top of that candidate.
 
 ## 1. Identity
 
 | Item | Value |
 | --- | --- |
 | Authoritative base | manager checkout `559b1736621c9ed32e41dd2b785dd0f040dcb647` (tree `4e7fb1736b4a30de323cd25fe5dd4b6ceaad65a1`) |
-| Superseded candidate | `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c` (review FAIL; retained in history) |
+| Superseded candidates | `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c` (round-1 review FAIL; retained in history) and `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree `5850a5a405800cd981c667d36d99328394af6b49` (round-2 review FAIL; retained in history) |
 | Candidate schema | **27** |
 | Candidate migration | `027_google_calendar_meet_provider_integration` |
-| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.2` (correction round 2) |
+| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.3` (correction round 3) |
 | Candidate SHA / tree | recorded by the host materialisation; a commit cannot embed its own hash |
 
 The preflight contract named `26` / `026_google_calendar_meet_provider_integration` as *placeholders
@@ -194,21 +200,31 @@ DZN_PHASE_2A2V_REPO=<repo> DZN_PHASE_2A2V_WP_DIR=<wp> DZN_PHASE_2A2V_NET=<net> \
 
 ## 7. Evidence executed for this correction round
 
-Executed in the correcting environment (no PHP interpreter and no Docker/WordPress/MariaDB runtime is
-available there, and network access is restricted, so no PHP file could be linted or executed):
+Executed in the correcting environment (no PHP interpreter is on the `PATH` and no Docker runtime is
+reachable there — the Docker CLI reports `permission denied while trying to connect to the docker
+API` — and network access is restricted, so no PHP file could be linted or executed):
 
 - a structural balance check over every touched PHP file (all clean);
-- a full manual review of every touched PHP file against the reviewed findings;
+- a full manual review of every touched PHP file against both reviewed findings, including a trace of
+  each corrected path through the shipped fixtures;
+- a symbol-resolution check over every PHP file in `src/` and `tests/`: each static class reference,
+  `new`/`extends`/`implements`/`catch` target and return type resolves to an imported name, a
+  same-namespace class or a fully-qualified name (this is what confirmed the adapter's missing
+  `ProviderIntegrationRule` import; the only remaining unqualified references in `src/` are two
+  pre-existing gaps in the merged Phase-N admin screen, recorded below rather than changed here);
+- a content-level tree check: rebuilding the reviewed candidate's tree from its tracked path/mode/blob
+  set reproduces `5850a5a405800cd981c667d36d99328394af6b49` exactly, and the same method applied to this
+  corrected working tree produces the candidate tree reported with this round;
 - `sh -n` is **not** applicable: the runner script was not modified;
 - `git diff --check` and a complete `git status` review before publication;
 - `php -l` over every touched PHP file: **NOT EXECUTED** (no PHP runtime in this environment) and
   must be run in the disposable harness before merge, together with the runtime suites above.
 
 Every suite in §6, including the two that need no WordPress, is therefore marked NOT EXECUTED HERE.
-The correction round changed source that those suites assert on, so the earlier candidate's
-EXECUTED — PASS results for them no longer carry over and must be reproduced by the reviewer's harness
-before this candidate is accepted. No live credential, no provider traffic, no production data, no
-Theme change and no deployment were used or produced.
+This correction round changed source that those suites assert on, so the earlier candidate's
+EXECUTED — PASS results no longer carry over and must be reproduced by the reviewer's harness before
+this candidate is accepted. No live credential, no provider traffic, no production data, no Theme
+change and no deployment were used or produced.
 
 ## 8. Explicit non-authority / deferrals
 
@@ -287,3 +303,63 @@ Behaviour that the review confirmed and that this round deliberately preserves: 
 Lesson/schedule/delivery/attendance write, credential sealing and binding, append-preserving
 supersession, digest-only command evidence with unconditional payload-digest replay comparison, the
 immutable provider-event history, and the fail-closed option on every open product decision.
+
+## 10. Correction round 3 — blocking findings and their resolution
+
+Reviewed candidate `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree
+`5850a5a405800cd981c667d36d99328394af6b49`. Both findings are corrected in code and in the test
+surface that asserts the corrected behaviour:
+
+1. **The deterministic normaliser read an outer `facts` field the seam deliberately strips.**
+   `ProviderIntegrationRule::deliveryEnvelope()` reduces a delivery to the provider code, the
+   transport, the authenticated instant, the exact body plus its digest and the proof digest — it
+   carries no `facts` field — and `ProviderEventIngestService` hands exactly that sanitised envelope to
+   `ProviderEventNormalizer::normalise()`. `ContractProviderAdapters::normalise()` nevertheless read
+   `$envelope['facts']`, so every fixture ingesting through the deterministic adapters was refused
+   with an empty fact set before any evidence could be handed over; the adapter also named
+   `ProviderIntegrationRule` without importing it, so `verify()` failed before a fact was ever read.
+   *Corrected:* the adapter imports the rule, verifies the delivery-envelope shape in `verify()`, and
+   normalises only from the digest-bound `raw_body` of the envelope it is handed. It re-checks
+   `hash_equals(hash('sha256',$raw),$body_digest)` itself, decodes that body, validates the controlled
+   facts (provider event key, provider account, participant role, UTC observed instant, UTC join/leave
+   instants) and takes the occurrence binding only from the authenticated body. An outer `facts` array
+   is never consulted, so a caller can never state the facts a delivery is ingested under.
+   `tests/phase-2a2v-isolated-runtime.php` §8 now asserts the body-bound normalisation, the sanitised
+   envelope the seam actually hands over, the refusal of a body that does not match its declared
+   digest, and that a forged outer fact set cannot override the body;
+   `tests/phase-2a2v-runtime.php` §9 now re-binds the authenticated body (recomputing its digest) to
+   prove a delivery whose body names another Lesson is refused, and proves that an authenticated body
+   binds the occurrence with no caller hint at all.
+2. **Handoff-outcome allocation was a non-transactional `MAX(...)+1`.** The attempt number was chosen
+   outside any transaction and the ingest seam appended the outcome after the receipt transaction had
+   closed, so two concurrent retries of the same received event could both choose the same attempt and
+   one would violate the unique `(provider_ingest_event_id, handoff_attempt)` index *after* Phase P had
+   already been invoked: the caller received a persistence failure instead of converging. *Corrected:*
+   the attempt is now allocated inside a transaction that locks the parent receipt row
+   (`SELECT … FOR UPDATE` by primary key), so the second contender waits for the first allocation to
+   commit and then takes the next attempt. A contender that finds the effective outcome already
+   recorded — including a refusal offered for a receipt that already carries an admission, which is
+   never superseded — is reported by a `0` return instead of a driver failure, and
+   `ProviderEventIngestService` re-reads the durable outcome and converges on it rather than surfacing
+   the failure. `tests/phase-2a2v-concurrency-verify.php` now additionally asserts, for the
+   `duplicate_vs_conflicting_event` mode, that attempt numbers are allocated contiguously for the
+   receipt, that neither contender is answered with a duplicate-key failure, and that converged
+   duplicates leave the recorded admission as the effective outcome.
+
+Behaviour that the review confirmed and that this round deliberately preserves: the authenticated
+envelope boundary (a raw delivery, a bare body or a channel token is never proof), the immutable
+provider-event receipt with append-only handoff outcomes, admission written only after a successful
+Phase-P handoff, and no write of any kind to Phase-M/N/O/P storage — the only writes remain the ten
+Phase-V tables and the Phase-P intake seam.
+
+### Pre-existing gap observed, deliberately not changed by this round
+
+The symbol-resolution check leaves exactly one unresolved unqualified class reference in the shipped
+`src/` tree, outside Phase V and outside both reviewed findings:
+`src/Admin/Controller/ScreenController.php` (`canonicalScheduleAction()`) constructs
+`CanonicalLessonScheduleService` and `CanonicalLessonScheduleReadService` without importing either
+class, so an administrator invocation of the Phase-N canonical-schedule action would fail on an
+unresolvable class name. The gap is carried by the authoritative base `559b173…`, is untouched by this
+phase, and is deliberately **not** repaired here: a bounded correction round must not widen the
+reviewed surface. It is recorded so the owning Phase-N slice can schedule the import fix under its own
+review, together with the runtime coverage that would catch it.

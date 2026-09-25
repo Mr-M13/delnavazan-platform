@@ -2,6 +2,7 @@
 namespace Delnavazan\Platform\Integrations;
 
 use Delnavazan\Platform\Core\Application\ProviderIntegrationIdempotency;
+use Delnavazan\Platform\Core\Application\ProviderIntegrationRule;
 use Delnavazan\Platform\Core\Application\Port\{ProviderCalendarPort,ProviderEventNormalizer,ProviderMeetingPort,ProviderOAuthPort};
 
 /**
@@ -88,21 +89,76 @@ final class ContractProviderAdapters implements ProviderOAuthPort,ProviderCalend
         return array('provider_object_reference'=>$reference,'join_uri_reference'=>$reference.'-join','provider_occurred_at_utc'=>$occurred,'acknowledged'=>true);
     }
 
-    /** @param array<string,mixed> $envelope */
+    /**
+     * Whether this delivery is an envelope the synthetic transport authenticated over the exact body.
+     *
+     * @param array<string,mixed> $envelope
+     */
     public function verify(array $envelope):bool{
         try{
-            ProviderIntegrationRule::deliveryEnvelope($envelope);
+            $envelope=ProviderIntegrationRule::deliveryEnvelope($envelope);
         }catch(\InvalidArgumentException){
             return false;
         }
-        return is_array($envelope['facts']??null);
+        return $this->bodyFacts((string)$envelope['raw_body'])!==null;
     }
 
-    /** @param array<string,mixed> $envelope */
+    /**
+     * Translate one authenticated envelope into provider-neutral facts.
+     *
+     * The facts are read from the digest-bound `raw_body` the named transport authenticated — verified
+     * against the envelope's own body digest — and never from a caller-supplied outer array. The
+     * sanitised envelope the ingest seam derives from a delivery deliberately carries no `facts` field,
+     * and an outer field would be untrusted input in any case: a caller must not be able to state the
+     * facts a delivery is ingested under.
+     *
+     * @param array<string,mixed> $envelope the sanitised authenticated envelope the caller already validated
+     * @return array{provider_code:string,provider_event_key:string,provider_payload_key:string,participant_role:string,provider_account_key:string,observed_at:string,join_at_utc:?string,leave_at_utc:?string,lesson_id:?int,schedule_version_id:?int,provenance_reference:string,evidence_reference:string}
+     */
     public function normalise(array $envelope):array{
-        $facts=$envelope['facts']??array();
-        if(!is_array($facts))throw new \InvalidArgumentException('Provider event body required');
-        return $facts;
+        $raw=(string)($envelope['raw_body']??'');
+        $digest=trim((string)($envelope['body_digest']??''));
+        if($raw===''||$digest===''||!hash_equals(hash('sha256',$raw),$digest))throw new \InvalidArgumentException('Provider event body required');
+        $decoded=$this->bodyFacts($raw);
+        if($decoded===null)throw new \InvalidArgumentException('Provider event body required');
+        $providerCode=ProviderIntegrationRule::evidenceProviderCode((string)($envelope['provider_code']??''));
+        $eventKey=trim((string)($decoded['provider_event_key']??''));
+        $account=trim((string)($decoded['provider_account_key']??''));
+        $role=(string)($decoded['participant_role']??'');
+        $observed=(string)($decoded['observed_at']??'');
+        if($eventKey==='')throw new \InvalidArgumentException('Provider event key required');
+        if($account==='')throw new \InvalidArgumentException('Provider account identity required');
+        if(!in_array($role,array('teacher','student'),true))throw new \InvalidArgumentException('Controlled participant role required');
+        if(!ProviderIntegrationRule::utc($observed))throw new \InvalidArgumentException('Valid UTC observed time required');
+        $join=isset($decoded['join_at_utc'])?(string)$decoded['join_at_utc']:null;
+        $leave=isset($decoded['leave_at_utc'])?(string)$decoded['leave_at_utc']:null;
+        foreach(array($join,$leave) as $instant)if($instant!==null&&!ProviderIntegrationRule::utc($instant))throw new \InvalidArgumentException('Valid UTC join instant required');
+        return array(
+            'provider_code'=>$providerCode,
+            'provider_event_key'=>$eventKey,
+            'provider_payload_key'=>(string)($decoded['provider_payload_key']??$eventKey),
+            'participant_role'=>$role,
+            'provider_account_key'=>$account,
+            'observed_at'=>$observed,
+            'join_at_utc'=>$join,
+            'leave_at_utc'=>$leave,
+            // An occurrence binding only ever comes from the authenticated body, never from a hint.
+            'lesson_id'=>isset($decoded['lesson_id'])?(int)$decoded['lesson_id']:null,
+            'schedule_version_id'=>isset($decoded['schedule_version_id'])?(int)$decoded['schedule_version_id']:null,
+            'provenance_reference'=>(string)($decoded['provenance_reference']??('provider-event-'.$eventKey)),
+            'evidence_reference'=>(string)($decoded['evidence_reference']??('provider-event-ref-'.$eventKey)),
+        );
+    }
+
+    /**
+     * Decode one authenticated provider body.
+     *
+     * @return array<string,mixed>|null null when the body is empty or is not a JSON object
+     */
+    private function bodyFacts(string $raw):?array{
+        if(trim($raw)==='')return null;
+        $decoded=json_decode($raw,true);
+        return is_array($decoded)?$decoded:null;
     }
 
     /** Never record credential material in the call log. */

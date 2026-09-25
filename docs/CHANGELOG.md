@@ -6,13 +6,29 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ## Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration — candidate, unmerged — 2026-09-25
 
 Schema 27 / migration `027_google_calendar_meet_provider_integration` / build
-`phase2a2v-provider-neutral-google-calendar-meet-20260925.2`. Reconstructed candidate: the previously
+`phase2a2v-provider-neutral-google-calendar-meet-20260925.3`. Reconstructed candidate: the previously
 recorded Phase-V candidate `3724edb3c36959f3657e6b495ab96f26d347c476` / tree
 `5402cf890e2db898bccb15ba8ffc97176ced6457` was lost from every workspace, backup object store, reflog
 and remote branch, so this slice was rebuilt from the approved provider-neutral contract, the
 authoritative current code/docs and the preserved Phase-V run evidence. It is additive on top of the
 materialised R1/R2 base and renumbers nothing. See
 `docs/PHASE-2A-2V-GOOGLE-CALENDAR-MEET-PROVIDER-NEUTRAL-INTEGRATION.md`.
+
+**Correction round 3** (build `…20260925.3`) applies the independent-review findings against the
+candidate `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree
+`5850a5a405800cd981c667d36d99328394af6b49`, additively and without rewriting that history:
+
+- `ContractProviderAdapters::normalise()` now translates the digest-bound `raw_body` of the
+  authenticated envelope — re-verified against the envelope's own body digest — and never an outer
+  `facts` field, which the ingest seam does not hand over and which a caller must never be able to
+  state facts through. The adapter also imports `ProviderIntegrationRule`, so the deterministic
+  transport actually verifies the envelope instead of failing before any fact is read.
+- Handoff-outcome allocation is serialised: the attempt number is chosen inside a transaction that
+  locks the parent receipt row, so concurrent retries of one received event cannot collide on the
+  unique `(provider_ingest_event_id, handoff_attempt)` index after the Phase-P handoff. A contender
+  whose outcome was already recorded — and a refusal offered for a receipt that already carries an
+  admission, which is never superseded — re-reads the durable outcome and converges instead of
+  surfacing a duplicate-key persistence failure.
 
 **Correction round 2** (build `…20260925.2`) applies the independent-review findings against the
 candidate `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree
@@ -74,6 +90,17 @@ candidate `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree
   the earlier round's PASS results do not carry over to changed source. What was executed here: a
   structural balance check over every touched PHP file, a full manual review against the findings,
   `git diff --check` and a complete `git status` review.
+- Evidence for correction round 3: the same environment constraint holds — no PHP interpreter on the
+  `PATH` and no reachable Docker runtime (the CLI reports `permission denied` on the daemon socket) —
+  so every suite in the phase's test surface, including `tests/phase-2a2v-contract.php` and
+  `tests/phase-2a2v-isolated-runtime.php`, is again marked NOT EXECUTED HERE and must be re-run in the
+  reviewer's disposable harness before acceptance. What was executed here: a structural balance check
+  over every PHP file in `src/` and `tests/` (371 files, 0 unbalanced), a line-by-line review of each
+  corrected path against both findings (including the fixture trace that proves the body-bound
+  normalisation and the serialised attempt allocation), a symbol-resolution check that every class the
+  touched files reference is imported or same-namespace — which is how the missing
+  `ProviderIntegrationRule` import in the deterministic adapter was confirmed and closed — a
+  content-level tree check, `git diff --check` and a complete `git status` review.
 
 ## Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority — candidate, unmerged — 2026-09-23
 

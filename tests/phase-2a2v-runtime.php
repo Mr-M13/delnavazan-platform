@@ -166,7 +166,7 @@ $leave=gmdate('Y-m-d H:i:s',strtotime((string)$target->starts_at_utc.' UTC')+180
 $observed=gmdate('Y-m-d H:i:s',strtotime((string)$target->starts_at_utc.' UTC')+1800);
 // Every delivery is an envelope a named trusted transport already authenticated over the exact body.
 $delivery=static function(string $eventKey,string $account,string $role,string $joinAt,string $leaveAt,string $observedAt) use($lessonId,$versionId):array{
-    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey.'-payload','participant_role'=>$role,'provider_account_key'=>$account,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt,'provenance_reference'=>'prov-'.$eventKey,'evidence_reference'=>'ref-'.$eventKey);
+    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey.'-payload','participant_role'=>$role,'provider_account_key'=>$account,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt,'lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'provenance_reference'=>'prov-'.$eventKey,'evidence_reference'=>'ref-'.$eventKey);
     $body=(string)wp_json_encode($facts);
     return array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-00000000','facts'=>$facts);
 };
@@ -185,10 +185,23 @@ dzn_v_assert(preg_match('/^[a-f0-9]{64}$/D',(string)$outcome->intake_result_dige
 $readEvents=(new ProviderIntegrationReadService())->events($lessonId);
 dzn_v_assert(count($readEvents)===1,'the Lesson read model must report the recorded receipt');
 dzn_v_assert((string)$readEvents[0]['processing_state']==='admitted'&&(string)$readEvents[0]['received_state']==='received','the read model must report the effective outcome and the immutable receive state separately');
-// A caller may never re-point an authenticated delivery at a different occurrence.
+// A caller may never re-point an authenticated delivery at a different occurrence: the binding is the
+// one the authenticated body names. The envelope below is re-bound to the exact body it declares, so it
+// is a genuinely authenticated delivery that names another Lesson than the caller hints at — and the
+// untrusted outer array still names the original Lesson, so a seam that read it instead of the body
+// could not refuse this delivery.
 $mismatched=$delivery('v-mismatch-'.$runSuffix,$accountKey,'teacher',$join,$leave,$observed);
-$mismatched['facts']['lesson_id']=$lessonId+1000;
+$mismatchedBody=json_decode((string)$mismatched['raw_body'],true);
+$mismatchedBody['lesson_id']=$lessonId+1000;
+$mismatched['raw_body']=(string)wp_json_encode($mismatchedBody);
+$mismatched['body_digest']=hash('sha256',$mismatched['raw_body']);
 dzn_v_rejected(fn()=>$ingestService->ingest($mismatched,dzn_v_key('ingest-mismatch')),'provider_event_context_mismatch','a delivery whose authenticated body names another occurrence');
+// The occurrence binding comes from the authenticated body even when the caller supplies no hint at
+// all, and the recorded receipt is still the one that body names.
+$bodyBound=$delivery('v-event-'.$runSuffix,$accountKey,'teacher',$join,$leave,$observed);
+unset($bodyBound['lesson_id'],$bodyBound['schedule_version_id']);
+$convergedBody=$ingestService->ingest($bodyBound,dzn_v_key('ingest-body-bound'));
+dzn_v_assert($convergedBody['idempotent']===true&&(int)$convergedBody['ingest_event_id']===(int)$admitted['ingest_event_id'],'an authenticated body must bind the occurrence without a caller hint');
 // Phase P owns the canonical consequence: whatever it decided, the evidence row it recorded (if any)
 // belongs to a Phase-P case, never to this phase.
 $phasePEvidence=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_evidence WHERE provider_event_key_digest=%s",hash_hmac('sha256','canonical_attendance_event_key:v-event-'.$runSuffix,wp_salt('dzn_canonical_attendance'))));

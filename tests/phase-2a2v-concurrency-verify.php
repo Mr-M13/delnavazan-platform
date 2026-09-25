@@ -68,10 +68,24 @@ if($mode==='connect_vs_revoke'){
 }elseif($mode==='duplicate_vs_conflicting_event'){
     $receipts=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE lesson_id=%d",(int)$state['lesson_id']),ARRAY_A)?:array();
     dzn_vcv_assert(count($receipts)===1,'one provider event key must leave exactly one integration receipt');
+    $receiptId=(int)$receipts[0]['id'];
     $conflicts=$count('provider_event_conflicts','lesson_id=%d',array((int)$state['lesson_id']));
-    if($w2['ok']===true&&is_array($w2['outcome']??null)&&!empty($w2['outcome']['conflict']))dzn_vcv_assert($conflicts===1,'a conflicting duplicate must leave exactly one conflict receipt');
+    $conflicted=$w2['ok']===true&&is_array($w2['outcome']??null)&&!empty($w2['outcome']['conflict']);
+    if($conflicted)dzn_vcv_assert($conflicts===1,'a conflicting duplicate must leave exactly one conflict receipt');
     else dzn_vcv_assert($conflicts===0,'an exact duplicate must converge without a conflict receipt');
     dzn_vcv_assert((int)$receipts[0]['event_sequence']>0,'a converged provider event must keep its original receipt fields');
+    // Duplicate-retry invariant: handoff-outcome allocation is serialised on the parent receipt, so two
+    // concurrent retries of one received event can never choose the same attempt number — each contender
+    // is answered from its own contiguous attempt, and none may receive a duplicate-key persistence
+    // failure in place of converging on the outcome the other contender recorded.
+    $attempts=array_map('intval',$wpdb->get_col($wpdb->prepare("SELECT handoff_attempt FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt",$receiptId))?:array());
+    if($attempts)dzn_vcv_assert($attempts===range(1,count($attempts)),'handoff-outcome attempts must be allocated contiguously for one receipt');
+    foreach(array('w1'=>$w1,'w2'=>$w2) as $worker=>$contender)
+        dzn_vcv_assert(!str_contains((string)($contender['message']??''),'Duplicate entry'),$worker.' must never be answered with a duplicate-key persistence failure');
+    if($w1['ok']===true&&$w2['ok']===true&&!$conflicted){
+        dzn_vcv_assert($count('provider_ingest_outcomes','provider_ingest_event_id=%d AND outcome=%s',array($receiptId,'admitted'))>=1,'converged duplicate retries must leave a recorded admission');
+        dzn_vcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT outcome FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt DESC,id DESC LIMIT 1",$receiptId))==='admitted','the effective outcome of a converged duplicate must be the recorded admission');
+    }
 }elseif($mode==='mapping_revoke_vs_ingest'){
     dzn_vcv_assert($count('integration_connections','teacher_id=%d AND active_slot=1',array($teacherId))===1,'a mapping revocation must never disturb the active connection');
     dzn_vcv_assert($count('provider_identity_mappings','id=%d AND mapping_state=%s',array((int)$state['identity_mapping_id'],'revoked'))===1,'the identity mapping must be recorded as revoked');

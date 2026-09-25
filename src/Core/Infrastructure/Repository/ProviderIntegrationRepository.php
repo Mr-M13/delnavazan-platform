@@ -153,6 +153,10 @@ final class ProviderIntegrationRepository {
     public function ingestEvent(string $providerCode,string $eventKeyDigest,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}provider_ingest_events WHERE provider_code=%s AND provider_event_key_digest=%s".($lock?' FOR UPDATE':''),$providerCode,$eventKeyDigest);
     }
+    /** One exact receipt by primary key, optionally locked as the serialisation parent of its outcomes. */
+    public function ingestEventById(int $id,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}provider_ingest_events WHERE id=%d".($lock?' FOR UPDATE':''),$id);
+    }
     public function insertIngestEvent(array $data):int{return $this->insert('provider_ingest_events',$data);}
     public function ingestEvents(int $lessonId):array{
         return $this->rows("SELECT * FROM {$this->p}provider_ingest_events WHERE lesson_id=%d ORDER BY id",$lessonId);
@@ -171,10 +175,38 @@ final class ProviderIntegrationRepository {
     }
 
     // ---- Provider event handoff outcomes -----------------------------------------------------
-    /** Append one handoff outcome; the receipt itself is never mutated by this. */
-    public function insertIngestOutcome(array $data):int{
-        $data['handoff_attempt']=$this->maxHandoffAttempt((int)$data['provider_ingest_event_id'])+1;
-        return $this->insert('provider_ingest_outcomes',$data);
+    /**
+     * Append one handoff outcome under a serialised attempt allocation.
+     *
+     * The allocation is a transaction that locks the parent receipt row for its duration, so two
+     * concurrent retries of the same receipt can never both compute the same `handoff_attempt`: the
+     * second contender waits for the first allocation to commit and then takes the next attempt. A
+     * contender that finds the unique `(provider_ingest_event_id, handoff_attempt)` index already
+     * occupied — or a refusal offered for a receipt that already carries an admission — is reported by
+     * the `0` return instead of a driver failure, so the caller re-reads the effective outcome and
+     * converges rather than surfacing a persistence error. The receipt row itself is never mutated.
+     *
+     * @return int the appended outcome row id, or 0 when the effective outcome was already recorded
+     */
+    public function insertIngestOutcome(int $eventId,array $data):int{
+        $this->begin();
+        try{
+            if(!$this->ingestEventById($eventId,true))throw new \InvalidArgumentException('provider_event_receipt_required');
+            if((string)($data['outcome']??'')==='refused'&&$this->admittedOutcome($eventId)){$this->commit();return 0;}
+            $data['provider_ingest_event_id']=$eventId;
+            $data['handoff_attempt']=$this->maxHandoffAttempt($eventId)+1;
+            $id=$this->insert('provider_ingest_outcomes',$data);
+            $this->commit();
+            return $id;
+        }catch(\Throwable $e){
+            $this->rollback();
+            if($e instanceof PersistenceException&&$this->duplicate($e)==='handoff_sequence')return 0;
+            throw $e;
+        }
+    }
+    /** Whether an admission has already been appended for one receipt; a recorded admission is never superseded. */
+    public function admittedOutcome(int $eventId):bool{
+        global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d AND outcome='admitted'",$eventId))>0;
     }
     public function maxHandoffAttempt(int $eventId):int{
         global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(handoff_attempt),0) FROM {$this->p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d",$eventId));
@@ -198,7 +230,7 @@ final class ProviderIntegrationRepository {
         $key=strtolower($m[1]);
         return in_array($key,array(
             'command_key_digest','active_connection','teacher_sequence','provider_subject','lesson_version','provider_event',
-            'provider_conference','conflict_identity','event_sequence','connection_sequence','uid',
+            'provider_conference','conflict_identity','event_sequence','connection_sequence','handoff_sequence','uid',
         ),true)?$key:null;
     }
 

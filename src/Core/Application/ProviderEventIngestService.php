@@ -143,17 +143,38 @@ final class ProviderEventIngestService {
         try{
             $result=$this->intake->ingestProviderEvidence($lessonId,$scheduleVersionId,$intakeInput,$key);
         }catch(\Throwable$e){
-            $this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'refused',$this->refusalCode($e),null,$actor);
+            // A refusal is appended only when this receipt does not already carry an admission. Two
+            // concurrent retries of the same receipt may both reach the handoff (Phase P is idempotent
+            // on the provider event key), so a contender that finds the effective outcome already
+            // recorded re-reads it and converges instead of reporting a failure for a delivery that did
+            // reach Phase P.
+            if($this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'refused',$this->refusalCode($e),null,$actor)<1)return $this->convergedAdmission($eventId);
             throw $e;
         }
         // Only a successful Phase-P handoff appends the durable admission, and the admission records
-        // the exact Phase-P result it was written for.
+        // the exact Phase-P result it was written for. Allocation is serialised on the parent receipt,
+        // so a concurrent retry can never collide on the attempt number: it either appends its own
+        // attempt or converges on the one recorded by the winner, and never surfaces a driver failure.
         $resultDigest=ProviderIntegrationIdempotency::payload(array(
             'case_id'=>(int)($result['case_id']??0),'evidence_id'=>(int)($result['evidence_id']??0),
             'created'=>isset($result['created'])?(bool)$result['created']:null,
         ));
-        $this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'admitted',null,$resultDigest,$actor);
+        if($this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'admitted',null,$resultDigest,$actor)<1)return $this->convergedAdmission($eventId);
         return array('ingest_event_id'=>$eventId,'processing_state'=>'admitted','conflict'=>false,'idempotent'=>$duplicate,'intake'=>$result,'operation'=>'ingest_provider_event');
+    }
+
+    /**
+     * Converge on the effective outcome a concurrent retry already recorded for this receipt.
+     *
+     * A contender whose own append did not become the recorded outcome — the effective attempt was
+     * already taken, or an admission already existed — re-reads the durable outcome instead of
+     * surfacing a duplicate-key failure. Only a recorded admission may be reported as an admission; a
+     * receipt with no readable admission can never be answered as one.
+     */
+    private function convergedAdmission(int $eventId):array{
+        $recorded=$this->repository->latestIngestOutcome($eventId);
+        if(!$recorded||(string)$recorded->outcome!=='admitted')throw new \RuntimeException('provider_event_outcome_unavailable');
+        return array('ingest_event_id'=>$eventId,'processing_state'=>'admitted','conflict'=>false,'idempotent'=>true,'operation'=>'ingest_provider_event');
     }
 
     /**
@@ -222,11 +243,14 @@ final class ProviderEventIngestService {
      *
      * Every attempt appends its own outcome, so an interrupted attempt is followed by a new row rather
      * than by a mutation of the recorded history, and the latest row is always the effective outcome.
+     * The attempt number is allocated by the repository inside a transaction that locks the parent
+     * receipt, so concurrent retries of one receipt serialise instead of colliding; a `0` result means
+     * the effective outcome was already recorded by a concurrent retry.
      */
     private function recordOutcome(int $eventId,string $providerCode,string $eventKeyDigest,string $outcome,?string $reason,?string $resultDigest,int $actor):int{
         $now=gmdate('Y-m-d H:i:s');
-        return $this->repository->insertIngestOutcome(array(
-            'uid'=>Identifier::uid(),'provider_ingest_event_id'=>$eventId,'provider_code'=>$providerCode,
+        return $this->repository->insertIngestOutcome($eventId,array(
+            'uid'=>Identifier::uid(),'provider_code'=>$providerCode,
             'provider_event_key_digest'=>$eventKeyDigest,'outcome'=>$outcome,'reason_code'=>$reason,
             'intake_result_digest'=>$resultDigest,'recorded_at'=>$now,'recorded_by'=>$actor,
             'created_at'=>$now,'created_by'=>$actor,

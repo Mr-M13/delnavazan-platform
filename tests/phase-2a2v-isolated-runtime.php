@@ -205,6 +205,19 @@ $assert($deterministicA['provider_object_reference']===$deterministicB['provider
 $assert($oauth->count('google_meet')===2,'the projection calls must be recorded per provider code');
 $assert($oauth->verify(array('provider_code'=>'google_meet','raw_body'=>'{}'))===false,'the deterministic transport must refuse a raw delivery');
 $assert($oauth->verify($authenticated(array('provider_event_key'=>'e-1')))===true,'the deterministic transport must accept an authenticated envelope');
+// The deterministic transport normalises the body its named transport authenticated — bound to the
+// envelope by digest — and never a caller-supplied outer fact array, which the seam does not even hand
+// over. An outer field may therefore never state the facts a delivery is ingested under.
+$contractDelivery=$authenticated(array('provider_event_key'=>'e-1','provider_account_key'=>'acct-1','participant_role'=>'teacher','observed_at'=>'2026-09-25 09:00:00','join_at_utc'=>'2026-09-25 08:00:00','leave_at_utc'=>'2026-09-25 08:40:00'));
+$contractFacts=$oauth->normalise($contractDelivery);
+$assert($contractFacts['provider_event_key']==='e-1'&&$contractFacts['provider_account_key']==='acct-1'&&$contractFacts['participant_role']==='teacher','the deterministic transport must normalise the authenticated body');
+$assert($contractFacts['join_at_utc']==='2026-09-25 08:00:00'&&$contractFacts['leave_at_utc']==='2026-09-25 08:40:00'&&$contractFacts['lesson_id']===null,'the deterministic transport must return the exact instants and inherit no occurrence');
+$assert($oauth->normalise(ProviderIntegrationRule::deliveryEnvelope($contractDelivery))['provider_event_key']==='e-1','the sanitised envelope the ingest seam hands over must normalise from its digest-bound body');
+$lying=$contractDelivery;$lying['facts']=array('provider_event_key'=>'forged','participant_role'=>'student','provider_account_key'=>'forged-account');
+$assert($oauth->normalise($lying)['provider_event_key']==='e-1'&&$oauth->normalise($lying)['participant_role']==='teacher','a caller-supplied outer fact set must never override the authenticated body');
+$refused(fn()=>$oauth->normalise(array('provider_code'=>'google_meet','raw_body'=>'{}','body_digest'=>str_repeat('0',64))),'a deterministic normalisation whose body does not match its declared digest');
+$refused(fn()=>$oauth->normalise(array('provider_code'=>'google_meet','raw_body'=>'{}','body_digest'=>hash('sha256','{}'))),'a deterministic normalisation of a body with no provider event');
+$refused(fn()=>$oauth->normalise(array('provider_code'=>'google_meet','raw_body'=>'not-json','body_digest'=>hash('sha256','not-json'))),'a deterministic normalisation of a non-object body');
 $translationOnly=new ContractProviderAdapters(array(),ContractProviderAdapters::PROJECTION_PENDING);
 $translation=$translationOnly->project(array('provider_code'=>'google_calendar','operation'=>'project','lesson_id'=>7,'schedule_version_id'=>91,'now_utc'=>'2026-09-25 07:00:00'));
 $assert(isset($translation['provider_request'])&&!isset($translation['provider_object_reference'])&&ProviderIntegrationRule::digest($translation['provider_facts_digest']),'a translation-only transport must return a request and no provider reference');
