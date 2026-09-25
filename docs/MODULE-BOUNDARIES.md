@@ -1,5 +1,18 @@
 # Delnavazan Platform Module Boundaries
 
+> **Phase 2A.2-V candidate boundary (Schema 27, not authoritative until independently reviewed and
+> merged):** the Integrations module owns exactly one provider integration surface — one Teacher
+> consent lifecycle per provider code, one sealed credential per connection, provider reference
+> mappings, a bounded Calendar/Meet projection seam, and provider-event ingestion into the Phase-P
+> evidence seam — plus its append-only receipts and digest-only command evidence. Core depends on the
+> four `Provider*Port` interfaces only and never imports `Delnavazan\Platform\Integrations\*`. The
+> phase owns no Lesson, schedule, delivery, attendance, settlement, payment, notification or Theme
+> storage: a projection mirrors an already-applicable canonical schedule version without mutating it,
+> a conference reference never proves attendance, participant identity remains
+> `CanonicalAttendanceIdentityService`, and canonical delivery/completion remain Phase O and Lesson
+> authority. Google-specific names, scopes and payload shapes exist only inside the pure translation
+> adapter, which performs no HTTP call, opens no OAuth client and reads no credential.
+
 > **Phase 2A.2-R1 boundary (Schema 25, merged and closed):** the commercial authority owns purchase
 > offers, pricing snapshots, promotions, account adjustments, obligations, provider-neutral payment
 > evidence, funding derivation, bounded entitlements, Term funding plans, the Regular recurring

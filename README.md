@@ -8,13 +8,14 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 
 | Item | State |
 |---|---|
-| Authoritative main | Phase 2A.2-R1 implementation merge at `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25 / R1 complete) |
-| Platform / schema | 0.1.0 / **26 candidate** |
-| Migrations | 001–026 candidate; latest `026_renewal_recurring_enrolment_authority` |
+| Authoritative main | Phase 2A.2-R1 implementation merge at `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25 / R1 complete), with the R1 and R2 candidates materialised on top at `559b1736621c9ed32e41dd2b785dd0f040dcb647` |
+| Platform / schema | 0.1.0 / **27 candidate** |
+| Migrations | 001–027 candidate; latest `027_google_calendar_meet_provider_integration` |
 | Latest merged slice | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority (Schema 25; merged / closed) |
 | Previous merged slice | Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority (Schema 24) |
-| Active Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; candidate awaiting independent review, correction rounds 1–6 applied, contract §13 pre-implementation prerequisites closed) |
-| Next boundary | **R2 candidate awaiting independent review.** No Stripe, notification delivery, Theme, deployment or production access is authorised |
+| Active Platform candidate | Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (Schema 27 / migration `027_google_calendar_meet_provider_integration` / build `phase2a2v-provider-neutral-google-calendar-meet-20260925.1`; **reconstructed** after the loss of the previously recorded candidate `3724edb3…`, awaiting independent review) |
+| Previous Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; correction rounds 1–6 applied, awaiting independent review) |
+| Next boundary | **Phase V candidate awaiting independent review.** No live credential, provider traffic, production data, Stripe, notification delivery, Theme change, deployment or production cutover is authorised |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

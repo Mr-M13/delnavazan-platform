@@ -3,6 +3,50 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration — candidate, unmerged — 2026-09-25
+
+Schema 27 / migration `027_google_calendar_meet_provider_integration` / build
+`phase2a2v-provider-neutral-google-calendar-meet-20260925.1`. Reconstructed candidate: the previously
+recorded Phase-V candidate `3724edb3c36959f3657e6b495ab96f26d347c476` / tree
+`5402cf890e2db898bccb15ba8ffc97176ced6457` was lost from every workspace, backup object store, reflog
+and remote branch, so this slice was rebuilt from the approved provider-neutral contract, the
+authoritative current code/docs and the preserved Phase-V run evidence. It is additive on top of the
+materialised R1/R2 base and renumbers nothing. See
+`docs/PHASE-2A-2V-GOOGLE-CALENDAR-MEET-PROVIDER-NEUTRAL-INTEGRATION.md`.
+
+- Nine provider-neutral integration tables with a fail-closed verifier: `integration_connections`,
+  `integration_credentials`, `integration_oauth_authorizations`, `provider_identity_mappings`,
+  `provider_calendar_event_mappings`, `provider_meeting_mappings`, `provider_ingest_events`,
+  `provider_event_conflicts` and `provider_integration_commands`. No provider-specific column, no
+  plaintext credential column, no mutable column on append-only evidence, and a unique active slot
+  per Teacher+provider, per provider subject and per Lesson+schedule version.
+- `ProviderIntegrationService` owns the recorded Teacher consent lifecycle (connect/refresh/
+  disconnect/revoke/reconnect-as-new-consent), server-side one-time state with PKCE, connection
+  identity mappings, Calendar/Meet projections against one exact applicable canonical schedule
+  version, retraction that never touches canonical truth, and digest-only command evidence with
+  unconditional payload-digest replay comparison.
+- `IntegrationSecretService` seals renewable credentials with `sodium_crypto_secretbox` (AES-256-GCM
+  fallback), a unique nonce per row, a salt-derived key with `dzn_provider_integration` domain
+  separation, stored key/cipher versions and an envelope bound to exactly one connection; decryption
+  fails closed on an unknown version, malformed nonce, truncated ciphertext or failed authentication.
+- `ProviderEventIngestService` verifies, normalises and deduplicates provider events on full immutable
+  context equality, records durable conflict receipts for a changed context without overwriting the
+  original, and hands facts to `CanonicalAttendanceIntakeService::ingestProviderEvidence` only. It
+  never resolves a participant identity, never writes Phase-O/P storage and holds no integration row
+  across the Phase-P transaction.
+- `GoogleCalendarMeetAdapter` is the only Google-specific seam and is a pure translation: no HTTP
+  client, no OAuth library, no credential, no webhook and no provider call anywhere in the phase.
+  `ContractProviderAdapters` implements all four ports deterministically for the evidence runs.
+- Least privilege: administrator holds `dzn_connect_own_provider_calendar`,
+  `dzn_manage_provider_integrations`, `dzn_revoke_provider_integrations`,
+  `dzn_ingest_provider_events` and `dzn_view_provider_integrations`; the Teacher role holds only
+  self-connect and self-view and is actively stripped of the management, revocation and ingestion
+  grants. Capability repair is per capability.
+- Evidence executed for this candidate: static contract test PASS, isolated pure-runtime proof PASS
+  (229 assertions), PHP lint clean, `sh -n` clean, `git diff --check` clean. The WP-CLI/MariaDB
+  migration, runtime, corruption, failure and concurrency suites are committed and gated but were not
+  executable in the reconstruction sandbox (no PHP CLI, MariaDB or reachable container runtime).
+
 ## Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority — candidate, unmerged — 2026-09-23
 
 Schema 26 / migration `026_renewal_recurring_enrolment_authority` / build
