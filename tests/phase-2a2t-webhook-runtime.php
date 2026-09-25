@@ -6,12 +6,20 @@
  * constant-gated disposable test vault, the pre-parse account selector, duplicate convergence, durable
  * conflict, out-of-order (`stale_provider_event`) safety, the bounded worker principal and the fact that
  * an anonymous request never establishes an administrator.
+ *
+ * Correction round 8 adds four proofs: [C8-1] a non-POST delivery still reaches the controlled handler and
+ * every precheck refusal is receipted with the exact bytes that arrived, [C8-2] the event object's active
+ * mapping must own exactly the obligation the event names (a mismatch, a historical mapping and an absent
+ * mapping are each refused and submit no evidence), [C8-3] a duplicate delivery converges through the one
+ * shared path (the concurrent form is proved by `tests/phase-2a2t-concurrency-runner.sh`) and [C8-4] a
+ * drain whose re-delivered body no longer matches the recorded immutable facts appends the controlled
+ * conflict decision instead of translating it.
  */
 if(getenv('DZN_PHASE_2A2T_WEBHOOK_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-T webhook runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2r1-fixture.php';
 require __DIR__.'/phase-2a2r2-fixture.php';
 use Delnavazan\Platform\Core\Application\{CollectionIntentService,CommercialPaymentService,RenewalCycleService};
-use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeService,PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderRegistry,PaymentProviderObjectService};
+use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeService,PaymentExecutionIdempotency,PaymentExecutionRule,PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderRegistry,PaymentProviderObjectService};
 use Delnavazan\Platform\Integrations\Payment\Stripe\{StripeEventTranslator,StripeSignatureVerifier,StripeWebhookController};
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_tw_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
@@ -63,8 +71,8 @@ $objectReference='pi_webhook_'.wp_generate_uuid4();
 $objects->link(array('provider_account_id'=>$accountId,'object_kind'=>'intent','canonical_kind'=>'obligation','canonical_id'=>$obligationId,'object_reference'=>$objectReference)+dzn_tw_evidence('mapping'),dzn_tw_key('mapping'));
 PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
 $intake=new PaymentEventIntakeService();
-$body=static function(string $eventReference,string $type,int $amount)use($obligation,$offer,$objectReference):string{
-    return (string)wp_json_encode(array('id'=>$eventReference,'type'=>$type,'created'=>time(),'data'=>array('object'=>array('id'=>$objectReference,'amount'=>$amount,'currency'=>strtolower((string)$offer['currency']),'metadata'=>array('obligation_reference'=>(string)$offer['offer_uid'].':2')))));
+$body=static function(string $eventReference,string $type,int $amount,?string $obligationReference=null,?string $objectId=null)use($offer,$objectReference):string{
+    return (string)wp_json_encode(array('id'=>$eventReference,'type'=>$type,'created'=>time(),'data'=>array('object'=>array('id'=>$objectId??$objectReference,'amount'=>$amount,'currency'=>strtolower((string)$offer['currency']),'metadata'=>array('obligation_reference'=>$obligationReference??((string)$offer['offer_uid'].':2'))))));
 };
 $headers=static fn(string $body):array=>array('stripe-signature'=>'t='.time().',v1='.hash_hmac('sha256',time().'.'.$body,'whsec_test_disposable'));
 
@@ -79,7 +87,62 @@ dzn_tw_assert((string)$unknown['reason_code']==='webhook_account_unresolved','an
 dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_event_receipts WHERE verification_state='refused'")>=3,'every refusal must be receipted');
 dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events")===0,'an unverified request must never become an event');
 
-// 2. A valid signature settles through R1 and confirms both R2 states under the worker principal.
+// 2. [C8-1] Every method reaches the controlled handler, and every refusal receipts the exact raw body.
+$routePath='/delnavazan-platform/v1/payment-provider-events/(?P<provider>[a-z0-9_]{1,32})/(?P<account>[A-Za-z0-9_-]{1,32})';
+$routes=rest_get_server()->get_routes();
+dzn_tw_assert(isset($routes[$routePath]),'the account-scoped webhook route must be registered');
+$declaredMethods=array();
+foreach((array)$routes[$routePath] as $endpoint)foreach((array)($endpoint['methods']??array()) as $key=>$value)$declaredMethods[is_string($key)?$key:(string)$value]=true;
+foreach(array('GET','POST','PUT','PATCH','DELETE') as $method)dzn_tw_assert(isset($declaredMethods[$method]),'a non-POST delivery must reach the controlled handler, not routing: '.$method);
+$methodBody=(string)wp_json_encode(array('id'=>'evt-method-'.wp_generate_uuid4(),'type'=>'payment_intent.succeeded'));
+$methodRequest=new \WP_REST_Request('GET','/delnavazan-platform/v1/payment-provider-events/stripe/'.$selector);
+$methodRequest->set_header('content-type','application/json');
+$methodRequest->set_body($methodBody);
+$methodResponse=rest_do_request($methodRequest);
+dzn_tw_assert($methodResponse->get_status()===405,'a non-POST delivery must be refused with the controlled method_not_allowed status');
+$methodReceipt=$wpdb->get_row("SELECT * FROM {$p}payment_provider_event_receipts ORDER BY id DESC LIMIT 1");
+dzn_tw_assert($methodReceipt&&(string)$methodReceipt->refusal_reason_code==='method_not_allowed','a non-POST delivery must be receipted as method_not_allowed');
+dzn_tw_assert((int)$methodReceipt->body_bytes===strlen($methodBody)&&hash_equals((string)$methodReceipt->request_digest,PaymentExecutionIdempotency::payloadDigest($methodBody)),'a refused delivery must be receipted with the exact raw body bytes that arrived');
+dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events")===0,'a refused method must never become an event');
+// A POST refused before parsing — the wrong content type, or a transport the precheck decides first on a
+// runtime without TLS — is receipted with the same exact bytes; the precheck decides what may be parsed,
+// never which bytes are recorded.
+$shapeBody=(string)wp_json_encode(array('id'=>'evt-shape-'.wp_generate_uuid4(),'type'=>'payment_intent.succeeded'));
+$shapeRequest=new \WP_REST_Request('POST','/delnavazan-platform/v1/payment-provider-events/stripe/'.$selector);
+$shapeRequest->set_header('content-type','text/plain');
+$shapeRequest->set_body($shapeBody);
+$shapeResponse=rest_do_request($shapeRequest);
+dzn_tw_assert($shapeResponse->get_status()===400,'a non-JSON delivery must be refused before parsing');
+$shapeReceipt=$wpdb->get_row("SELECT * FROM {$p}payment_provider_event_receipts ORDER BY id DESC LIMIT 1");
+dzn_tw_assert(in_array((string)$shapeReceipt->refusal_reason_code,array('unsupported_content_type','https_required'),true),'a non-JSON delivery must carry its controlled refusal reason');
+dzn_tw_assert((int)$shapeReceipt->body_bytes===strlen($shapeBody)&&hash_equals((string)$shapeReceipt->request_digest,PaymentExecutionIdempotency::payloadDigest($shapeBody)),'a refused delivery must be receipted with the exact raw body bytes that arrived');
+$oversized=str_repeat('x',PaymentExecutionRule::MAX_WEBHOOK_BYTES+1);
+$oversizedResult=$intake->receive('stripe',$selector,$oversized,array(),array('precheck_refusal'=>'payload_too_large'));
+dzn_tw_assert((int)$oversizedResult['status']===413&&(string)$oversizedResult['reason_code']==='payload_too_large','an oversized delivery must be refused with payload_too_large');
+$oversizedReceipt=$wpdb->get_row("SELECT * FROM {$p}payment_provider_event_receipts ORDER BY id DESC LIMIT 1");
+dzn_tw_assert((int)$oversizedReceipt->body_bytes===strlen($oversized)&&hash_equals((string)$oversizedReceipt->request_digest,PaymentExecutionIdempotency::payloadDigest($oversized)),'an oversized delivery must be receipted with the exact raw body bytes that arrived');
+dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events")===0,'a refused body must never become an event');
+
+// 3. [C8-2] Attribution is exact: the event object's active mapping must own the obligation it names.
+$mismatchBody=$body('evt-mismatch-'.wp_generate_uuid4(),'payment_intent.succeeded',(int)$obligation['amount_minor'],(string)$offer['offer_uid'].':1');
+$mismatch=$intake->receive('stripe',$selector,$mismatchBody,$headers($mismatchBody));
+dzn_tw_assert((string)$mismatch['verification_state']==='verified','the signature is verified; only the attribution is refused');
+$mismatchEvent=(int)$wpdb->get_var("SELECT id FROM {$p}payment_provider_events ORDER BY id DESC LIMIT 1");
+$mismatchDecision=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d ORDER BY id DESC LIMIT 1",$mismatchEvent));
+dzn_tw_assert($mismatchDecision&&(string)$mismatchDecision->decision_state==='refused'&&(string)$mismatchDecision->reason_code==='ambiguous_obligation_attribution','an object mapped to one obligation must never submit evidence for another obligation named in metadata');
+dzn_tw_assert($mismatchDecision->commercial_evidence_id===null&&(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",1))>0,'a refused attribution must submit no evidence and must not disturb the obligation the object does not own');
+$detachedReference='pi_webhook_'.wp_generate_uuid4();
+$detachedLink=$objects->link(array('provider_account_id'=>$accountId,'object_kind'=>'intent','canonical_kind'=>'obligation','canonical_id'=>$obligationId,'object_reference'=>$detachedReference)+dzn_tw_evidence('detached-mapping'),dzn_tw_key('detached-mapping'));
+$objects->detach((int)$detachedLink['provider_object_id'],dzn_tw_evidence('detach'),dzn_tw_key('detach'));
+$detachedBody=$body('evt-detached-'.wp_generate_uuid4(),'payment_intent.succeeded',(int)$obligation['amount_minor'],null,$detachedReference);
+$detached=$intake->receive('stripe',$selector,$detachedBody,$headers($detachedBody));
+dzn_tw_assert((string)$detached['verification_state']==='verified','a valid signature does not make a historical mapping authority');
+$detachedEvent=(int)$wpdb->get_var("SELECT id FROM {$p}payment_provider_events ORDER BY id DESC LIMIT 1");
+$detachedDecision=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d ORDER BY id DESC LIMIT 1",$detachedEvent));
+dzn_tw_assert($detachedDecision&&(string)$detachedDecision->reason_code==='unmapped_provider_object'&&$detachedDecision->commercial_evidence_id===null,'a superseded or detached mapping must never attribute evidence');
+dzn_tw_assert($wpdb->get_var($wpdb->prepare("SELECT active_slot FROM {$p}payment_provider_objects WHERE id=%d",(int)$detachedLink['provider_object_id']))===null,'the detached mapping must be historical, not active');
+
+// 4. A valid signature settles through R1 and confirms both R2 states under the worker principal.
 $anonymousBefore=(int)get_current_user_id();
 $verified=$intake->receive('stripe',$selector,$payload,$headers($payload),array('source'=>'203.0.113.9'));
 dzn_tw_assert((string)$verified['verification_state']==='verified'&&(int)$verified['status']===200,'a valid signature must be accepted');
@@ -93,7 +156,7 @@ dzn_tw_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renew
 $decision=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE obligation_id=%d ORDER BY id DESC LIMIT 1",$obligationId));
 dzn_tw_assert($decision&&(string)$decision->r2_consequence_state==='applied'&&(int)$decision->recorded_by===(int)$principal,'the decision must record the worker principal and an applied consequence');
 
-// 3. A duplicate delivery converges; a materially different duplicate is preserved as a conflict.
+// 5. A duplicate delivery converges; a materially different duplicate is preserved as a conflict.
 $eventBefore=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events");
 $intake->receive('stripe',$selector,$payload,$headers($payload));
 dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events")===$eventBefore,'an identical duplicate must converge on the recorded event');
@@ -103,7 +166,7 @@ $conflict=(string)$wpdb->get_var("SELECT reason_code FROM {$p}payment_provider_e
 dzn_tw_assert($conflict==='conflicting_provider_event'||$conflict==='provider_event_not_authoritative'||$conflict==='stale_provider_event','a later materially different event must be conservatively recorded, never silently converged');
 dzn_tw_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",$cycleId))==='collected','no provider event may regress a collected cycle');
 
-// 4. An unset principal leaves the event durably receivable and a later drain completes it exactly once.
+// 6. An unset principal leaves the event durably receivable and a later drain completes it exactly once.
 $unsetBody=$body('evt-unset-'.wp_generate_uuid4(),'payment_intent.requires_action',(int)$obligation['amount_minor']);
 delete_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION);
 $unset=$intake->receive('stripe',$selector,$unsetBody,$headers($unsetBody));
@@ -115,7 +178,25 @@ $drained=$intake->drain($unsetEvent,$unsetBody,$headers($unsetBody));
 dzn_tw_assert((string)$drained['decision_state']==='translated','a later drain must complete the pending decision');
 dzn_tw_assert((string)$intake->drain($unsetEvent,$unsetBody,$headers($unsetBody))!=='','a repeated drain must be safe');
 
-// 5. An over-privileged principal settles nothing.
+// 7. [C8-4] A drain may never translate a body that no longer matches the recorded immutable facts.
+$drainReference='evt-drain-'.wp_generate_uuid4();
+$drainBody=$body($drainReference,'payment_intent.requires_action',(int)$obligation['amount_minor']);
+delete_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION);
+$intake->receive('stripe',$selector,$drainBody,$headers($drainBody));
+$drainEvent=(int)$wpdb->get_var("SELECT id FROM {$p}payment_provider_events ORDER BY id DESC LIMIT 1");
+$drainFact=(string)$wpdb->get_var($wpdb->prepare("SELECT event_fact_digest FROM {$p}payment_provider_events WHERE id=%d",$drainEvent));
+update_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION,(int)$principal,false);
+$evidenceBefore=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_payment_evidence");
+$changedBody=$body($drainReference,'payment_intent.succeeded',(int)$obligation['amount_minor']+1);
+$changed=$intake->drain($drainEvent,$changedBody,$headers($changedBody));
+dzn_tw_assert((string)$changed['decision_state']==='conflicted'&&(string)$changed['reason_code']==='conflicting_provider_event','a drain whose body changed must append the controlled conflict decision');
+dzn_tw_assert(hash_equals($drainFact,(string)$wpdb->get_var($wpdb->prepare("SELECT event_fact_digest FROM {$p}payment_provider_events WHERE id=%d",$drainEvent))),'the recorded event must be preserved unchanged');
+dzn_tw_assert((string)$wpdb->get_var($wpdb->prepare("SELECT reason_code FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d ORDER BY id ASC LIMIT 1",$drainEvent))==='payment_worker_principal_required','the original deferred decision must still be the first decision of the event');
+dzn_tw_assert((int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}commercial_payment_evidence")===$evidenceBefore,'a conflicting drain must submit no evidence');
+$settledDrain=$intake->drain($drainEvent,$drainBody,$headers($drainBody));
+dzn_tw_assert((string)$settledDrain['decision_state']==='conflicted','a conflicting drain must never be completed as a translation by a later identical delivery');
+
+// 8. An over-privileged principal settles nothing.
 $principalUser=get_user_by('id',(int)$principal);
 $principalUser->add_cap('manage_options');
 $blockedBody=$body('evt-overpriv-'.wp_generate_uuid4(),'payment_intent.requires_action',100);

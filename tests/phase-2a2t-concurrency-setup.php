@@ -4,7 +4,7 @@ if(getenv('DZN_PHASE_2A2T_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!W
 require __DIR__.'/phase-2a2r1-fixture.php';
 require __DIR__.'/phase-2a2r2-fixture.php';
 use Delnavazan\Platform\Core\Application\{CollectionIntentService,RenewalCycleService};
-use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderObjectService,PaymentProviderRegistry,ProviderReferenceClaims};
+use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderObjectService,PaymentProviderRegistry,PaymentSecretVault,ProviderReferenceClaims};
 use Delnavazan\Platform\Integrations\Payment\ContractPaymentAdapter;
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_tcs_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
@@ -38,10 +38,11 @@ foreach(array(0,1) as $index){
     $opened=$intent->openManualPaymentRequired($cycleId,array('obligation_id'=>(int)$obligation['obligation_id'])+dzn_tcs_evidence('open-'.$index),dzn_tcs_key('open-'.$index));
     $intentId=(int)$opened['collection_intent_id'];
     $intent->submit($intentId,dzn_tcs_evidence('submit-'.$index),dzn_tcs_key('submit-'.$index));
-    $fixtures[]=array('obligation_id'=>(int)$obligation['obligation_id'],'intent_id'=>$intentId,'cycle_id'=>$cycleId,'student_id'=>(int)$wpdb->get_var($wpdb->prepare("SELECT beneficiary_student_id FROM {$p}commercial_offers WHERE id=%d",(int)$offer['offer_id'])));
+    $fixtures[]=array('obligation_id'=>(int)$obligation['obligation_id'],'intent_id'=>$intentId,'cycle_id'=>$cycleId,'student_id'=>(int)$wpdb->get_var($wpdb->prepare("SELECT beneficiary_student_id FROM {$p}commercial_offers WHERE id=%d",(int)$offer['offer_id'])),'amount_minor'=>(int)$obligation['amount_minor'],'currency'=>(string)$offer['currency'],'obligation_reference'=>(string)$offer['offer_uid'].':2');
 }
 $accounts=new PaymentProviderAccountService();
-$account=$accounts->register(array('provider_key'=>'stripe','mode'=>'test','reference_code'=>'conc-'.wp_generate_uuid4(),'account_reference'=>'acct-conc','execution_state'=>'enabled','credential_state'=>'configured')+dzn_tcs_evidence('account'),dzn_tcs_key('account'));
+$selector='conc-'.wp_generate_uuid4();
+$account=$accounts->register(array('provider_key'=>'stripe','mode'=>'test','reference_code'=>$selector,'account_reference'=>'acct-conc','execution_state'=>'enabled','credential_state'=>'configured')+dzn_tcs_evidence('account'),dzn_tcs_key('account'));
 $accountId=(int)$account['provider_account_id'];
 $wpdb->update($p.'payment_provider_accounts',array('account_reference_digest'=>hash_hmac('sha256','payment_execution_reference:acct-conc',wp_salt('dzn_payment_execution'))),array('id'=>$accountId));
 $objects=new PaymentProviderObjectService();
@@ -52,4 +53,30 @@ foreach($fixtures as $index=>$row){
     $fixtures[$index]['references']=$references;
 }
 PaymentProviderRegistry::registerExecutionPort(new ContractPaymentAdapter());
-update_option('dzn_phase_2a2t_concurrency_fixture',array('mode'=>$mode,'account_id'=>$accountId,'rows'=>$fixtures),false);
+$fixturePayload=array('mode'=>$mode,'account_id'=>$accountId,'rows'=>$fixtures);
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),true)){
+    // [C8-3] The duplicate-delivery race needs the two disposable intake inputs the execution fixtures do
+    // not use: a worker principal holding exactly the §9.7 capability set, and a synthetic signing secret
+    // held by the constant-gated disposable test vault. The event body is fixed here, so both workers
+    // deliver byte-identical facts (or, for the conflicting mode, the same event identity with a different
+    // recorded fact) and only the unique `provider_event` index and the recorded fact digest can decide.
+    $principal=wp_insert_user(array('user_login'=>'dzn-t-conc-principal-'.wp_generate_uuid4(),'user_pass'=>wp_generate_password(24),'role'=>'subscriber'));
+    $principalUser=get_user_by('id',(int)$principal);
+    foreach(PaymentExecutionSupport::WORKER_CAPABILITIES as $capability)$principalUser->add_cap($capability);
+    update_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION,(int)$principal,false);
+    if(!defined('DZN_PLATFORM_PAYMENT_TEST_VAULT'))define('DZN_PLATFORM_PAYMENT_TEST_VAULT',true);
+    $webhookSecret='whsec_test_conc_'.wp_generate_uuid4();
+    $storedSecret=(new PaymentSecretVault())->store('stripe',$accountId,'webhook_signing_secret','test',$webhookSecret,array('nonce'=>'abcdefgh12345678'),dzn_tcs_key('secret'));
+    dzn_tcs_assert(($storedSecret['stored']??false)===true,'the disposable test vault must hold the synthetic signing secret');
+    $row=$fixtures[0];
+    $eventReference='evt-conc-'.wp_generate_uuid4();
+    $webhookBody=static function(int $occurredAt)use($eventReference,$row):string{
+        return (string)wp_json_encode(array('id'=>$eventReference,'type'=>'payment_intent.succeeded','created'=>$occurredAt,'data'=>array('object'=>array('id'=>$row['references']['obligation'],'amount'=>$row['amount_minor'],'currency'=>strtolower((string)$row['currency']),'metadata'=>array('obligation_reference'=>$row['obligation_reference'])))));
+    };
+    $fixturePayload['webhook']=array(
+        'selector'=>$selector,'secret'=>$webhookSecret,'event_reference'=>$eventReference,
+        'obligation_id'=>(int)$row['obligation_id'],'intent_id'=>(int)$row['intent_id'],'cycle_id'=>(int)$row['cycle_id'],
+        'body'=>$webhookBody(time()),'body_changed'=>$webhookBody(time()-1),
+    );
+}
+update_option('dzn_phase_2a2t_concurrency_fixture',$fixturePayload,false);

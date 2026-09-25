@@ -12,16 +12,32 @@ use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeSer
  * request is receipted, including a refusal decided before parsing; rate limiting is deliberately not
  * applied — signature verification is the control, and a rate limit would discard legitimately retried
  * provider traffic.
+ *
+ * [C8-1] "Every inbound request" includes a request whose method is not `POST`: WordPress matches a
+ * route's declared methods *before* it reaches a callback, so the route is registered for every HTTP
+ * method and the controlled handler decides `method_not_allowed` itself (§9.2). The handler also always
+ * hands the *exact raw bytes* that arrived to the receipt, even when a precheck refuses the request
+ * before it is parsed, so the durable audit digest can never describe a body the provider did not send
+ * (§9.3).
  */
 final class StripeWebhookController {
+    /**
+     * [C8-1] The complete HTTP-method set of both webhook routes.
+     *
+     * A route registered for `POST` alone would answer a `GET`/`PUT`/`PATCH`/`DELETE` delivery with a
+     * routing-level error and record nothing. Registering every method keeps the method check inside the
+     * controlled handler, where it is receipted with `method_not_allowed` and the exact raw body.
+     */
+    private const ROUTE_METHODS='GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS';
+
     public static function register():void{
         register_rest_route('delnavazan-platform/v1','/payment-provider-events/(?P<provider>[a-z0-9_]{1,32})/(?P<account>[A-Za-z0-9_-]{1,32})',array(
-            'methods'=>'POST','permission_callback'=>'__return_true','callback'=>array(__CLASS__,'handle'),
+            'methods'=>self::ROUTE_METHODS,'permission_callback'=>'__return_true','callback'=>array(__CLASS__,'handle'),
         ));
         // The bare provider route exists so every inbound request is receipted and never falls back to
         // a default account.
         register_rest_route('delnavazan-platform/v1','/payment-provider-events/(?P<provider>[a-z0-9_]{1,32})',array(
-            'methods'=>'POST','permission_callback'=>'__return_true','callback'=>array(__CLASS__,'handleProviderOnly'),
+            'methods'=>self::ROUTE_METHODS,'permission_callback'=>'__return_true','callback'=>array(__CLASS__,'handleProviderOnly'),
         ));
     }
 
@@ -40,7 +56,11 @@ final class StripeWebhookController {
         $meta=array('received_at'=>PaymentExecutionSupport::now(),'source'=>(string)$request->get_header('x-forwarded-for'));
         $reason=self::precheck($request,$rawBody);
         if($reason!==null)$meta['precheck_refusal']=$reason;
-        $result=$intake->receive($providerKey,$accountSelector,($reason===null?$rawBody:''),$headers,$meta);
+        // [C8-1] The actual raw body is always passed to the receipt: the precheck decides whether the
+        // request may be parsed and verified, never which bytes are recorded. Substituting an empty body
+        // for an oversized, unsupported-content-type or otherwise refused request would record a
+        // zero-byte/different digest and destroy the exact-raw-body audit invariant of §9.3.
+        $result=$intake->receive($providerKey,$accountSelector,$rawBody,$headers,$meta);
         $response=new \WP_REST_Response(array('status'=>$result['verification_state']),self::status((int)$result['status']));
         $response->header('Cache-Control','no-store');
         return $response;

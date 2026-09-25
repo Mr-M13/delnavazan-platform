@@ -61,6 +61,23 @@ final class PaymentProviderRepository {
     public function objectByReferenceDigest(int $accountId,string $objectKind,string $referenceDigest,bool $lock=false):?object{
         return $this->one("SELECT * FROM {$this->p}payment_provider_objects WHERE payment_provider_account_id=%d AND object_kind=%s AND object_reference_digest=%s".($lock?' FOR UPDATE':''),$accountId,$objectKind,$referenceDigest);
     }
+    /**
+     * [C8-2] Every *active* mapping of one provider object reference, whatever its kind.
+     *
+     * The provider-side unique index is kind-scoped, so one raw reference could in principle be linked
+     * under two different kinds. The caller requires exactly one candidate and refuses an ambiguous
+     * object rather than choosing one, and a historical row (`active_slot IS NULL` — superseded or
+     * detached) is never returned, because it is no longer authority for attribution.
+     */
+    public function activeObjectsByReferenceDigest(int $accountId,string $referenceDigest,bool $lock=false):array{
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}payment_provider_objects WHERE payment_provider_account_id=%d AND object_reference_digest=%s AND active_slot=1".($lock?' FOR UPDATE':''),$accountId,$referenceDigest))?:array();
+    }
+    /** [C8-2] The R1 obligation one canonical collection intent already owns (NULL when it owns none). */
+    public function obligationForCollectionIntent(int $collectionIntentId):?int{
+        $row=$this->one("SELECT obligation_id FROM {$this->p}collection_intents WHERE id=%d",$collectionIntentId);
+        return $row?(int)$row->obligation_id:null;
+    }
     public function objectsForCanonical(string $canonicalKind,int $canonicalId):array{
         global $wpdb;
         return $wpdb->get_results($wpdb->prepare("SELECT * FROM {$this->p}payment_provider_objects WHERE canonical_kind=%s AND canonical_id=%d ORDER BY id ASC",$canonicalKind,$canonicalId))?:array();

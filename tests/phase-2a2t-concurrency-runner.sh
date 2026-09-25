@@ -10,7 +10,8 @@ case $mode in
   duplicate_webhook|out_of_order_event|submit_vs_cancel|settlement_vs_attempt|mapping_change_vs_intake|\
   secret_rotation_vs_intake|unrelated_students|duplicate_command_replay|settlement_vs_r2_consequence|\
   submit_vs_cancel_in_flight|redrive_after_crash|concurrent_expired_lease|takeover_reissue_fenced|\
-  fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure) ;;
+  fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure|\
+  conflicting_duplicate_webhook) ;;
   *) echo "Unknown Phase T concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives
@@ -38,6 +39,12 @@ waitfor "$gate/w1.started" || { echo "holder worker never gated"; cat "$gate/w1.
 wprun "$gate" w2 "$repo/tests/phase-2a2t-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 w2=$!
 case $mode in
+  duplicate_webhook|conflicting_duplicate_webhook)
+    # [C8-3] Both deliveries must be in flight together, so neither worker holds a lock: each announces
+    # itself in the gate directory and waits for its sibling before submitting the same provider event
+    # identity, and the unique `provider_event` index arbitrates the race.
+    waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
+    ;;
   unrelated_students)
     # The contender owns a different Student's account root, so it must complete while the holder's
     # transaction is still open; only then is the holder released.

@@ -126,6 +126,12 @@ final class PaymentEventIntakeService {
             if(hash_equals((string)$event->event_reference_digest,PaymentExecutionIdempotency::eventReference((string)$envelope->eventReference()))){$match=$envelope;break;}
         }
         if($match===null)throw new \InvalidArgumentException('provider_event_not_authoritative');
+        // [C8-4] The recorded event is immutable. A body that matches the event identity but not the
+        // recorded immutable facts is a conflicting duplicate: the original event is preserved unchanged,
+        // the controlled conflict decision is appended, and no evidence is submitted for the changed
+        // facts — a drain may never translate a payload the event never recorded.
+        if(!hash_equals((string)$event->event_fact_digest,$this->factDigest((string)$event->provider_key,(string)$event->event_reference_digest,$match)))
+            return $this->recordConflict($event);
         $decision=$this->appendDecision($event,$this->decide($event,$match),'drain');
         return array('event_id'=>$eventId,'decision_id'=>$decision['decision_id'],'decision_state'=>$decision['decision_state'],'created'=>true);
     }
@@ -169,23 +175,45 @@ final class PaymentEventIntakeService {
         $providerKey=(string)$account->provider_key;
         $eventReferenceDigest=PaymentExecutionIdempotency::eventReference((string)$envelope->eventReference());
         $factDigest=$this->factDigest($providerKey,$eventReferenceDigest,$envelope);
+        // A duplicate this worker can already read converges before anything is inserted.
         $existing=$this->repository->eventByReferenceDigest($providerKey,$eventReferenceDigest);
-        if($existing){
-            if(hash_equals((string)$existing->event_fact_digest,$factDigest)){
-                $last=$this->repository->latestDecision((int)$existing->id);
-                // A duplicate delivery may complete an R2 consequence that is still pending; it never
-                // appends a row for a consequence that is already applied, refused or not applicable.
-                if($last&&$this->decisionIsPending($last))return $this->appendDecision($existing,$this->decide($existing,$envelope),'duplicate_pending');
-                return array('event_id'=>(int)$existing->id,'decision_id'=>$last?(int)$last->id:null,'decision_state'=>$last?(string)$last->decision_state:'recorded','converged'=>true,'created'=>false);
-            }
-            return $this->recordConflict($existing);
-        }
-        $eventId=$this->insertEvent($receiptId,$account,$envelope,$eventReferenceDigest,$factDigest,$receivedAt);
-        $event=$this->repository->event($eventId);
+        if($existing)return $this->convergeExisting($existing,$factDigest,$envelope);
+        // [C8-3] The unique `provider_event` index — never the read — is the arbiter between two workers
+        // that both saw no event: the insert reports whether this worker created the row, and a worker
+        // that lost the index takes exactly the same convergence path as the worker that read a duplicate.
+        $inserted=$this->insertEvent($receiptId,$account,$envelope,$eventReferenceDigest,$factDigest,$receivedAt);
+        $event=$this->repository->event((int)$inserted['event_id']);
+        if(!$event)throw new \RuntimeException('payment_event_corrupt');
+        if(!$inserted['created'])return $this->convergeExisting($event,$factDigest,$envelope);
         return $this->appendDecision($event,$this->decide($event,$envelope));
     }
 
-    private function insertEvent(int $receiptId,object $account,ProviderEventEnvelope $envelope,string $eventReferenceDigest,string $factDigest,string $receivedAt):int{
+    /**
+     * [C8-3] The single convergence path of §9.5.
+     *
+     * Identical facts converge idempotently; a duplicate delivery may complete an R2 consequence that is
+     * still `pending`, and it never appends a row for a consequence that is already applied, refused or
+     * not applicable. Materially different facts preserve the original event unchanged and append the
+     * controlled `conflicting_provider_event` decision — a worker that lost the insert race must never
+     * translate its own view of the facts.
+     */
+    private function convergeExisting(object $existing,string $factDigest,ProviderEventEnvelope $envelope):array{
+        if(hash_equals((string)$existing->event_fact_digest,$factDigest)){
+            $last=$this->repository->latestDecision((int)$existing->id);
+            if($last&&$this->decisionIsPending($last))return $this->appendDecision($existing,$this->decide($existing,$envelope),'duplicate_pending');
+            return array('event_id'=>(int)$existing->id,'decision_id'=>$last?(int)$last->id:null,'decision_state'=>$last?(string)$last->decision_state:'recorded','converged'=>true,'created'=>false);
+        }
+        return $this->recordConflict($existing);
+    }
+
+    /**
+     * Insert the durable event row or resolve the winner of a concurrent delivery ([C8-3]).
+     *
+     * Returns the event id together with the proof of ownership: `created` is true only for the worker
+     * whose insert actually wrote the row. A worker that meets the unique `provider_event` index gets the
+     * winner's recorded event id and `created = false`, so it never translates or decides a duplicate.
+     */
+    private function insertEvent(int $receiptId,object $account,ProviderEventEnvelope $envelope,string $eventReferenceDigest,string $factDigest,string $receivedAt):array{
         $now=PaymentExecutionSupport::now();
         $this->repository->begin();
         try{
@@ -202,11 +230,11 @@ final class PaymentEventIntakeService {
             $this->repository->rollback();
             if($this->repository->duplicate($e)==='provider_event'){
                 $winner=$this->repository->eventByReferenceDigest((string)$account->provider_key,$eventReferenceDigest);
-                if($winner)return (int)$winner->id;
+                if($winner)return array('event_id'=>(int)$winner->id,'created'=>false);
             }
             throw $e;
         }
-        return $eventId;
+        return array('event_id'=>$eventId,'created'=>true);
     }
 
     private function recordConflict(object $event):array{
@@ -242,7 +270,11 @@ final class PaymentEventIntakeService {
         if($envelope->obligationReference()!==null&&$obligationId===null)return $this->refusal('ambiguous_obligation_attribution');
         if($obligationId!==null&&$this->isStale($obligationId,$envelope->providerOccurredAt()))return $this->refusal('stale_provider_event','ignored');
         if($envelope->providerAccountReference()!==null&&!hash_equals($this->accountDigest((int)$event->payment_provider_account_id),PaymentExecutionIdempotency::reference((string)$envelope->providerAccountReference())))return $this->refusal('unmapped_provider_account');
-        if($envelope->providerObjectReference()!==null&&!$this->objectIsMapped((int)$event->payment_provider_account_id,(string)$envelope->providerObjectReference()))return $this->refusal('unmapped_provider_object');
+        // [C8-2] Attribution is exact or refused (§10 rule 1).
+        if($envelope->providerObjectReference()!==null){
+            $attribution=$this->objectAttribution((int)$event->payment_provider_account_id,(string)$envelope->providerObjectReference(),$obligationId);
+            if($attribution!==null)return $this->refusal($attribution);
+        }
         if(PaymentExecutionSupport::workerPrincipalId()<1)return $this->refusal('payment_worker_principal_required');
         try{
             return $this->worker->run(fn():array=>$this->translate($event,$envelope,$obligationId));
@@ -437,10 +469,40 @@ final class PaymentEventIntakeService {
         global $wpdb;$p=$wpdb->prefix.'dzn_';
         return (string)$wpdb->get_var($wpdb->prepare("SELECT account_reference_digest FROM {$p}payment_provider_accounts WHERE id=%d",$accountId));
     }
-    private function objectIsMapped(int $accountId,string $reference):bool{
-        $digest=PaymentExecutionIdempotency::reference($reference);
-        foreach(PaymentExecutionRule::OBJECT_KINDS as $kind)if($this->repository->objectByReferenceDigest($accountId,$kind,$digest))return true;
-        return false;
+    /**
+     * [C8-2] Exact provider-object-to-obligation attribution (§10 rule 1).
+     *
+     * The event's own provider object must carry **exactly one active mapping**, and the canonical
+     * obligation that mapping already owns must be exactly the obligation the event resolved:
+     *
+     * - an absent mapping, or a historical (`superseded`/`detached`) one, is never authority and is
+     *   refused with `unmapped_provider_object`;
+     * - more than one active candidate — the provider-side unique index is kind-scoped — is refused as
+     *   ambiguous rather than arbitrated;
+     * - a mapping whose canonical row owns a different obligation (or owns none while the event names
+     *   one) can never submit evidence for the obligation the event names; it is refused with
+     *   `ambiguous_obligation_attribution`. A signed event for an object linked to one canonical row can
+     *   therefore never settle, or attempt to settle, an obligation that mapping does not own.
+     *
+     * Returns the controlled refusal reason, or null when the attribution is exact. An event that names no
+     * obligation and an object whose mapping owns none are compatible: neither claims an attribution, so
+     * R1's own routing (§10 rule 1, `unmatched_payment_evidence`) decides what the evidence is worth.
+     */
+    private function objectAttribution(int $accountId,string $objectReference,?int $obligationId):?string{
+        $candidates=$this->repository->activeObjectsByReferenceDigest($accountId,PaymentExecutionIdempotency::reference($objectReference));
+        if(count($candidates)!==1)return $candidates===array()?'unmapped_provider_object':'ambiguous_obligation_attribution';
+        $mapping=$candidates[0];
+        PaymentExecutionIntegrity::mapping($mapping);
+        if((string)$mapping->state!=='linked')return 'unmapped_provider_object';
+        return $this->canonicalObligation($mapping)===$obligationId?null:'ambiguous_obligation_attribution';
+    }
+    /** The one R1 obligation an active mapping already owns, or null when it owns none ([C8-2]). */
+    private function canonicalObligation(object $mapping):?int{
+        return match((string)$mapping->canonical_kind){
+            'obligation'=>(int)$mapping->canonical_id,
+            'collection_intent'=>$this->repository->obligationForCollectionIntent((int)$mapping->canonical_id),
+            default=>null,
+        };
     }
     private function isStale(?int $obligationId,?string $occurredAt):bool{
         if($obligationId===null||$occurredAt===null)return false;

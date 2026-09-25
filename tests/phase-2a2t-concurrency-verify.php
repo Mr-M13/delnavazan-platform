@@ -27,4 +27,30 @@ $releasedWithLease=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_executi
 dzn_tcv_assert($releasedWithLease===0,'a released claim may never retain a lease');
 $generations=$wpdb->get_col("SELECT claim_generation FROM {$p}payment_execution_dispatches");
 foreach($generations as $generation)dzn_tcv_assert((int)$generation>=1,'a dispatch generation must be positive');
+
+// [C8-3] The duplicate-delivery race: one event identity, one recorded event, and never a second
+// translation or a second R1/R2 consequence for a duplicate the unique index arbitrated.
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),true)){
+    dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['body'],$fixture['webhook']['body_changed']),'the duplicate-webhook race fixture must exist');
+    $webhook=$fixture['webhook'];
+    $events=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_events");
+    $decisions=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions");
+    $conflicts=(int)$wpdb->get_var("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE decision_state='conflicted'");
+    $settlements=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id']));
+    $evidence=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id']));
+    dzn_tcv_assert($events===1,'two deliveries of one event identity must converge on exactly one recorded event');
+    dzn_tcv_assert($settlements===1&&$evidence===1,'a duplicate delivery must settle exactly once through R1');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id']))==='confirmed','the collection intent must be confirmed exactly once');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id']))==='collected','the renewal cycle must be collected exactly once');
+    $payloadDigest=(string)$wpdb->get_var("SELECT payload_digest FROM {$p}payment_provider_events");
+    dzn_tcv_assert(in_array($payloadDigest,array(
+        \Delnavazan\Platform\Core\Application\PaymentExecution\PaymentExecutionIdempotency::payloadDigest((string)$webhook['body']),
+        \Delnavazan\Platform\Core\Application\PaymentExecution\PaymentExecutionIdempotency::payloadDigest((string)$webhook['body_changed']),
+    ),true),'the recorded event must be one of the two deliveries that raced');
+    if($mode==='duplicate_webhook'){
+        dzn_tcv_assert($decisions===1&&$conflicts===0,'identical deliveries must append no second decision at all');
+    }else{
+        dzn_tcv_assert($decisions===2&&$conflicts===1,'materially different facts for one event identity must append exactly one controlled conflict decision');
+    }
+}
 echo "phase-2a2t-concurrency-verify: ".$mode." OK (settled=".$settled.", live=".$live.", dispatch_in_flight refusals=".$refusals.")\n";

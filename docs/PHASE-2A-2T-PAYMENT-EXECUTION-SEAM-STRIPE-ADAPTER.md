@@ -2,12 +2,12 @@
 
 **Status:** candidate — awaiting independent review. Not merged, not deployed, not production-authorised.
 **Schema:** 028 / migration `028_payment_execution_seam_provider_adapter`
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260924.7`
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260924.8`
 **Base:** `main` at the Phase-V candidate tree (Schema 27), strictly additive on top of R1 (Schema 25, authoritative) and R2 (Schema 26, candidate).
 
 This record documents the implementation of the contract in
 [PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md](PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md)
-(correction round 7, SHA-256 `c803116df033ee01149353cfbb11238176f3ffa98a444892ae9e1d6fb89ddf81`). The contract
+(correction round 8, SHA-256 `fb611d36627544ade01d5fa8935a4b98b11893cc1f465ddc5d1179d256b796ad`). The contract
 is normative; this record states what was built, what could be executed in this environment, and what
 remains deliberately unresolved.
 
@@ -61,8 +61,24 @@ remains deliberately unresolved.
 - **The drain re-supplies the delivery.** `payment_provider_events` stores only digests by design, so a
   received event whose translation refused (for example an unset worker principal) is completed by
   `PaymentEventIntakeService::drain($eventId, $rawBody, $headers)`: the body is verified against the
-  recorded account's single active signing secret before the event identity is matched, so a drain can
-  never manufacture a fact and converges on the recorded identity exactly once.
+  recorded account's single active signing secret before the event identity is matched, and [C8-4] the
+  **full** recorded `event_fact_digest` is then recomputed and required to match, so a drain can never
+  manufacture a fact, never translate a changed payload for a recorded event id, and converges on the
+  recorded identity exactly once.
+- [C8-1] **The route is method-complete and the receipt is byte-exact.** Both webhook routes are
+  registered for every HTTP method through one locked method set, so a `GET`/`PUT`/`PATCH`/`DELETE`
+  delivery reaches the controlled handler and is receipted as `method_not_allowed` instead of being
+  dropped by WordPress routing; and the controller always hands the exact raw bytes it received to the
+  receipt, whatever precheck refused the request, so no refusal records a zero-byte or rewritten digest.
+- [C8-2] **Attribution is exact.** The event's own provider object must carry exactly one *active*
+  mapping (`active_slot = 1`, `state = linked`), and the canonical obligation that mapping owns —
+  `canonical_id` for an `obligation` mapping, the mapped collection intent's `obligation_id` for a
+  `collection_intent` mapping — must equal the obligation the event resolved. A historical mapping is
+  never authority; a mismatch is refused `ambiguous_obligation_attribution` and submits no evidence.
+- [C8-3] **A lost insert race converges.** Insert-or-resolve reports whether this worker created the
+  event: a worker that meets `UNIQUE provider_event` adopts the winner's row and enters the same
+  fact-digest convergence path a read duplicate enters, so identical deliveries converge on one decision
+  and materially different facts append the controlled conflict decision instead of a second translation.
 - **Operator exception reason.** §8.3 requires an operator-visible exception when an `in_flight` claim
   cannot be reconciled. Phase T may not widen R1's locked `CommercialRule::EXCEPTION_REASONS`, so the
   candidate records that exception under the existing controlled reason `conflicting_payment_evidence`
@@ -76,7 +92,25 @@ remains deliberately unresolved.
 - **No scheduler.** `drain()` and `redrive()` are explicit, idempotent entry points for a later scheduler
   owned by another phase; no `cron` or `wp_schedule_*` call exists anywhere in `src/`.
 
-## 4. Evidence executed in this environment
+## 4. Correction round 8 (independent review of `91bf288` / tree `dec38b70`)
+
+The independent review of the round-7 candidate returned **FAIL — CORRECTION REQUIRED** on four blocking
+findings. Each is closed additively in this candidate; no authority, table, capability, policy or provider
+call is added, and no previous commit is rewritten.
+
+| # | Blocking finding | Correction in this candidate |
+| --- | --- | --- |
+| C8-1 | A non-`POST` delivery never reached the controller (WordPress matched the route method first), so it could not be receipted; and every precheck-refused request was receipted against `''` instead of the bytes that arrived, recording a zero-byte/different digest for oversized, invalid-content-type and other refusals. | Both routes declare one locked **all-method** set (`GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS`), so §9.2's method requirement is decided inside the controlled handler and receipted as `method_not_allowed`; the controller always passes the **exact raw body** to `receive()`, so a refused request records its true `request_digest` and `body_bytes`. |
+| C8-2 | Attribution resolved the obligation from metadata alone while `objectIsMapped()` accepted *any* stored mapping of the event object, regardless of canonical kind/id or active state, so a signed event could submit evidence for an obligation the mapped object did not own. | The intake resolves **exactly one active mapping** for the event object (`active_slot = 1`, `state = linked`; historical rows are never authority) and requires the canonical obligation that mapping owns (`obligation` → `canonical_id`; `collection_intent` → its `obligation_id`) to equal the obligation the event resolved. Absent/historical ⇒ `unmapped_provider_object`; multiple candidates or a mismatch ⇒ `ambiguous_obligation_attribution`; no evidence is submitted. |
+| C8-3 | Two workers could both observe no event; the loser of `insertEvent()` received the winner's id after the unique-key collision and then unconditionally called `decide()`, appending a second decision and running a second R1/R2 consequence. | Insert-or-resolve now returns `created`; a worker that lost `UNIQUE provider_event` adopts the winner's event and is routed through the **one shared** convergence path (identical facts converge; a `pending` R2 consequence may be completed; materially different facts append the controlled conflict decision). |
+| C8-4 | `drain()` validated only the event-reference digest, so a changed but validly signed payload with the same event id bypassed the duplicate fact-digest conflict path and was translated as the recorded event. | `drain()` recomputes the **full** `event_fact_digest` before appending any decision; a mismatch preserves the recorded event unchanged, appends the controlled `conflicting_provider_event` decision with the R1 exception, and submits no evidence. |
+
+`tests/phase-2a2t-contract.php` asserts all four source contracts; `tests/phase-2a2t-webhook-runtime.php`
+proves the routing/receipt, attribution and drain behaviour; `tests/phase-2a2t-concurrency-runner.sh` makes
+`duplicate_webhook` a real duplicate-delivery race and adds `conflicting_duplicate_webhook` (seventeen
+modes total, up from sixteen).
+
+## 5. Evidence executed in this environment
 
 | Check | Result |
 | --- | --- |
@@ -86,14 +120,14 @@ remains deliberately unresolved.
 | Source scans: exactly fifteen declared tables; exact vocabulary strings; no forbidden column pattern; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; only an adapter seals or opens an envelope | pass |
 | `tests/phase-2a2t-contract.php` | **not executed — PHP is unavailable in this environment** |
 | `tests/phase-2a2t-migration-runtime.php`, `-runtime.php`, `-webhook-runtime.php`, `-secret-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php` | **not executed — PHP and the disposable WordPress + MariaDB runtime are unavailable in this environment** |
-| `tests/phase-2a2t-concurrency-runner.sh` (all sixteen modes) | **not executed — the disposable container runtime is unreachable in this environment** |
+| `tests/phase-2a2t-concurrency-runner.sh` (all seventeen modes) | **not executed — the disposable container runtime is unreachable in this environment** |
 
 The runtime suites are written and wired exactly as the contract's §17 requires, and they were
 **not** run here. Running them on the disposable runtime (fresh install, 26→28 upgrade, migration,
 webhook, secret, corruption, failure and the full concurrency matrix) is the mandatory acceptance gate
 for this candidate and remains outstanding.
 
-## 5. Explicit non-authorisation
+## 6. Explicit non-authorisation
 
 No live Stripe API call, credential, webhook secret value, charge, refund, payout, provider dashboard
 change, notification delivery, Theme/NIU change, Amelia write/removal, deployment, production access,
@@ -101,9 +135,10 @@ production cutover or merge occurred or is authorised by this record. `LIVE_EXEC
 `PROVISIONABLE_PROVIDERS` are empty, so the Stripe adapter is provably incapable of an outbound call and
 no code path can store a Stripe credential — not even through the capability-authorised vault surface.
 
-## 6. Definition of done — outstanding items
+## 7. Definition of done — outstanding items
 
 1. Execute every §17 suite on the disposable runtime and record the results.
 2. Confirm the Schema 027/028 ledger assumption is recorded either way (Phase S owning 027, or 027
    deliberately skipped) as the contract's §19 prerequisite requires.
-3. Independent review of the candidate commit and tree.
+3. Independent review of the corrected candidate commit and tree (correction round 8 closes the four
+   blocking findings the review of `91bf288cd1cf4d5c08e7c99cb310a4d0743113b1` raised).

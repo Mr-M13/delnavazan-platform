@@ -175,6 +175,36 @@ if(str_contains($intake,'requirePayment(')||str_contains($intake,'->lapse(')||st
 if(str_contains($intake,'CommercialRule::EVIDENCE_KINDS')||str_contains($intake,'$wpdb->insert')||str_contains($intake,'$wpdb->query("INSERT'))throw new RuntimeException('The intake must not write commercial storage directly');
 if(!str_contains($intake,'CommercialPaymentService')||!str_contains($intake,'->ingest('))throw new RuntimeException('Translation must route through the existing R1 ingest boundary');
 
+// [C8-1] Every HTTP method reaches the controlled handler, and every receipt carries the exact raw body.
+if(!str_contains($controller,'ROUTE_METHODS'))throw new RuntimeException('[C8-1] the webhook method set must be declared once');
+if(!str_contains($controller,'GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS'))throw new RuntimeException('[C8-1] every HTTP method must be routed to the controlled handler');
+if(substr_count($controller,"'methods'=>self::ROUTE_METHODS")!==2)throw new RuntimeException('[C8-1] both webhook routes must declare the all-method set');
+if(!str_contains($controller,'$intake->receive($providerKey,$accountSelector,$rawBody,$headers,$meta)'))throw new RuntimeException('[C8-1] the receipt must always receive the exact raw body, whatever a precheck decided');
+if(str_contains($controller,'$reason===null?'))throw new RuntimeException('[C8-1] a precheck refusal must never substitute an empty or rewritten body');
+if(!str_contains($intake,'precheck_refusal'))throw new RuntimeException('[C8-1] the controller must pass a controlled precheck refusal to the intake');
+if(!str_contains($intake,'body_bytes')||!str_contains($intake,"'request_digest'=>PaymentExecutionIdempotency::payloadDigest(\$rawBody)"))throw new RuntimeException('[C8-1] the receipt must record the digest and byte count of the body it was given');
+
+// [C8-2] Attribution is exact: the event object's active mapping must own the obligation the event names.
+if(!str_contains($providerRepository,'function activeObjectsByReferenceDigest('))throw new RuntimeException('[C8-2] the active mapping must be resolvable by reference digest');
+if(!str_contains($providerRepository,'object_reference_digest=%s AND active_slot=1'))throw new RuntimeException('[C8-2] a historical mapping must never be returned as attribution authority');
+if(!str_contains($providerRepository,'function obligationForCollectionIntent('))throw new RuntimeException('[C8-2] an R2 collection-intent mapping must resolve the obligation it owns');
+if(str_contains($intake,'objectIsMapped'))throw new RuntimeException('[C8-2] the loose "any historical mapping" check must be gone');
+if(!str_contains($intake,'activeObjectsByReferenceDigest'))throw new RuntimeException('[C8-2] the intake must resolve the event object through the active mapping');
+if(!str_contains($intake,'$this->canonicalObligation($mapping)===$obligationId?null'))throw new RuntimeException('[C8-2] the mapping\'s canonical obligation must equal the obligation the event resolved');
+if(!str_contains($intake,'function canonicalObligation(')||!str_contains($intake,"'collection_intent'=>\$this->repository->obligationForCollectionIntent("))throw new RuntimeException('[C8-2] the canonical obligation of both obligation and collection-intent mappings must be resolved');
+if(!str_contains($intake,"'unmapped_provider_object'")||!str_contains($intake,"'ambiguous_obligation_attribution'"))throw new RuntimeException('[C8-2] a mismatch and an absent mapping must each be refused');
+
+// [C8-3] Insert-or-resolve reports ownership, and a lost insert race converges like any duplicate.
+if(!str_contains($intake,'private function convergeExisting('))throw new RuntimeException('[C8-3] duplicates must converge through one shared path');
+if(!str_contains($intake,"string \$eventReferenceDigest,string \$factDigest,string \$receivedAt):array"))throw new RuntimeException('[C8-3] insert-or-resolve must report whether this worker created the event');
+if(!str_contains($intake,"return array('event_id'=>(int)\$winner->id,'created'=>false);"))throw new RuntimeException('[C8-3] a worker that loses the unique event index must adopt the winner\'s event without ownership');
+if(!str_contains($intake,"if(!\$inserted['created'])return \$this->convergeExisting(\$event,\$factDigest,\$envelope);"))throw new RuntimeException('[C8-3] a lost insert race must route through the same convergence path as a read duplicate');
+if(!str_contains($intake,"if(\$existing)return \$this->convergeExisting(\$existing,\$factDigest,\$envelope);"))throw new RuntimeException('[C8-3] a read duplicate must use the same convergence path');
+
+// [C8-4] A drain recomputes the full fact digest and never translates changed facts.
+if(!str_contains($intake,'$this->factDigest((string)$event->provider_key,(string)$event->event_reference_digest,$match)'))throw new RuntimeException('[C8-4] the drain must recompute the recorded event fact digest');
+if(!str_contains($intake,'return $this->recordConflict($event);'))throw new RuntimeException('[C8-4] a changed drain payload must append the controlled conflict decision');
+
 // §9.7: the bounded worker principal is adopted, proved and restored.
 if(!str_contains($support,'dzn_platform_payment_worker_principal'))throw new RuntimeException('The worker principal option is missing');
 foreach(array("'dzn_ingest_payment_provider_events'","'dzn_ingest_commercial_payment_evidence'","'dzn_manage_collection_intents'","'dzn_manage_renewal_cycles'") as $capability)
@@ -228,12 +258,16 @@ foreach(array(
     'secret_rotation_vs_intake','unrelated_students','duplicate_command_replay','settlement_vs_r2_consequence',
     'submit_vs_cancel_in_flight','redrive_after_crash','concurrent_expired_lease','takeover_reissue_fenced',
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
+    'conflicting_duplicate_webhook',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
+if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
+if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');
+if(!str_contains($concurrency,'converge on exactly one recorded event'))throw new RuntimeException('[C8-3] the duplicate race must assert one recorded event');
 foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation') as $needle)
     if(!str_contains($migrationRuntime,$needle))throw new RuntimeException('The migration-runtime suite is incomplete: '.$needle);
 foreach(array('redrive','reconcile','dispatch_descriptor_unavailable','provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $needle)
     if(!str_contains($runtime,$needle))throw new RuntimeException('The runtime suite is incomplete: '.$needle);
-foreach(array('signature_invalid','signature_outside_tolerance','webhook_account_unresolved','conflicting_provider_event','stale_provider_event','payment_worker_principal_required') as $needle)
+foreach(array('signature_invalid','signature_outside_tolerance','webhook_account_unresolved','conflicting_provider_event','stale_provider_event','payment_worker_principal_required','method_not_allowed','payload_too_large','request_digest','unmapped_provider_object','ambiguous_obligation_attribution','active_slot') as $needle)
     if(!str_contains($webhookRuntime,$needle))throw new RuntimeException('The webhook suite is incomplete: '.$needle);
 foreach(array('provider_secret_write_not_authorised','write_refused','decrypt_failed','REDACTED_SECRET') as $needle)
     if(!str_contains($secretRuntime,$needle))throw new RuntimeException('The secret suite is incomplete: '.$needle);

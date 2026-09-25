@@ -6,10 +6,47 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ## Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter — candidate, unmerged — 2026-09-25
 
 Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260924.7`, additive on top of the Phase-V candidate
+`phase2a2t-payment-execution-seam-stripe-adapter-20260924.8`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 7, SHA-256
-`c803116df033ee01149353cfbb11238176f3ffa98a444892ae9e1d6fb89ddf81`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 8, SHA-256
+`fb611d36627544ade01d5fa8935a4b98b11893cc1f465ddc5d1179d256b796ad`).
+
+**Correction round 8** (build `…20260924.8`) applies the independent review of the candidate
+`91bf288cd1cf4d5c08e7c99cb310a4d0743113b1` / tree `dec38b700c70f116cae53a1df64db011dbd99081`
+additively, without rewriting that history. Four blocking findings are closed:
+
+- **Every inbound request is receipted, and the receipt is byte-exact.** The webhook routes were
+  registered for `POST` only, so WordPress matched the method before any callback and a
+  `GET`/`PUT`/`PATCH`/`DELETE` delivery was answered by routing and never recorded. Both routes now
+  declare one locked all-method set, the §9.2 method requirement is decided inside the controlled
+  handler, and a non-`POST` delivery is receipted as `method_not_allowed` with `405`. The controller also
+  substituted `''` for the raw body on every precheck refusal, so oversized, wrong-content-type and other
+  refused requests recorded a zero-byte/different digest; the exact raw bytes are now always passed to the
+  receipt, and a refused body is recorded with its true digest and byte count and still never becomes an
+  event.
+- **Attribution is exact.** Attribution resolved the obligation from metadata alone while the object check
+  accepted any stored mapping, regardless of canonical kind, canonical id or active state, so a signed
+  event could submit evidence for an obligation the mapped object did not own. The intake now resolves
+  exactly one *active* mapping (`active_slot = 1`, `state = linked`) for the event's own provider object and
+  requires the canonical obligation that mapping already owns (`obligation` → `canonical_id`;
+  `collection_intent` → its `obligation_id`) to equal the obligation the event resolved: an absent or
+  historical mapping is `unmapped_provider_object`, a mismatch or multiple candidates are
+  `ambiguous_obligation_attribution`, and neither submits evidence.
+- **A lost duplicate race converges.** Two concurrent deliveries of one event identity could both see no
+  event, and the loser of the insert then received the winner's id after the unique-key collision and
+  unconditionally appended a second decision (and a second R1/R2 consequence). Insert-or-resolve now
+  reports whether this worker created the event; a worker that meets `UNIQUE provider_event` adopts the
+  winner's row and enters the same fact-digest/terminal-decision convergence path a read duplicate enters.
+- **A drain cannot translate changed facts.** `drain()` compared only the event-reference digest, so a
+  changed but validly signed payload with the same event id bypassed the conflict path. The drain now
+  recomputes the full recorded `event_fact_digest`; a mismatch preserves the recorded event, appends the
+  controlled `conflicting_provider_event` decision with the R1 exception, and submits no evidence.
+
+`tests/phase-2a2t-contract.php` asserts the four source contracts, `tests/phase-2a2t-webhook-runtime.php`
+proves the routing/receipt, attribution and drain behaviour, and `tests/phase-2a2t-concurrency-runner.sh`
+turns `duplicate_webhook` into a real duplicate-delivery race and adds `conflicting_duplicate_webhook`
+(seventeen modes). No authority, table, capability, policy or provider call was added, and no earlier
+commit was rewritten.
 
 - **Owns:** the provider-neutral execution seam (port, request/outcome vocabulary, provider registry), the
   provider account and object-mapping registry, the immutable execution command with its append-only
@@ -29,7 +66,7 @@ Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build
   over by exactly one fenced generation and reconciled before any re-issue.
 - **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
   §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
-  sixteen-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  seventeen-mode concurrency matrix) are written and wired but **could not be executed in this environment
   because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
   mandatory acceptance gate and remains outstanding.
 - **Candidates and merge:** single coherent candidate, no merge, no deployment.
