@@ -183,11 +183,40 @@ final class TeacherRateService {
         );
         return array('teacher_id'=>$teacherId,'rates'=>$rows);
     }
-    /** §5.4: a rate command's reason literal is a §5.2.1 member. */
+    /**
+     * §15.3: an identical replay converges on the recorded rate — and only after that rate row has been
+     * re-loaded under the held Teacher root and re-proved.
+     *
+     * The row must exist, still carry the command's own Teacher and scope selectors, pass the §7
+     * integrity proof of the owning section, and still reproduce the payload the command recorded: the
+     * recorded version's own facts for `record`, the exact written closure for `close`, and the exact
+     * recorded retraction instant and reason for `withdraw`. Anything else — an absent row, a moved
+     * amount, a re-opened interval, a rate that is not withdrawn — fails closed and preserves the
+     * original command row.
+     */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
-        if((string)$row->result_state==='refused')throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
-        return array('rate_id'=>$row->result_rate_id===null?null:(int)$row->result_rate_id,'result_state'=>(string)$row->result_state,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        FinanceSupport::assertReplayState($row,$operation);
+        $rate=FinanceSupport::replayResultRow((int)$row->result_rate_id,fn(int $id)=>$this->rates->byId($id,true),array(
+            'teacher_id'=>(int)$row->teacher_id,
+            'scope_kind'=>(string)$row->scope_kind,
+            'course_scope_id'=>(int)$row->course_scope_id,
+        ),'finance_teacher_rates');
+        FinanceRateIntegrity::validate($rate);
+        if($operation==='record')FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array(
+            'teacher_id'=>(int)$rate->teacher_id,'scope_kind'=>(string)$rate->scope_kind,'course_scope_id'=>(int)$rate->course_scope_id,
+            'amount_minor'=>(int)$rate->amount_minor,'currency'=>(string)$rate->currency,'effective_from'=>(string)$rate->effective_from,
+            'compensation_basis'=>(string)$rate->compensation_basis,
+        ),'finance_teacher_rates');
+        if($operation==='close'){
+            if($rate->effective_until===null)throw new FinanceRefusalException('command_replay_conflict','A replayed rate closure names an interval that is still open');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('rate_id'=>(int)$rate->id,'effective_until'=>(string)$rate->effective_until,'operation'=>'close'),'finance_teacher_rates');
+        }
+        if($operation==='withdraw'){
+            if((string)$rate->status!=='withdrawn')throw new FinanceRefusalException('command_replay_conflict','A replayed rate withdrawal names a rate that is not withdrawn');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('rate_id'=>(int)$rate->id,'reason'=>(string)$row->reason_code,'operation'=>'withdraw'),'finance_teacher_rates');
+        }
+        return array('rate_id'=>(int)$rate->id,'result_state'=>(string)$row->result_state,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
     /** §7.1: no two intervals of one scope may overlap; the record-time proof runs before any write. */
     private function assertIntervalFree(int $teacherId,string $scopeKind,int $courseScopeId,string $effectiveFrom,int $ignoreRateId=0):void{

@@ -219,6 +219,17 @@ instant is now admissible for the winner while the two refusal modes keep record
 One syntax error in `tests/phase-2a2u-corruption-runtime.php` (a closure `use` clause carrying a default
 value) and one malformed `str_contains()` needle in `tests/phase-2a2u-contract.php` are corrected with it.
 
+## 0h. Implementation-candidate review correction round 3 — finding and correction
+
+The independent review of the **implementation candidate** `97a572937e07c021bf9c0fc9c65da23cdae92e08`
+(tree `370eda98f7aa84182c7d06c91cbca7caf79637c2`) returned **FAIL — CORRECTION REQUIRED** with one
+blocking finding. It is corrected on a descendant of that commit (never rewritten, never amended, never
+rebased, never force-pushed), and §15.3 — which already required this — is the operative section.
+
+| Finding | Correction |
+| --- | --- |
+| U-C9-BLOCK-001 — `replay()` returned a recorded result id without re-loading or validating the authoritative result row | §15.3 permits an idempotent replay **only after the authoritative aggregate and the recorded result row are re-verified**, and every command family now does exactly that. Two declarations make it uniform and enforceable: `FinanceRule::commandOutcomeStates()` names the *one* declared non-refusal outcome state of each operation (plus `failed` for a reconciliation run, and never `refused`), and `FinanceSupport` gains the three shared helpers `assertReplayState()` (a `refused` row converges on its refusal; any other undeclared state fails closed `command_replay_conflict`), `replayResultRow()` (the typed result is re-loaded under the held root with its own named-index locking read, must exist, and must still carry the command's own selectors or the replay fails closed `command_replay_conflict`), and `assertReplayPayload()` (the recorded result must still reproduce the exact command payload). Each service's `replay()` then re-proves its own section's derivation: the policy version row's key/version/vocabulary and recorded payload (`record`), the §7 rate integrity proof and the exact recorded closure/retraction, the §8.2 snapshot digest with its rate row, version and interval coverage, the §9.1 evaluation derivation digest bound to its own snapshot (and, for `override`, the override row that names it), the §12.2 correction derivation digest with its corrected rate and prior-snapshot digest, the §10.3 statement totals/line-set/derivation proof and §10.1 timezone triple plus the per-operation recorded outcome (`issue` evidence, `withdraw` state, `supersede` predecessor move), and the §11.2 run/finding proof with the recomputed findings digest (and, for `resolve_exception`, the resolution evidence). A deleted, corrupted or mismatched result therefore fails closed and preserves the original command record. Coverage is added in two places: `tests/phase-2a2u-replay-unit.php` (a pure, WordPress-free and database-free unit proof of the shared helpers, executed in the implementation environment) and one corruption-replay probe per command family in `tests/phase-2a2u-corruption-runtime.php`, each proving the fail-closed replay and the converging replay after exact restoration — including the absent-result case, which deletes the recorded policy version row and restores it exactly. `tests/phase-2a2u-contract.php` now scans every service for the re-load and the owning re-proof, so the correction cannot silently regress. |
+
 ## 1. Verified authoritative state
 
 | Fact | Verified value (this checkout) |

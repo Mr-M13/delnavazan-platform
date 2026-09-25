@@ -231,6 +231,41 @@ foreach ( array( 'amount', 'period', 'currency', 'finding_code', 'reason_code', 
 foreach ( array( $statementService, $reconciliationService ) as $source ) if ( str_contains( $source, 'outboxIntent' ) && ! str_contains( $source, 'FinanceSupport::outboxIntent(' ) ) throw new RuntimeException( 'A Finance intent is only ever raised through the declared seam' );
 if ( str_contains( $support, 'outboxIntent' ) && preg_match( '/commitRefusal\((.*?)\)\s*;/s', $support ) && str_contains( substr( $support, strpos( $support, 'public static function commitRefusal' ), 3000 ), 'outboxIntent' ) ) throw new RuntimeException( 'A refusal must never raise a notification intent' );
 
+// ---- §15.3 replay re-verification. --------------------------------------------------------------
+// A replay may converge only after the authoritative aggregate and the recorded result row are
+// re-verified: each command family re-loads its typed result under the held root, re-proves the
+// selectors and the owning integrity/derivation, and fails closed on an absent or invalid result.
+if ( ! str_contains( $rule, 'public static function commandOutcomeStates(string $operation):array' ) ) throw new RuntimeException( 'The declared non-refusal outcome states of an operation must be one declared helper' );
+if ( ! str_contains( $rule, "return \$operation==='run'?array(\$success,self::COMMAND_FAILED_STATE):array(\$success);" ) ) throw new RuntimeException( 'Only a reconciliation run may declare the `failed` outcome alongside its success state' );
+foreach ( array(
+	'public static function assertReplayState(object $row,string $operation):void',
+	'public static function replayResultRow(int $resultId,callable $reload,array $selectors,string $aggregate):object',
+	'public static function assertReplayPayload(string $payloadDigest,array $facts,string $aggregate):void',
+) as $helper ) if ( ! str_contains( $support, $helper ) ) throw new RuntimeException( 'The shared §15.3 replay re-verification helper is missing: ' . $helper );
+if ( ! str_contains( $support, "FinanceRule::COMMAND_REFUSAL_STATE)throw new FinanceRefusalException((string)\$row->reason_code" ) ) throw new RuntimeException( 'A replayed refusal must still converge on its refusal' );
+if ( substr_count( $support, "throw new FinanceRefusalException('command_replay_conflict'" ) < 3 ) throw new RuntimeException( 'An absent, mismatched or non-reproducing recorded result must fail closed with command_replay_conflict' );
+// Every command family re-loads its own typed result and re-proves it with its own section's proof.
+$replayFamilies = array(
+	'policy' => array( $policyService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->policies->byId($id,true)', 'FinanceSupport::assertReplayPayload(' ) ),
+	'rate' => array( $rateService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->rates->byId($id,true)', 'FinanceRateIntegrity::validate(', 'FinanceSupport::assertReplayPayload(' ) ),
+	'snapshot' => array( $snapshotService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->snapshots->byId($id,true)', 'FinanceSnapshotIntegrity::assertDigest(', 'FinanceRateIntegrity::covers(' ) ),
+	'payability' => array( $payabilityService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->evaluations->evaluationById($id,true)', 'FinancePayabilityIntegrity::digest(', 'overrideById(' ) ),
+	'correction' => array( $correctionService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->snapshots->correctionById($id,true)', 'FinanceRule::CORRECTION_DIGEST_FIELDS', 'prior_snapshot_digest' ) ),
+	'statement' => array( $statementService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->statements->byId($id,true)', 'FinanceStatementIntegrity::assertTotals(', 'FinanceStatementIntegrity::assertTimezoneTriple(' ) ),
+	'reconciliation' => array( $reconciliationService, array( 'FinanceSupport::assertReplayState(', 'FinanceSupport::replayResultRow(', '$this->reconciliation->runById($id,true)', '$this->reconciliation->exceptionById($id,true)', 'FinanceReconciliationIntegrity::assertRun(', 'FinanceReconciliationIntegrity::findingsDigest(' ) ),
+);
+foreach ( $replayFamilies as $family => $entry ) foreach ( $entry[1] as $needle )
+	if ( ! str_contains( $entry[0], $needle ) ) throw new RuntimeException( 'A command family replay must re-load and re-prove its recorded result (' . $family . '): ' . $needle );
+foreach ( array( 'finance_policy_commands', 'finance_teacher_rate_commands', 'finance_snapshot_commands', 'finance_payability_commands', 'finance_statement_commands', 'finance_reconciliation_commands' ) as $commandTable )
+	if ( ! str_contains( $migration, $commandTable ) ) throw new RuntimeException( 'A declared command table is missing: ' . $commandTable );
+// The corruption suite carries one corruption-replay probe per command family, each asserting the
+// fail-closed replay and the converging replay after exact restoration.
+$corruption = file_get_contents( $root . '/tests/phase-2a2u-corruption-runtime.php' );
+foreach ( array( "'policy'", "'rate'", "'snapshot'", "'payability'", "'correction'", "'statement'", "'reconciliation run'", "'payability override'", "'exception resolution'" ) as $family )
+	if ( ! str_contains( $corruption, $family ) ) throw new RuntimeException( 'The corruption suite must cover the replay of every command family: ' . $family );
+if ( substr_count( $corruption, '$replayProbe(' ) < 9 ) throw new RuntimeException( 'Every command family needs its own corruption-replay probe' );
+if ( ! str_contains( $corruption, "identical replay converges on the recorded typed result after exact restoration" ) ) throw new RuntimeException( 'Every corruption-replay probe must prove convergence after exact restoration' );
+
 // ---- The candidate must ship the contract it implements. ----------------------------------------
 if ( ! is_readable( $root . '/docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md' ) ) throw new RuntimeException( 'The implementation candidate must carry the contract it implements' );
 if ( ! is_readable( $root . '/docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY.md' ) ) throw new RuntimeException( 'The implementation candidate must carry its implementation record' );

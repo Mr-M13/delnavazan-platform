@@ -1,7 +1,7 @@
 <?php
 namespace Delnavazan\Platform\Core\Application\Finance;
 
-use Delnavazan\Platform\Core\Application\Finance\Integrity\FinanceSnapshotIntegrity;
+use Delnavazan\Platform\Core\Application\Finance\Integrity\{FinanceRateIntegrity,FinanceSnapshotIntegrity};
 use Delnavazan\Platform\Core\Infrastructure\Repository\{FinanceSnapshotRepository,TeacherRateRepository};
 use Delnavazan\Platform\Core\Support\Identifier;
 
@@ -106,9 +106,28 @@ final class LessonFinanceSnapshotService {
             return array('snapshot_id'=>$snapshotId,'lesson_id'=>$lessonId,'rate_id'=>(int)$rate->id,'rate_version'=>(int)$rate->rate_version,'derived_amount_minor'=>$derivedAmount,'currency'=>(string)$rate->currency,'snapshot_instant_utc'=>$instant,'captured'=>true,'command_id'=>$commandId);
         });
     }
+    /**
+     * §15.3/§8.2: an identical capture converges on the recorded snapshot — and only after that row has
+     * been re-loaded under the held root and re-proved end to end.
+     *
+     * The snapshot must exist, still name the command's own Lesson and Teacher, still reproduce its
+     * declared derivation digest over its own recorded facts, and still name a rate row and version that
+     * exist and cover its own locked snapshot instant (`snapshot_derivation_mismatch`, §8.5, is the
+     * owning code for a corrupt shape). A deleted or mismatched snapshot is never reported as a
+     * converged capture.
+     */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
-        if((string)$row->result_state==='refused')throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
-        return array('snapshot_id'=>$row->result_snapshot_id===null?null:(int)$row->result_snapshot_id,'correction_id'=>$row->result_correction_id===null?null:(int)$row->result_correction_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        FinanceSupport::assertReplayState($row,$operation);
+        $snapshot=FinanceSupport::replayResultRow((int)$row->result_snapshot_id,fn(int $id)=>$this->snapshots->byId($id,true),array(
+            'lesson_id'=>(int)$row->lesson_id,
+            'teacher_id'=>(int)$row->teacher_id,
+        ),'finance_lesson_snapshots');
+        FinanceSnapshotIntegrity::assertDigest($snapshot);
+        $rate=$this->rates->byId((int)$snapshot->rate_id,true);
+        if(!$rate||(int)$rate->rate_version!==(int)$snapshot->rate_version)throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed snapshot names a rate row and version that do not exist');
+        if(!FinanceRateIntegrity::covers($rate,(string)$snapshot->snapshot_instant_utc))throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed snapshot names a rate interval that does not cover its own locked instant');
+        FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('lesson_id'=>(int)$snapshot->lesson_id,'operation'=>'capture'),'finance_lesson_snapshots');
+        return array('snapshot_id'=>(int)$snapshot->id,'correction_id'=>$row->result_correction_id===null?null:(int)$row->result_correction_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

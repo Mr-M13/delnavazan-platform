@@ -1,15 +1,16 @@
 # Phase 2A.2-U — Finance, Payability, Effective-Dated Teacher Rates, Statements & Audited Corrections (Schema 30)
 
-**Status:** implementation candidate — **independent review correction round 2 applied** (the review of
-`86d57606cabcddba15d076edfe14fb4e7257e60f` / tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned
-FAIL — CORRECTION REQUIRED with six blocking findings; all six are closed, plus two declared adjacent
-corrections and two suite defects — see §6). Not authoritative until independently reviewed and merged;
-not deployed and not merged.
+**Status:** implementation candidate — **independent review correction round 3 applied** (the review of
+`97a572937e07c021bf9c0fc9c65da23cdae92e08` / tree `370eda98f7aa84182c7d06c91cbca7caf79637c2` returned
+FAIL — CORRECTION REQUIRED with one blocking finding on §15.3 replay re-verification; it is closed, with
+the round-2 corrections and round-1 corrections retained — see §6–§7). Not authoritative until independently
+reviewed and merged; not deployed and not merged.
 **Schema:** 30 / migration `030_finance_payability_rate_statement_authority`.
 **Build:** `phase2a2u-finance-payability-rate-statement-20260925.1`.
 **Contract:** `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md`
-(SHA-256 `9893bbd935aad4a66908340ca6e3a91546be65b4cc80e7a334ed5f3473b8cd07`; correction round 2 adds
-§0g and the §6.2/§7.2/§9.2/§9.3/§10.5/§12.2/§13.5/§15.3/§15.4/§15.5 amendments).
+(SHA-256 `c679a6fa14c1824da8481e364e2aaa396823a8a7f0277ef08de6b4c8a553cc3b`; correction round 2 adds
+§0g and the §6.2/§7.2/§9.2/§9.3/§10.5/§12.2/§13.5/§15.3/§15.4/§15.5 amendments, and correction round 3
+adds §0h — the §15.3 replay re-verification the sections already required).
 **Base:** `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279` — the materialised Phase 2A.2-T candidate tree at
 Schema 29. Phase T (and R2, V) remain unmerged candidates; this candidate is therefore **explicitly
 scoped to that recorded base**, exactly as contract §20 prerequisite 2 allows, and it consumes no
@@ -32,7 +33,7 @@ R2/T-only selector.
 | §13.4 verifier | `Migrator::verify_finance_payability_rate_statement_schema()` at all three declared call sites |
 | §14.2 capabilities | `dzn_manage_finance_policies`, `dzn_manage_teacher_rates`, `dzn_manage_lesson_payability`, `dzn_manage_finance_statements`, `dzn_view_finance_authority` — repaired per capability and removed from `dzn_teacher` |
 | §17 intents | `TEACHER_STATEMENT_ISSUED`, `TEACHER_STATEMENT_SUPERSEDED`, `FINANCE_RECONCILIATION_EXCEPTION_RAISED`, written identity-only through the unchanged `platform_outbox` seam |
-| §18 suites | `tests/phase-2a2u-contract.php`, `-migration-runtime.php`, `-runtime.php`, `-statement-runtime.php`, `-reconciliation-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php`, `-concurrency-runner.sh` (+ setup/worker/verify), `-fixture.php` |
+| §18 suites | `tests/phase-2a2u-contract.php`, `-replay-unit.php`, `-migration-runtime.php`, `-runtime.php`, `-statement-runtime.php`, `-reconciliation-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php`, `-concurrency-runner.sh` (+ setup/worker/verify), `-fixture.php` |
 
 ## 2. How the locked decisions are expressed
 
@@ -103,9 +104,10 @@ is implemented conservatively and is flagged here rather than left implicit.
 | Evidence | Status |
 | --- | --- |
 | Source contract suite (`tests/phase-2a2u-contract.php`) | **Executed and passing** under a PHP 8.5.8 WASM CLI (`php-wasm`, PHP 8.5.8, no WordPress and no database): `phase-2a2u-contract: OK`. Two defects in the suite itself were found and corrected with it — a malformed `str_contains()` needle for the per-capability repair and a closure `use` clause carrying a default value in `tests/phase-2a2u-corruption-runtime.php` |
-| PHP syntax of the whole candidate | **Executed and passing**: all 460 `.php` files of `src/`, `tests/`, `delnavazan-platform.php` and `uninstall.php` tokenise and parse cleanly under PHP 8.5.8 (`token_get_all(..., TOKEN_PARSE)`) |
+| §15.3 replay re-verification unit suite (`tests/phase-2a2u-replay-unit.php`) | **Executed and passing** under the same PHP 8.5.8 WASM CLI, with no WordPress and no database: `phase-2a2u-replay-unit: OK`. It loads the four real classes the shared helpers live in (stubbing only `wp_salt()`, the digest key) and proves the declared answers of a replay: a `refused` row converges on its own reason code, a run may replay `completed` or `failed`, a non-declared state, an absent or deleted typed result, a result naming another aggregate row and a result that no longer reproduces the command payload all fail closed with `command_replay_conflict`, and a matching result is returned |
+| PHP syntax of the whole candidate | **Executed and passing**: all 461 `.php` files of `src/`, `tests/`, `delnavazan-platform.php` and `uninstall.php` tokenise and parse cleanly under PHP 8.5.8 (`token_get_all(..., TOKEN_PARSE)`) |
 | Migration/verifier at all three call sites | Implemented; **not executed** |
-| Runtime, statement, reconciliation, corruption, failure suites | Written; **not executed** |
+| Runtime, statement, reconciliation, corruption, failure suites | Written; **not executed** — the corruption suite now carries one §15.3 corruption-replay probe per command family, and its fixture flow is corrected so a canonical capture resolves the Lesson's own recorded outcome anchor (round 3, §6) |
 | Concurrency runner (`phase-2a2u-concurrency-runner.sh` + setup/worker/verify) | Written; **not executed** |
 | Adjacent L/M/M0/N/O/P/Q/R1/R2/T regressions | **Not re-run** |
 
@@ -115,8 +117,9 @@ yet: those suites need the disposable WordPress + MariaDB runtime, and executing
 a mandatory acceptance gate before this candidate may be merged. The static half of the gate is now
 executed: the source contract suite passes (including its source scans over
 `src/Core/Application/Finance/**` for the declared command result states, the reason-code allowlist, the
-typed command results, the root discipline, the §15.7 write allowlist and the §17 intent shape) and every
-PHP file in the candidate parses.
+typed command results, the root discipline, the §15.3 replay re-verification of every command family, the
+§15.7 write allowlist and the §17 intent shape), the shared §15.3 replay helpers are behaviourally proven
+by `tests/phase-2a2u-replay-unit.php`, and every PHP file in the candidate parses.
 
 ## 5. Deliberate non-authorisations preserved
 
@@ -171,3 +174,41 @@ no applicable anchor unless an outcome is recorded) and leaves the Lesson `autho
 has already ended, and several calls pass a 60 *minute* duration where the suite's own comment intends one
 minute. Those are test-fixture defects, not candidate behaviour, and they are recorded here so the
 runtime gate is executed against a corrected fixture rather than assumed green.
+
+## 7. Independent review correction round 3 (implementation candidate)
+
+The independent review of `97a572937e07c021bf9c0fc9c65da23cdae92e08` (tree
+`370eda98f7aa84182c7d06c91cbca7caf79637c2`) returned **FAIL — CORRECTION REQUIRED** with one blocking
+finding, U-C9-BLOCK-001. It is closed on this descendant (additive history only: no reset, no rebase, no
+amend, no force-push) and contract §0h records it in the section that governs it.
+
+| # | Finding | Where the correction lives |
+| --- | --- | --- |
+| 1 | Every command family's `replay()` returned the recorded typed result id without re-loading or validating the authoritative result row, so a deleted, corrupted or mismatched result could be reported as a successful replay (§15.3) | `FinanceRule::commandOutcomeStates()` declares the one non-refusal outcome of each operation (plus `failed` for a reconciliation `run`, never `refused`); `FinanceSupport::assertReplayState()` refuses any recorded state outside that declaration, `FinanceSupport::replayResultRow()` re-loads the typed result under the root the command already holds (locking named-index read), fails closed `command_replay_conflict` when the row is absent or no longer carries the command's own selectors, and `FinanceSupport::assertReplayPayload()` proves the recorded result still reproduces the exact command payload; each service's `replay()` then re-proves its own section — policy vocabulary and recorded version payload, the §7 rate integrity proof and exact closure/retraction, the §8 snapshot digest with rate row/version/coverage, the §9 evaluation derivation digest with its own snapshot and (for `override`) the override row that names it, the §12 correction derivation digest with its corrected rate and prior-snapshot digest, the §10 statement totals/derivation and timezone triple plus the per-operation recorded outcome, and the §11 run/finding proof with the recomputed findings digest and (for `resolve_exception`) the resolution evidence |
+
+**Coverage added with the correction, and what is executed.** `tests/phase-2a2u-contract.php` (source scan)
+now asserts the shared helpers and, for each of the seven command families, that its `replay()` re-loads
+its own typed result and re-proves it with its own section's validator, so the correction cannot silently
+regress. `tests/phase-2a2u-replay-unit.php` is a new, pure §15.3 unit suite — no WordPress, no database —
+that loads the four real classes the helpers live in and proves the declared answers: a `refused` row
+converges on its own reason code, a run replays `completed` or `failed`, and an undeclared state, an
+absent or deleted typed result, a result naming another aggregate and a result whose recorded fact has
+moved all fail closed `command_replay_conflict`. Both suites are **executed and passing** under the PHP
+8.5.8 WASM CLI in the implementation environment (`phase-2a2u-contract: OK`,
+`phase-2a2u-replay-unit: OK`), and all 461 candidate PHP files parse cleanly. Finally,
+`tests/phase-2a2u-corruption-runtime.php` gains one corruption-replay probe per command family (policy,
+rate, snapshot, payability, correction, statement, reconciliation, payability override and exception
+resolution): each records a real command, corrupts the exact fact its own §15.3 re-derivation reads —
+including the absent-result case, which deletes the recorded policy version row — proves the identical
+replay fails closed, restores the row exactly and proves the identical replay then converges on the same
+recorded result.
+
+**Fixture flow corrected so that coverage can actually run.** The corruption suite's own fixture flow is
+corrected in this round: its three occurrences are one-minute occurrences whose delivery outcome is
+recorded after they end and whose Lessons are then completed, so each capture resolves the Lesson's own
+recorded outcome anchor instead of failing `occurrence_anchor_missing` (the helper releases the schedule
+version, so the outcome is the anchor) or `snapshot_lesson_not_finalised`. This is the fixture defect §6
+flagged; the same repair is **still outstanding** for `-runtime.php`, `-statement-runtime.php`,
+`-reconciliation-runtime.php` and `-failure-runtime.php`, which remain written-but-not-executed, and the
+disposable WordPress + MariaDB runtime is still required to execute every §18 authority, migration,
+corruption, failure and concurrency suite. No runtime evidence is claimed for this candidate.

@@ -109,9 +109,38 @@ final class FinanceCorrectionService {
     public function effectivePayability(int $lessonId):?object{
         return FinancePayabilityIntegrity::effective($lessonId);
     }
+    /**
+     * §15.3/§12.2: an identical correction replay converges on the recorded correction — and only after
+     * that append-only row has been re-loaded under the held Teacher root and re-proved.
+     *
+     * The correction must exist, still name the command's own Lesson and prior snapshot, still reproduce
+     * its declared derivation digest over its own recorded restatement, still name a corrected rate row
+     * and version that exist, and still carry the command's recorded reason. Its base snapshot must still
+     * reproduce the digest the correction named as its prior snapshot. Anything else fails closed and
+     * preserves the original command row.
+     */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
-        if((string)$row->result_state==='refused')throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
-        return array('correction_id'=>$row->result_correction_id===null?null:(int)$row->result_correction_id,'snapshot_id'=>$row->result_snapshot_id===null?null:(int)$row->result_snapshot_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        FinanceSupport::assertReplayState($row,$operation);
+        $correction=FinanceSupport::replayResultRow((int)$row->result_correction_id,fn(int $id)=>$this->snapshots->correctionById($id,true),array(
+            'snapshot_id'=>(int)$row->snapshot_id,
+            'lesson_id'=>(int)$row->lesson_id,
+        ),'finance_snapshot_corrections');
+        if((string)$correction->reason_code!==(string)$row->reason_code)throw new FinanceRefusalException('command_replay_conflict','The replayed correction no longer carries the reason the command recorded');
+        $values=array(
+            'snapshot_id'=>(int)$correction->snapshot_id,'lesson_id'=>(int)$correction->lesson_id,
+            'corrected_rate_id'=>(int)$correction->corrected_rate_id,'corrected_rate_version'=>(int)$correction->corrected_rate_version,
+            'corrected_rate_amount_minor'=>(int)$correction->corrected_rate_amount_minor,'corrected_currency'=>(string)$correction->corrected_currency,
+            'corrected_derived_amount_minor'=>(int)$correction->corrected_derived_amount_minor,
+            'intro_policy_key'=>$correction->intro_policy_key,'intro_policy_version'=>$correction->intro_policy_version===null?null:(int)$correction->intro_policy_version,
+            'prior_snapshot_digest'=>(string)$correction->prior_snapshot_digest,
+        );
+        if(!hash_equals((string)$correction->derivation_digest,FinanceSupport::digest(FinanceRule::CORRECTION_DIGEST_FIELDS,$values)))throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed correction no longer reproduces its recorded derivation digest');
+        $correctedRate=$this->rates->byId((int)$correction->corrected_rate_id,true);
+        if(!$correctedRate||(int)$correctedRate->rate_version!==(int)$correction->corrected_rate_version)throw new FinanceRefusalException('snapshot_correction_incomplete','The replayed correction names a corrected rate row and version that do not exist');
+        $snapshot=FinanceSupport::replayResultRow((int)$correction->snapshot_id,fn(int $id)=>$this->snapshots->byId($id,true),array('lesson_id'=>(int)$correction->lesson_id),'finance_lesson_snapshots');
+        FinanceSnapshotIntegrity::assertDigest($snapshot);
+        if(!hash_equals((string)$snapshot->derivation_digest,(string)$correction->prior_snapshot_digest))throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed correction no longer names the digest of the snapshot it corrected');
+        return array('correction_id'=>(int)$correction->id,'snapshot_id'=>(int)$correction->snapshot_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

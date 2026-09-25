@@ -9,8 +9,8 @@ Schema 30 / migration `030_finance_payability_rate_statement_authority` / build
 `phase2a2u-finance-payability-rate-statement-20260925.1`, additive on the Phase-T candidate tree at
 Schema 29 and explicitly scoped to that recorded base (contract §20 prerequisite 2). It implements the
 contract `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md` (SHA-256
-`9893bbd935aad4a66908340ca6e3a91546be65b4cc80e7a334ed5f3473b8cd07`, whose §0g records correction
-round 2).
+`c679a6fa14c1824da8481e364e2aaa396823a8a7f0277ef08de6b4c8a553cc3b`, whose §0g records correction
+round 2 and whose §0h records correction round 3).
 
 **Independent review correction round 2** (the review of `86d57606cabcddba15d076edfe14fb4e7257e60f` /
 tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned FAIL — CORRECTION REQUIRED with six blocking
@@ -52,6 +52,32 @@ contract suite is **executed and passing** under a PHP 8.5.8 WASM CLI together w
 460 candidate PHP files. The §18 runtime suites remain unexecuted (no MariaDB and no Docker daemon in the
 implementation environment) and, as recorded in the phase document, need fixture-flow work before they
 can run.
+
+**Independent review correction round 3** (the review of
+`97a572937e07c021bf9c0fc9c65da23cdae92e08` / tree `370eda98f7aa84182c7d06c91cbca7caf79637c2` returned
+FAIL — CORRECTION REQUIRED with one blocking finding; it is closed on this descendant, additively, with no
+reset, rebase, amend or force-push):
+
+- §15.3 replay re-verification is now implemented in every command family. `replay()` no longer returns a
+  recorded result id on trust: it re-loads the typed result row under the root the command already holds
+  (a locking named-index read), fails closed `command_replay_conflict` when that row is absent or no longer
+  carries the command's own selectors, re-proves the family's own declared derivation/integrity, and (where
+  the command payload is a pure function of the recorded row) proves the row still reproduces the exact
+  payload the command recorded (U-C9-BLOCK-001). `FinanceRule::commandOutcomeStates()` and the shared
+  `FinanceSupport::assertReplayState()` / `replayResultRow()` / `assertReplayPayload()` helpers make the
+  arbitration uniform; a `refused` row still converges on its refusal, a reconciliation `run` still
+  replays its declared `completed` or `failed` outcome, and a state outside the operation's declared
+  outcome can never replay as its success.
+- Coverage: a new pure, WordPress-free and database-free unit suite
+  (`tests/phase-2a2u-replay-unit.php`, **executed and passing** as `phase-2a2u-replay-unit: OK`) proves the
+  shared helpers' declared answers, and `tests/phase-2a2u-corruption-runtime.php` gains one
+  corruption-replay probe per command family — policy, rate, snapshot, payability, correction, statement,
+  reconciliation, payability override and exception resolution — each proving the fail-closed replay over a
+  corrupted or deleted recorded result and the converging replay after exact restoration. The source
+  contract suite additionally scans every service for the re-load and its own re-proof. The corruption
+  suite's fixture flow is corrected with it so a canonical capture resolves the Lesson's own recorded
+  outcome anchor; the remaining §18 runtime suites are still written-but-not-executed and the disposable
+  WordPress + MariaDB runtime is still required.
 
 - **A versioned finance policy registry** with four declared keys and a single reason-code allowlist; a
   version is immutable in value with exactly one auditable `status` column that moves at most twice in one

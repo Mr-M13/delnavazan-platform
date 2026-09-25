@@ -346,6 +346,58 @@ final class FinanceSupport {
     }
 
     // ---------------------------------------------------------------------
+    // Replay re-verification (§15.3)
+    // ---------------------------------------------------------------------
+
+    /**
+     * §15.3: a replay may only report the recorded outcome of the operation it replays.
+     *
+     * A `refused` row converges on its recorded refusal; a row whose `result_state` is not one of the
+     * operation's declared outcome states can never be presented as that operation's successful result
+     * and fails closed with `command_replay_conflict` instead of returning a recorded result id.
+     */
+    public static function assertReplayState(object $row,string $operation):void{
+        $state=(string)($row->result_state??'');
+        if($state===FinanceRule::COMMAND_REFUSAL_STATE)throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
+        if(!in_array($state,FinanceRule::commandOutcomeStates($operation),true))throw new FinanceRefusalException('command_replay_conflict','A recorded command row whose state is not the operation\'s declared outcome can never replay as that result');
+    }
+
+    /**
+     * §15.3: re-load and re-verify a recorded command's authoritative typed result before it is reported.
+     *
+     * The read runs inside the transaction that already holds the command's own serialisation root, so
+     * an identical replay converges only on a result row that is still present and still names this
+     * command's aggregate. A typed result id that is absent, unreadable, or contradicted by the row it
+     * names fails closed with `command_replay_conflict`: the original command record is preserved and the
+     * replay writes no second fact. The owning section's integrity proof of the returned row (digest,
+     * chain, totals) is the caller's next step, and its own declared reason code is what a corrupt row
+     * records.
+     *
+     * @param callable(int):?object         $reload    named-index read, locked under the held root
+     * @param array<string,int|string|null> $selectors column => the exact value the typed row must carry
+     */
+    public static function replayResultRow(int $resultId,callable $reload,array $selectors,string $aggregate):object{
+        $result=$resultId>0?$reload($resultId):null;
+        if(!$result)throw new FinanceRefusalException('command_replay_conflict','The recorded '.$aggregate.' result row of this command is absent or unreadable');
+        foreach($selectors as $column=>$expected){
+            $actual=$result->{$column}??null;
+            if($expected===null?$actual!==null:(string)$actual!==(string)$expected)throw new FinanceRefusalException('command_replay_conflict','The recorded '.$aggregate.' result row no longer names this command\'s '.$column);
+        }
+        return $result;
+    }
+
+    /**
+     * §15.3: the recorded result must still reproduce the exact command payload the caller sent.
+     *
+     * Used where the command's payload is a pure function of the result row's own recorded facts, so a
+     * result row whose facts have moved is refused `command_replay_conflict` rather than reported as a
+     * convergence.
+     */
+    public static function assertReplayPayload(string $payloadDigest,array $facts,string $aggregate):void{
+        if(!hash_equals($payloadDigest,self::payload($facts)))throw new FinanceRefusalException('command_replay_conflict','The recorded '.$aggregate.' result row no longer reproduces the command it recorded');
+    }
+
+    // ---------------------------------------------------------------------
     // Transactions and row helpers
     // ---------------------------------------------------------------------
 

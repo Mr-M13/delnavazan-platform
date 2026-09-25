@@ -143,10 +143,30 @@ final class FinancePolicyService {
         $allowed=$policyKey==='INTRO_PAYABILITY_POLICY'?array('payable','non_payable'):(FinanceRule::COMPENSATION_POLICY_VALUES[$policyKey]??array());
         if($valueType!=='policy_reference'||!in_array($value,$allowed,true))throw new FinanceRefusalException('finance_policy_value_type_invalid','The recorded value is not a member of the key\'s declared vocabulary');
     }
-    /** §15.3: an identical replay converges on the original result; a different one is refused. */
+    /**
+     * §15.3: an identical replay converges on the original result — and only after the version row the
+     * command recorded has been re-loaded under the held global policy root and re-proved.
+     *
+     * A different intent is refused. So is a recorded result that is absent, that names another key or
+     * version, that no longer carries a well-formed member of the key's declared vocabulary, that no
+     * longer reproduces the command's own payload (`record`), or whose status contradicts the recorded
+     * conditional move (`supersede`/`withdraw`). Every one of those fails closed with
+     * `command_replay_conflict` and preserves the original command row.
+     */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
-        if((string)$row->result_state==='refused')throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
-        return array('policy_id'=>(int)$row->result_policy_id,'policy_key'=>(string)$row->policy_key,'policy_version'=>$row->policy_version===null?null:(int)$row->policy_version,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        FinanceSupport::assertReplayState($row,$operation);
+        $policy=FinanceSupport::replayResultRow((int)$row->result_policy_id,fn(int $id)=>$this->policies->byId($id,true),array(
+            'policy_key'=>(string)$row->policy_key,
+            'policy_version'=>$row->policy_version===null?null:(int)$row->policy_version,
+        ),'finance_policies');
+        $this->assertKey((string)$policy->policy_key);
+        $this->assertValue((string)$policy->policy_key,(string)$policy->policy_value,(string)$policy->value_type);
+        if(!FinanceRule::utc((string)$policy->effective_from)||(int)$policy->policy_version<1)throw new FinanceRefusalException('command_replay_conflict','The recorded policy version no longer carries a valid instant and version');
+        if(!in_array((string)$policy->status,array('active','superseded','withdrawn'),true))throw new FinanceRefusalException('command_replay_conflict','The recorded policy version no longer carries a declared lifecycle status');
+        if($operation==='record')FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('key'=>(string)$policy->policy_key,'value'=>(string)$policy->policy_value,'value_type'=>(string)$policy->value_type,'effective_from'=>(string)$policy->effective_from),'finance_policies');
+        if($operation==='supersede'&&(string)$policy->status==='active')throw new FinanceRefusalException('command_replay_conflict','A replayed policy supersession names a version that is still active');
+        if($operation==='withdraw'&&(string)$policy->status!=='withdrawn')throw new FinanceRefusalException('command_replay_conflict','A replayed policy withdrawal names a version that is not withdrawn');
+        return array('policy_id'=>(int)$policy->id,'policy_key'=>(string)$policy->policy_key,'policy_version'=>(int)$policy->policy_version,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

@@ -8,7 +8,7 @@ final class FinanceReconciliationRepository extends FinanceRepository {
     public function insertRun(array $data):int{return $this->insert('finance_reconciliation_runs',$data,'Reconciliation run persistence failed');}
     /** The run's stable public handle, assigned once after its insert (declared `reference_code`). */
     public function assignPublicHandle(int $runId):void{$this->assignReference('finance_reconciliation_runs',$runId,\Delnavazan\Platform\Core\Support\Identifier::reference('FINR',$runId));}
-    public function runById(int $id):?object{return $this->one("SELECT * FROM {$this->p}finance_reconciliation_runs WHERE id=%d",$id);}
+    public function runById(int $id,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}finance_reconciliation_runs WHERE id=%d".($lock?' FOR UPDATE':''),$id);}
     public function runs(?int $teacherId=null,?string $startUtc=null,?string $endUtc=null):array{
         if($teacherId!==null)return $this->many("SELECT * FROM {$this->p}finance_reconciliation_runs WHERE teacher_id=%d ORDER BY id DESC",$teacherId);
         if($startUtc!==null&&$endUtc!==null)return $this->many("SELECT * FROM {$this->p}finance_reconciliation_runs WHERE period_start_utc<%s AND period_end_utc>%s ORDER BY id DESC",$endUtc,$startUtc);

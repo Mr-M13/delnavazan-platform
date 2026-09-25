@@ -332,9 +332,39 @@ final class TeacherStatementService {
         $end=(new \DateTimeImmutable($endUtc,new \DateTimeZone('UTC')))->setTimezone($zone);
         return $start->format('Y-m-d H:i').'–'.$end->format('Y-m-d H:i').' '.$timezone;
     }
+    /**
+     * §15.3/§10.3: an identical statement replay converges on the recorded statement — and only after
+     * that row has been re-loaded under the held root and re-proved.
+     *
+     * The statement must exist, still name the command's own Teacher, and still pass the §10.3 recorded
+     * totals, line-set and derivation proof together with the §10.1 timezone-triple proof. Each operation
+     * additionally re-proves its own recorded outcome: `draft` the exact drafted period, `issue` the
+     * one-time issuance evidence, `withdraw` the terminal withdrawn state, `supersede` the predecessor's
+     * recorded move to the successor the replay names. A missing, mismatched or corrupt result fails
+     * closed (`statement_derivation_mismatch`/`statement_totals_mismatch` for a corrupt recorded shape,
+     * `command_replay_conflict` for a result that no longer matches the command).
+     */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
-        if((string)$row->result_state==='refused')throw new FinanceRefusalException((string)$row->reason_code,'A refused command replay converges on its refusal');
-        return array('statement_id'=>$row->result_statement_id===null?null:(int)$row->result_statement_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        FinanceSupport::assertReplayState($row,$operation);
+        $statement=FinanceSupport::replayResultRow((int)$row->result_statement_id,fn(int $id)=>$this->statements->byId($id,true),array('teacher_id'=>(int)$row->teacher_id),'finance_statements');
+        FinanceStatementIntegrity::assertTotals((int)$statement->id,$this->statements,$this->snapshots,$this->evaluations);
+        FinanceStatementIntegrity::assertTimezoneTriple($statement);
+        if($operation==='draft')FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('teacher_id'=>(int)$statement->teacher_id,'start'=>(string)$statement->period_start_utc,'end'=>(string)$statement->period_end_utc,'operation'=>'draft'),'finance_statements');
+        if($operation==='issue'){
+            if(!in_array((string)$statement->state,array('issued','superseded'),true)||$statement->issued_at===null||$statement->issued_by===null)throw new FinanceRefusalException('command_replay_conflict','A replayed issuance names a statement that never recorded its issuance evidence');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('statement_id'=>(int)$statement->id,'operation'=>'issue'),'finance_statements');
+        }
+        if($operation==='withdraw'){
+            if((string)$statement->state!=='withdrawn')throw new FinanceRefusalException('command_replay_conflict','A replayed statement withdrawal names a statement that is not withdrawn');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('statement_id'=>(int)$statement->id,'reason'=>(string)$row->reason_code,'operation'=>'withdraw'),'finance_statements');
+        }
+        if($operation==='supersede'){
+            $predecessor=$this->statements->byId((int)$row->statement_id,true);
+            if(!$predecessor||(string)$predecessor->state!=='superseded'||(int)$predecessor->superseded_by_statement_id!==(int)$statement->id)throw new FinanceRefusalException('command_replay_conflict','A replayed statement supersession no longer names a predecessor that recorded its successor');
+            if((string)$predecessor->period_start_utc!==(string)$statement->period_start_utc||(string)$predecessor->period_end_utc!==(string)$statement->period_end_utc)throw new FinanceRefusalException('command_replay_conflict','A replayed statement supersession names a successor of another period');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('statement_id'=>(int)$predecessor->id,'reason'=>(string)$row->reason_code,'operation'=>'supersede'),'finance_statements');
+        }
+        return array('statement_id'=>(int)$statement->id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

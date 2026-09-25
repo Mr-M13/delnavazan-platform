@@ -1,12 +1,13 @@
 <?php
 /**
  * Disposable Phase-U corruption proof: every declared corrupt Finance shape fails closed through its
- * owning validator, is never silently repaired, and converges after exact restoration. Synthetic local
- * data only.
+ * owning validator, is never silently repaired, and converges after exact restoration — and every
+ * command family's §15.3 replay re-loads and re-proves its recorded typed result before it converges.
+ * Synthetic local data only.
  */
 if(getenv('DZN_PHASE_2A2U_CORRUPTION_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-U corruption runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2u-fixture.php';
-use Delnavazan\Platform\Core\Application\Finance\{FinancePolicyService,LessonFinanceSnapshotService,LessonPayabilityService,TeacherRateService,TeacherStatementService};
+use Delnavazan\Platform\Core\Application\Finance\{FinanceCorrectionService,FinancePolicyService,FinanceReconciliationService,LessonFinanceSnapshotService,LessonPayabilityService,TeacherRateService,TeacherStatementService};
 use Delnavazan\Platform\Core\Application\Finance\Integrity\{FinancePayabilityIntegrity,FinanceRateIntegrity,FinanceSnapshotIntegrity,FinanceStatementIntegrity};
 use Delnavazan\Platform\Core\Infrastructure\Migration\Migrator;
 global $wpdb;$p=$wpdb->prefix.'dzn_';
@@ -14,12 +15,21 @@ $fixture=get_option('dzn_phase_2a2j_fixture');
 dzn_u_fix_assert(is_array($fixture)&&count($fixture['sources']??array())>=8,'Phase-J production fixture required');
 wp_set_current_user(1);
 dzn_u_fix_reset();
-$snapshots=new LessonFinanceSnapshotService();$payability=new LessonPayabilityService();$statements=new TeacherStatementService();$rates=new TeacherRateService();$policies=new FinancePolicyService();
+$snapshots=new LessonFinanceSnapshotService();$payability=new LessonPayabilityService();$statements=new TeacherStatementService();$rates=new TeacherRateService();$policies=new FinancePolicyService();$corrections=new FinanceCorrectionService();$reconciliation=new FinanceReconciliationService();
 $chain=dzn_u_fix_chain($fixture);
 $teacherId=(int)$chain['teacher_id'];
-$lesson=dzn_u_fix_occurrence($chain,$fixture,'corrupt-1',2,30);
-$other=dzn_u_fix_occurrence($chain,$fixture,'corrupt-2',2,30);
+// One-minute occurrences keep the elapsed-period wait short. The canonical occurrence helper releases
+// the schedule version, so the Lesson's own recorded delivery outcome is what anchors a capture: each
+// occurrence is ended, delivered and then completed before anything is captured.
+$lesson=dzn_u_fix_occurrence($chain,$fixture,'corrupt-1',2,1);
+$other=dzn_u_fix_occurrence($chain,$fixture,'corrupt-2',2,1);
+$replay=dzn_u_fix_occurrence($chain,$fixture,'replay-1',2,1);
 $rate=dzn_u_fix_rate($teacherId,array('scope_kind'=>'teacher','course_scope_id'=>0,'amount_minor'=>12000,'currency'=>'AUD','effective_from'=>gmdate('Y-m-d H:i:s',time()-3600),'compensation_basis'=>'per_session'),'corrupt');
+dzn_u_fix_settle(array($lesson,$other,$replay));
+foreach(array(array($lesson,'corrupt-1'),array($other,'corrupt-2'),array($replay,'replay-1')) as $pair){
+    dzn_u_fix_outcome($pair[0],'delivered',$pair[1]);
+    dzn_u_fix_complete($pair[0],$pair[1]);
+}
 $snapshots->capture((int)$lesson['lesson_id'],dzn_u_fix_key('cap-1'));
 $snapshots->capture((int)$other['lesson_id'],dzn_u_fix_key('cap-2'));
 $evaluation=$payability->evaluate((int)$lesson['lesson_id'],dzn_u_fix_key('eval-1'));
@@ -120,4 +130,136 @@ $wpdb->query("DELETE FROM {$p}finance_policy_roots");
 $failsClosed(fn()=>Migrator::maybe_upgrade(),'Migration verification failed','a missing global policy root');
 $wpdb->query($wpdb->prepare("INSERT INTO {$p}finance_policy_roots (root_key,created_at,created_by) VALUES ('finance_policy',%s,NULL)",gmdate('Y-m-d H:i:s')));
 Migrator::maybe_upgrade();
-echo "phase-2a2u-corruption-runtime: OK (every corrupt shape fails closed through its owning validator and converges after restoration)\n";
+
+// ---- §15.3 replay re-verification, one probe per command family and every typed result shape. -----
+// Each probe records one real command, corrupts the typed result row that command recorded, proves the
+// identical replay now fails closed instead of returning a recorded id, restores the row exactly, and
+// proves the identical replay then converges on the same recorded result. A deleted result row is
+// covered by the policy probe, which is the family whose result is a single row with no derivation of
+// its own; the other families corrupt exactly the fact their own §15.3 re-derivation reads.
+$replayProbe=static function(callable $call,callable $corrupt,callable $restore,string $expected,string $family,int $expectedId,string $idKey)use($failsClosed):void{
+    $corrupt();
+    $failsClosed($call,$expected,$family.' replay over a corrupt recorded result');
+    $restore();
+    $converged=$call();
+    dzn_u_fix_assert(isset($converged[$idKey])&&(int)$converged[$idKey]===$expectedId,$family.' identical replay converges on the recorded typed result after exact restoration');
+};
+$replayKey=static fn(string $label):string=>'dzn-2a2u-replay-'.$label.'-'.wp_generate_uuid4();
+
+// Policy (`record`): the recorded version row itself must be re-loaded and re-proved; a deleted row is
+// the absent-result case and the payload must still reproduce the command's own recorded facts. The
+// probe's effective instant is in the future so it can never race the migration's own seeded instant,
+// which the version timeline's strictly-increasing rule would refuse.
+$policyKey=$replayKey('policy');
+$policyFrom=gmdate('Y-m-d H:i:s',time()+3600);
+$policyRecord=$policies->record('STUDENT_NO_SHOW_COMPENSATION_POLICY',array('policy_value'=>'non_payable','value_type'=>'policy_reference','effective_from'=>$policyFrom,'evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-policy','evidence_at'=>gmdate('Y-m-d H:i:s')),$policyKey);
+$policyRow=(array)$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_policies WHERE id=%d",(int)$policyRecord['policy_id']));
+$replayProbe(
+    static fn()=>$policies->record('STUDENT_NO_SHOW_COMPENSATION_POLICY',array('policy_value'=>'non_payable','value_type'=>'policy_reference','effective_from'=>$policyFrom,'evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-policy','evidence_at'=>gmdate('Y-m-d H:i:s')),$policyKey),
+    static fn()=>$wpdb->query($wpdb->prepare("DELETE FROM {$p}finance_policies WHERE id=%d",(int)$policyRecord['policy_id'])),
+    static function()use($wpdb,$p,$policyRow):void{dzn_u_fix_assert($wpdb->insert($p.'finance_policies',$policyRow)!==false,'the deleted policy version must restore exactly: '.$wpdb->last_error);},
+    'command_replay_conflict','policy',(int)$policyRecord['policy_id'],'policy_id'
+);
+
+// Rate (`record`): the recorded row must still pass the §7 integrity proof and still reproduce the
+// command's recorded scope, amount, currency, instant and basis. The probe uses the chain's Course scope
+// with a future effective instant, so it neither consumes nor disturbs the snapshots already recorded.
+$rateReplayKey=$replayKey('rate');
+$rateReplayInput=array('scope_kind'=>'teacher_course','course_scope_id'=>(int)$chain['course_id'],'amount_minor'=>13500,'currency'=>'AUD','effective_from'=>gmdate('Y-m-d H:i:s',time()+3600),'compensation_basis'=>'per_session','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-rate','evidence_at'=>gmdate('Y-m-d H:i:s'));
+$rateReplay=$rates->record($teacherId,$rateReplayInput,$rateReplayKey);
+$rateReplayAmount=(int)$wpdb->get_var($wpdb->prepare("SELECT amount_minor FROM {$p}finance_teacher_rates WHERE id=%d",(int)$rateReplay['rate_id']));
+$replayProbe(
+    static fn()=>$rates->record($teacherId,$rateReplayInput,$rateReplayKey),
+    static fn()=>$wpdb->update($p.'finance_teacher_rates',array('amount_minor'=>$rateReplayAmount+1),array('id'=>(int)$rateReplay['rate_id'])),
+    static fn()=>$wpdb->update($p.'finance_teacher_rates',array('amount_minor'=>$rateReplayAmount),array('id'=>(int)$rateReplay['rate_id'])),
+    'command_replay_conflict','rate',(int)$rateReplay['rate_id'],'rate_id'
+);
+
+// Snapshot (`capture`): the recorded snapshot must still reproduce its derivation digest and still name
+// a rate row/version that exists and covers its own locked instant.
+$captureReplayKey=$replayKey('capture');
+$captureReplay=$snapshots->capture((int)$replay['lesson_id'],$captureReplayKey);
+$captureDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT derivation_digest FROM {$p}finance_lesson_snapshots WHERE id=%d",(int)$captureReplay['snapshot_id']));
+$replayProbe(
+    static fn()=>$snapshots->capture((int)$replay['lesson_id'],$captureReplayKey),
+    static fn()=>$wpdb->update($p.'finance_lesson_snapshots',array('derivation_digest'=>str_repeat('b',64)),array('id'=>(int)$captureReplay['snapshot_id'])),
+    static fn()=>$wpdb->update($p.'finance_lesson_snapshots',array('derivation_digest'=>$captureDigest),array('id'=>(int)$captureReplay['snapshot_id'])),
+    'snapshot_derivation_mismatch','snapshot',(int)$captureReplay['snapshot_id'],'snapshot_id'
+);
+
+// Payability (`evaluate`): the recorded evaluation must still reproduce its own §9.1 derivation digest
+// and its vocabulary, and must still be bound to a snapshot of its own Lesson.
+$evaluateReplayKey=$replayKey('evaluate');
+$evaluateReplay=$payability->evaluate((int)$replay['lesson_id'],$evaluateReplayKey);
+$evaluateDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT derivation_digest FROM {$p}finance_payability_evaluations WHERE id=%d",(int)$evaluateReplay['evaluation_id']));
+$replayProbe(
+    static fn()=>$payability->evaluate((int)$replay['lesson_id'],$evaluateReplayKey),
+    static fn()=>$wpdb->update($p.'finance_payability_evaluations',array('derivation_digest'=>str_repeat('c',64)),array('id'=>(int)$evaluateReplay['evaluation_id'])),
+    static fn()=>$wpdb->update($p.'finance_payability_evaluations',array('derivation_digest'=>$evaluateDigest),array('id'=>(int)$evaluateReplay['evaluation_id'])),
+    'upstream_aggregate_invalid','payability',(int)$evaluateReplay['evaluation_id'],'evaluation_id'
+);
+
+// Correction (`correct_snapshot`): the recorded correction must still reproduce its §12.2 derivation
+// digest, name a corrected rate row/version that exists, and name the digest of the snapshot it corrected.
+$correctionReplayKey=$replayKey('correction');
+$correctionReplay=$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey);
+$correctionAmount=(int)$wpdb->get_var($wpdb->prepare("SELECT corrected_derived_amount_minor FROM {$p}finance_snapshot_corrections WHERE id=%d",(int)$correctionReplay['correction_id']));
+$replayProbe(
+    static fn()=>$corrections->correctSnapshot((int)$replay['lesson_id'],array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s')),$correctionReplayKey),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_derived_amount_minor'=>$correctionAmount+1),array('id'=>(int)$correctionReplay['correction_id'])),
+    static fn()=>$wpdb->update($p.'finance_snapshot_corrections',array('corrected_derived_amount_minor'=>$correctionAmount),array('id'=>(int)$correctionReplay['correction_id'])),
+    'snapshot_derivation_mismatch','correction',(int)$correctionReplay['correction_id'],'correction_id'
+);
+
+// Statement (`draft`): the recorded statement must still recompute its totals, line set and derivation
+// digest exactly, and still carry an all-or-nothing timezone triple.
+$statementStart=(string)$replay['starts_at_utc'];
+$statementEnd=gmdate('Y-m-d H:i:s',strtotime((string)$replay['ends_at_utc'].' UTC')+1);
+$draftReplayKey=$replayKey('draft');
+$draftReplay=$statements->draft($teacherId,$statementStart,$statementEnd,$draftReplayKey);
+$draftPayable=(int)$wpdb->get_var($wpdb->prepare("SELECT payable_amount_minor FROM {$p}finance_statements WHERE id=%d",(int)$draftReplay['statement_id']));
+$replayProbe(
+    static fn()=>$statements->draft($teacherId,$statementStart,$statementEnd,$draftReplayKey),
+    static fn()=>$wpdb->update($p.'finance_statements',array('payable_amount_minor'=>$draftPayable+1),array('id'=>(int)$draftReplay['statement_id'])),
+    static fn()=>$wpdb->update($p.'finance_statements',array('payable_amount_minor'=>$draftPayable),array('id'=>(int)$draftReplay['statement_id'])),
+    'statement_totals_mismatch','statement',(int)$draftReplay['statement_id'],'statement_id'
+);
+
+// Reconciliation (`run`): the recorded run must still reproduce its period, scope and state, pass the
+// §11.2 run/finding proof and reproduce its recorded findings digest.
+$runReplayKey=$replayKey('run');
+$runReplay=$reconciliation->run($statementStart,$statementEnd,$teacherId,$runReplayKey);
+$runDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT findings_digest FROM {$p}finance_reconciliation_runs WHERE id=%d",(int)$runReplay['run_id']));
+$replayProbe(
+    static fn()=>$reconciliation->run($statementStart,$statementEnd,$teacherId,$runReplayKey),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_runs',array('findings_digest'=>str_repeat('d',64)),array('id'=>(int)$runReplay['run_id'])),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_runs',array('findings_digest'=>$runDigest),array('id'=>(int)$runReplay['run_id'])),
+    'upstream_aggregate_invalid','reconciliation run',(int)$runReplay['run_id'],'run_id'
+);
+
+// Payability override (`override`): the recorded override must still name the evaluation it produced.
+$overrideReplayKey=$replayKey('override');
+$overrideReplay=$payability->override((int)$replay['lesson_id'],'non_payable','operator_decision',array('evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-override','evidence_at'=>gmdate('Y-m-d H:i:s')),$overrideReplayKey);
+$overrideDigest=(string)$wpdb->get_var($wpdb->prepare("SELECT derivation_digest FROM {$p}finance_payability_evaluations WHERE id=%d",(int)$overrideReplay['evaluation_id']));
+$replayProbe(
+    static fn()=>$payability->override((int)$replay['lesson_id'],'non_payable','operator_decision',array('evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-override','evidence_at'=>gmdate('Y-m-d H:i:s')),$overrideReplayKey),
+    static fn()=>$wpdb->update($p.'finance_payability_evaluations',array('derivation_digest'=>str_repeat('e',64)),array('id'=>(int)$overrideReplay['evaluation_id'])),
+    static fn()=>$wpdb->update($p.'finance_payability_evaluations',array('derivation_digest'=>$overrideDigest),array('id'=>(int)$overrideReplay['evaluation_id'])),
+    'upstream_aggregate_invalid','payability override',(int)$overrideReplay['evaluation_id'],'evaluation_id'
+);
+
+// Exception resolution (`resolve_exception`): the recorded exception must still carry its resolution
+// evidence, so a resolution that has been re-opened can never converge as a completed resolution.
+$openException=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}finance_exceptions WHERE state='open' AND teacher_id IS NULL AND reason_code=%s ORDER BY id DESC LIMIT 1",'command_replay_conflict'));
+dzn_u_fix_assert($openException>0,'a replayed corrupt result records its own open exception evidence');
+$resolveReplayKey=$replayKey('resolve');
+$resolveReplay=$reconciliation->resolveException($openException,array('resolution_note'=>'replay corruption recorded and restored'),$resolveReplayKey);
+$resolveRow=(array)$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}finance_exceptions WHERE id=%d",$openException));
+$replayProbe(
+    static fn()=>$reconciliation->resolveException($openException,array('resolution_note'=>'replay corruption recorded and restored'),$resolveReplayKey),
+    static fn()=>$wpdb->update($p.'finance_exceptions',array('state'=>'open','resolved_at'=>null,'resolved_by'=>null),array('id'=>$openException)),
+    static fn()=>$wpdb->update($p.'finance_exceptions',array('state'=>$resolveRow['state'],'resolved_at'=>$resolveRow['resolved_at'],'resolved_by'=>$resolveRow['resolved_by']),array('id'=>$openException)),
+    'command_replay_conflict','exception resolution',$openException,'exception_id'
+);
+
+echo "phase-2a2u-corruption-runtime: OK (every corrupt shape fails closed through its owning validator, every command family's replay re-proves its recorded result, and exact restoration converges)\n";

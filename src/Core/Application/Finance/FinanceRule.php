@@ -64,6 +64,18 @@ final class FinanceRule {
     public static function commandResultState(string $state):bool{
         return in_array($state,self::COMMAND_RESULT_STATES,true);
     }
+    /**
+     * §15.3: every declared non-refusal outcome state of one mutating operation.
+     *
+     * A recorded command outcome is the operation's *one* declared success state, or — only for the
+     * reconciliation `run` that could not hydrate its scope — the declared `failed` state. The one
+     * refusal state is never an outcome this helper returns: §15.8 owns it, and a replayed refusal
+     * converges on its refusal rather than being presented as a successful result.
+     */
+    public static function commandOutcomeStates(string $operation):array{
+        $success=self::commandSuccessState($operation);
+        return $operation==='run'?array($success,self::COMMAND_FAILED_STATE):array($success);
+    }
     /** U-D18: the evidence channels a Finance command may record. */
     public const EVIDENCE_CHANNELS=array('staff_record','authenticated_platform','document_reference');
     /** §11.2: reconciliation finding severities. */
