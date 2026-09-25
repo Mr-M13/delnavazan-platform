@@ -1684,7 +1684,9 @@ class only ever closes the notification as terminal `failed`, the status is part
   `terminal`, abort or cancellation class, or the acknowledged hand-off — or a notification with no re-arm at
   all, beside a `retry_scheduled` row it never earned; a `retry_scheduled` row that is not the closing
   attempt's last history row, or that is not the contiguous immediate successor of the `queued` row the same
-  re-arm appended and does not restate that `queued → queued` transition; and a
+  re-arm appended — its own `event_sequence` exactly one greater than that `queued` row's, so a pair that a
+  skipped sequence leaves adjacent in the ordered read is not that successor, because adjacency in a result
+  set is not the placement §9 requires — and does not restate that `queued → queued` transition; and a
   `retry_scheduled` row whose `reason_code` is not the closing attempt's own outcome code, or whose
   `evidence_reference_digest` is not exactly the digest-only retry evidence of that persisted schedule.
   The notification's rows are proved **per re-arm, in the order the lifecycle produced them**
@@ -2165,7 +2167,9 @@ aggregate.
   **both** append-only histories in the same transaction and before the outbox row is re-armed: the closing
   attempt appends the digest-only companion as its own last history row (a row that restates the state the
   closure produced and never moves the attempt), and the notification appends the matching
-  `retry_scheduled` row directly after the `queued` row the same re-arm produced, restating that state and
+  `retry_scheduled` row directly after the `queued` row the same re-arm produced — the contiguous successor
+  whose own `event_sequence` is exactly one greater than that `queued` row's and never a row that is merely
+  adjacent to it in the ordered read — restating that state and
   carrying the closure's own non-terminal outcome code, so one persisted schedule is evidenced exactly once
   on each history and neither history can announce a re-arm the other did not prove. No raw payload and no
   clock reading is stored. A clamp that leaves **no** usable window — the clamped instant is not strictly
@@ -2411,13 +2415,15 @@ attempt may carry no `failure_class` only as the acknowledgement — with the ac
 borrowed by a closure class and the acknowledged shape itself valid only beside the `dispatched`
 notification it produced — and a `retry_scheduled` audit row must be present exactly where a closure
 persisted its schedule and absent everywhere else, proved on **both** append-only histories and, on the
-notification, per re-arm in the order the lifecycle produced it (directly after that re-arm's `queued` row
-and restating its `queued → queued` transition), and the
+notification, per re-arm in the order the lifecycle produced it (the contiguous successor of that re-arm's
+`queued` row — its own `event_sequence` exactly one greater than that row's, never a row only adjacent to it
+in the ordered read — restating its `queued → queued` transition), and the
 corruption suite carries the matching end-to-end cases (an attempt `retry_max_attempts + 1` behind a
 three-attempt ceiling walk, two open attempts on one `dispatching` notification, the three class-less
 closures, an acknowledged attempt beside a terminal notification, the removed/forged/reused **and
 exchanged** retry evidence on either history, the audit row that does not restate its `queued → queued`
-transition or no longer follows its own `queued` row, the injected evidence beside an
+transition, the audit row that no longer follows its own `queued` row, and the audit row left adjacent to
+its `queued` row only by a skipped `event_sequence`, the injected evidence beside an
 exhausted closure, and a re-arm whose quadruple disagrees with the derivation even though both evidence
 rows were recomputed) and the
 §6.2.4 tier-F durable-instant suite (including
@@ -2571,6 +2577,28 @@ execution evidence and deferred product decisions but do not block this contract
   deployment occurred.
 
 ## 19. Correction record
+
+Implementation correction round 9 (host review `CORRECTION ROUND 7`; failed candidate `465a708`, tree
+`766ef7b4`) — the independent review refused the candidate with one blocking finding: the notification-side
+retry-audit proof required only that the `retry_scheduled` row's predecessor **in the ordered result set**
+was the `queued` row, never that the pair's own `event_sequence` values were contiguous. This entry records
+the **product-code** correction only: no migration identity, table count, migration name, build identity or
+contract rule change is involved — the correction makes the persisted runtime match the retry-audit
+placement §7.3 and §9 already state (the `retry_scheduled` row §6.6 appends in the re-arm's own transaction,
+whose contiguous successor §14's `attempt_lifecycle_invalid` diagnostic already names) — no schema object is
+added, and no merge, deploy, provider activation, external send, Amelia or Theme change is involved. The
+host ledger numbers this review correction round 7 of the current implementation attempt; the identical
+blocking finding was also returned as `CORRECTION ROUND 6` against this same failed candidate, with no
+candidate produced in between, and this document's record sequence continues at 9.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| `NotificationIntegrity::retryEvidenceIntegrity()` proved only that the preceding row of the `event_sequence`-ordered result set was `queued` (`event_type = queued`, `to_state = queued`) and that the audit row itself restated `queued → queued`; it never required `retry_scheduled.event_sequence === queued.event_sequence + 1`. A forged re-arm pair whose sequences skip one — `queued` at `Q`, `retry_scheduled` at `Q + 2`, with no row between them — leaves the two adjacent in the ordered read and passed every protected read and the schema verifier, although §9 requires the audit row to be the **contiguous** immediate successor of the `queued` row its own re-arm appended, so adjacency in a result set is not the required placement. | The per-re-arm match now reads the pair's own sequence numbers: `retryEvidenceIntegrity()` refuses the audit row unless `(int) $event->event_sequence === (int) $previous->event_sequence + 1` in addition to the existing predecessor, state and reason/digest proofs, so a pair left adjacent only by a skipped `event_sequence` is refused whole with `attempt_lifecycle_invalid` on every protected read, the attempt read seam, the dispatch claim and `verify_notification_communications_schema()`. The rule is unchanged from §7.3/§9 — only the proof now measures the placement numerically instead of inferring it from result-set order. Coverage: `tests/phase-2a2s-corruption-runtime.php` §9(h) renumbers the intact ceiling walk's first re-arm audit row and every later notification-history row one higher (so the forged pair sits at `Q` and `Q + 2` while remaining adjacent in the ordered read), asserts that gap, proves the discarded read, the attempt read seam and the schema verifier each fail closed with `attempt_lifecycle_invalid`, then restores every sequence and asserts the walk reads clean again; `tests/phase-2a2s-contract.php` §15 asserts the numeric-contiguity source rule and both new runtime case labels. | §7.3, §9, §14, §15 |
+
+Verification available here: `tests/phase-2a2s-contract.php` §15 asserts the new source rule and the new
+runtime case labels. This correction environment provides no PHP or WordPress runtime, so the runtime
+suites are updated and reviewed by source but were **not executed here**; no migration was re-run and no
+schema object, identity or build changed.
 
 Implementation correction round 8 (host review `CORRECTION ROUND 5`; failed candidate `52ebb18`, tree
 `e821b302`) — the independent review refused the candidate with two blocking findings in the shared

@@ -467,13 +467,18 @@ final class NotificationIntegrity {
      * persisted quadruple and its digest-only companion row, and the notification's history records the same
      * digest-only retry evidence in the same transaction, before the outbox row is re-armed. Exactly one such
      * row may exist for each re-arming attempt — one per persisted schedule, each directly after the `queued`
-     * row that re-arm appended, restating the state it produced and carrying the closure's own code — and
-     * none may exist for a closure that derived nothing, so the notification's audit trail can neither omit a
+     * row that re-arm appended and the **contiguous** successor of it, its own `event_sequence` exactly one
+     * greater than that `queued` row's, restating the state it produced and carrying the closure's own code —
+     * and none may exist for a closure that derived nothing, so the notification's audit trail can neither omit a
      * re-arm nor announce one that never happened. The rows are proved **in the order the lifecycle produced
      * them** — the re-arming attempt's own `attempt_sequence` paired with the `retry_scheduled` row's own
      * `event_sequence` — so each row's digest is bound to its own re-arm rather than merely being a member of
      * an acceptable set: two re-arms whose distinct evidenced digests were exchanged would leave every
-     * expected digest present exactly once and could never be caught by set membership.
+     * expected digest present exactly once and could never be caught by set membership. The numeric
+     * contiguity is required of the pair itself: adjacency in an `event_sequence`-ordered result set is not
+     * the §9 placement, so a forged re-arm pair — a `retry_scheduled` row left adjacent to a `queued` row
+     * only because the sequences in between were skipped — is refused rather than read as that row's
+     * immediate successor.
      *
      * @throws \RuntimeException `attempt_lifecycle_invalid`.
      */
@@ -499,9 +504,11 @@ final class NotificationIntegrity {
             if((string)$event->event_type===NotificationRule::RETRY_SCHEDULED_EVENT){
                 // The row is the audit companion of the re-arm the `queued` row just recorded: it restates
                 // that transition (`queued → queued`), it is the contiguous immediate successor of the same
-                // re-arm's `queued` row, and it carries that closure's own outcome code — never a state of
-                // its own and never a stray row.
-                if($previous===null||(string)$previous->event_type!=='queued'||(string)$previous->to_state!=='queued'
+                // re-arm's `queued` row — its own `event_sequence` exactly one greater than that row's, not
+                // merely the next row the ordering happened to return — and it carries that closure's own
+                // outcome code — never a state of its own and never a stray row.
+                if($previous===null||(int)$event->event_sequence!==(int)$previous->event_sequence+1
+                    ||(string)$previous->event_type!=='queued'||(string)$previous->to_state!=='queued'
                     ||(string)$event->from_state!=='queued'||(string)$event->to_state!=='queued')throw new \RuntimeException('attempt_lifecycle_invalid');
                 if($index>=count($expected))throw new \RuntimeException('attempt_lifecycle_invalid');
                 $matched=$expected[$index++];

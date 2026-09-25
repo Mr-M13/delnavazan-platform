@@ -183,6 +183,37 @@ Theme change is involved.
   closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
   which its §5 assertion referenced without the import (a latent fatal in the suite itself).
 
+### Implementation correction round 9 (host review `CORRECTION ROUND 7`, failed candidate `465a708`, tree `766ef7b4`)
+
+The host review refused the candidate with one blocking finding: the notification-side retry-audit proof
+required the `retry_scheduled` row's predecessor in the `event_sequence`-ordered result set to be the
+`queued` row, but never required the pair's own sequences to be contiguous. The host ledger numbers this
+review correction round 7 of the current implementation attempt — the identical blocking finding was also
+returned as `CORRECTION ROUND 6` against this same failed candidate, and no candidate was produced in
+between — while this record's own sequence continues at 9. The schema identity, table count, migration name
+and build identity are unchanged, no schema object is added (the finding restates the retry-audit placement
+§7.3 and §9 already state, with §14's `attempt_lifecycle_invalid` diagnostic already naming that contiguous
+successor), and no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The notification-side retry audit row must be the numeric contiguous successor of its own `queued`
+  row, not merely the next row the ordering returned.** `NotificationIntegrity::retryEvidenceIntegrity()`
+  proved only that the preceding result-set row was `event_type = queued` with `to_state = queued` and that
+  the audit row itself restated `queued → queued`, so a forged re-arm pair whose sequences skip one —
+  `queued` at `Q`, `retry_scheduled` at `Q + 2`, with nothing between them — stayed adjacent in the
+  ordered read and passed every protected read and the schema verifier. The per-re-arm match now refuses
+  the row unless `(int) $event->event_sequence === (int) $previous->event_sequence + 1` beside the existing
+  predecessor, state, reason and digest proofs, so the pair is judged by its own sequence numbers and a
+  skipped sequence is refused whole with `attempt_lifecycle_invalid`.
+- Coverage: `tests/phase-2a2s-corruption-runtime.php` §9(h) renumbers the intact ceiling walk's first
+  re-arm audit row and every later notification-history row one higher, asserts the resulting `Q`/`Q + 2`
+  pair is still adjacent in the ordered read, proves the aggregate read, the attempt read seam and the
+  schema verifier each fail closed with `attempt_lifecycle_invalid`, then restores every sequence and
+  asserts the walk reads clean again. `tests/phase-2a2s-contract.php` §15 asserts the numeric-contiguity
+  source rule and every new runtime case label.
+- Verification available here: this correction environment provides no PHP or WordPress runtime, so the
+  runtime suites are updated and reviewed by source but were **not executed here**; no migration was
+  re-run and no schema object, identity or build changed.
+
 ### Implementation correction round 8 (host review `CORRECTION ROUND 5`, failed candidate `52ebb18`, tree `e821b302`)
 
 The host review refused the candidate with two blocking findings in the shared integrity proofs. This is

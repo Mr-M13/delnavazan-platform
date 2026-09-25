@@ -490,4 +490,24 @@ $wpdb->update($p.'notification_events',array('to_state'=>$precedingQueuedTo),arr
 Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
 dzn_s_fix_assert($read->one($ceilingNotificationId)['state']==='failed','restoring the retry-row states must restore the read');
 dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notification_events WHERE notification_id=%d AND event_type='retry_scheduled'",$ceilingNotificationId))===2,'the restored ceiling walk must keep exactly its two retry evidence rows');
+// (h) The audit row must be the **contiguous** successor of its own `queued` row, not merely the next row the
+//     `event_sequence`-ordered read returns. The pair is renumbered so the `retry_scheduled` row skips one
+//     sequence — a forged re-arm pair with sequences `Q` and `Q + 2` — which leaves it adjacent in the result
+//     set while no longer being that row's successor by exactly one; only the numeric contiguity of the pair
+//     can refuse it, and the protected read, the attempt read seam and the schema verifier each do.
+$gapQueuedSequence=(int)$wpdb->get_var($wpdb->prepare("SELECT event_sequence FROM {$p}notification_events WHERE id=%d",$precedingQueuedId));
+$gapRows=$wpdb->get_results($wpdb->prepare("SELECT id,event_sequence FROM {$p}notification_events WHERE notification_id=%d AND event_sequence>%d ORDER BY event_sequence DESC",$ceilingNotificationId,$gapQueuedSequence))?:array();
+dzn_s_fix_assert(count($gapRows)>=2&&(int)$gapRows[count($gapRows)-1]->event_sequence===$gapQueuedSequence+1,'the ceiling walk must hold its first re-arm audit row and the history after it');
+foreach($gapRows as $gapRow)dzn_s_fix_assert($wpdb->update($p.'notification_events',array('event_sequence'=>(int)$gapRow->event_sequence+1),array('id'=>(int)$gapRow->id))!==false,'the renumbering of one notification history row must succeed');
+dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT event_sequence FROM {$p}notification_events WHERE id=%d",(int)$notificationEvidence->id))===$gapQueuedSequence+2,'the forged re-arm pair must skip one sequence while staying adjacent in the ordered read');
+dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}notification_events WHERE notification_id=%d AND event_sequence<%d ORDER BY event_sequence DESC LIMIT 1",$ceilingNotificationId,$gapQueuedSequence+2))===(int)$precedingQueuedId,'the forged audit row must still be preceded by its own queued row in the ordered read');
+dzn_s_fix_rejected(fn()=>$read->one($ceilingNotificationId),'attempt_lifecycle_invalid','a re-arm audit row separated from its queued row by a sequence gap');
+dzn_s_fix_rejected(fn()=>$attemptRead->events($ceilingAttempts[1]),'attempt_lifecycle_invalid','a re-arm audit row separated from its queued row by a sequence gap on the attempt read seam');
+$gapVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$gapVerifier=str_contains($error->getMessage(),'attempt_lifecycle_invalid');}
+dzn_s_fix_assert($gapVerifier,'a re-arm audit row separated from its queued row by a sequence gap must fail the S verifier');
+foreach(array_reverse($gapRows) as $gapRow)dzn_s_fix_assert($wpdb->update($p.'notification_events',array('event_sequence'=>(int)$gapRow->event_sequence),array('id'=>(int)$gapRow->id))!==false,'restoring one notification history row sequence must succeed');
+Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
+dzn_s_fix_assert($read->one($ceilingNotificationId)['state']==='failed','restoring the contiguous sequences must restore the read');
+dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT event_sequence FROM {$p}notification_events WHERE id=%d",(int)$notificationEvidence->id))===$gapQueuedSequence+1,'restoring the contiguous sequences must restore the audit row placement');
 echo "Phase 2A.2-S corruption runtime passed\n";

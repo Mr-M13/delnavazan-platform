@@ -322,6 +322,7 @@ if(!str_contains($integrity,"if((\$notification->failure_reason_code??null)!==nu
 if(!str_contains($integrity,'public static function retryEvidenceIntegrity(object $notification,array $attempts):void'))throw new RuntimeException('The notification history must prove its own retry evidence');
 if(!str_contains($integrity,'self::retryEvidenceIntegrity($notification,$attempts);'))throw new RuntimeException('Aggregate integrity must prove the retry evidence on both append-only histories');
 if(!str_contains($integrity,"||(string)\$event->from_state!=='queued'||(string)\$event->to_state!=='queued'"))throw new RuntimeException('The notification-side retry evidence row must restate the queued transition it follows');
+if(!str_contains($integrity,"||(int)\$event->event_sequence!==(int)\$previous->event_sequence+1"))throw new RuntimeException('The notification-side retry evidence row must be the contiguous numeric successor of its own queued row');
 if(!str_contains($integrity,"if(\$index>=count(\$expected))throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('The notification-side retry evidence must be matched to its own re-arm in lifecycle order');
 if(!str_contains($integrity,"if(\$index!==count(\$expected))throw new \RuntimeException('attempt_lifecycle_invalid');"))throw new RuntimeException('Every re-arm must be proved by exactly one notification-side evidence row');
 if(!str_contains($integrity,"usort(\$expected,static fn(array \$left,array \$right):int=>\$left['sequence']<=>\$right['sequence']);"))throw new RuntimeException('The expected retry evidence must be ordered by the re-arming attempt sequence');
@@ -343,9 +344,12 @@ foreach(array(
     "'attempt_lifecycle_invalid','a notification-side retry evidence row that does not restate the queued transition it follows'",
     "'attempt_lifecycle_invalid','a notification-side retry evidence row that restates another state'",
     "'attempt_lifecycle_invalid','a notification-side retry evidence row that no longer follows its own queued transition'",
+    "'attempt_lifecycle_invalid','a re-arm audit row separated from its queued row by a sequence gap'",
+    "'attempt_lifecycle_invalid','a re-arm audit row separated from its queued row by a sequence gap on the attempt read seam'",
     "'attempt_lifecycle_invalid','an exhausted closure that announced a retry schedule it never derived'",
     "'retry_schedule_divergence','a re-arming closure whose persisted back-off disagrees with the §9 derivation'",
 ) as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The corruption suite must prove the ceiling, the live lease and the retry audit evidence: '.$needle);
+if(!str_contains($runtimeSuites,"'a re-arm audit row separated from its queued row by a sequence gap must fail the S verifier'"))throw new RuntimeException('The corruption suite must prove the sequence-gap re-arm pair fails the schema verifier');
 foreach(array('above the frozen retry ceiling','two open attempts','without a failure class') as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The ceiling and class-less coverage must be explicit: '.$needle);
 if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-concurrency-verify.php'),'NotificationIntegrity::retryEvidenceIntegrity('))throw new RuntimeException('The concurrency verifier must prove the retry evidence on both append-only histories');
 echo "Phase 2A.2-S contract static test passed\n";
