@@ -2,15 +2,15 @@
 
 ## 028_payment_execution_seam_provider_adapter (Phase 2A.2-T, candidate, unmerged)
 
-Additive on top of the Phase-V candidate at Schema 27. It creates exactly sixteen tables
+Additive on top of the Phase-V candidate at Schema 27. It creates exactly fifteen seam tables
 (`payment_provider_accounts`, `_account_events`, `_account_commands`, `payment_provider_objects`,
 `_object_events`, `_object_commands`, `payment_provider_secrets`, `payment_execution_commands`,
 `payment_execution_attempts`, `payment_execution_results`, `payment_execution_dispatches`,
-`payment_provider_event_receipts`, `payment_provider_events`, `payment_provider_event_decisions`, `payment_provider_event_decision_claims`,
+`payment_provider_event_receipts`, `payment_provider_events`, `payment_provider_event_decisions`,
 `payment_provider_secret_events`), performs no backfill, infers no provider account, mapping, secret or
 event, adds no column to any existing table, opens no provider connection and makes no external call.
 `verify_payment_execution_schema()` runs after migration 028, on current-schema verification and
-unconditionally before the schema option may advance to 28 — including the retained-028/stale-version
+unconditionally before the schema option may advance to 29 — including the retained-028/stale-version
 path — and it rejects a table outside the declared set, a non-InnoDB table, a missing `id`/`PRIMARY
 KEY(id)` or `uid`/`UNIQUE uid`, a raw-reference column, a plaintext credential column, a mutable column on
 an append-only table, a digest outside the six declared optional digests, a `*_id` whose parent does not
@@ -18,10 +18,34 @@ itself declare the identity it is referenced by, a dispatch-claim defect (missin
 non-`DISPATCH_STATES` state, two live claims on one subject, a claim coexisting with anything but its own
 descriptor refusal, an incomplete or tampered sealed envelope, a non-positive generation, a lease rule
 violation), a NULL-able or wrongly-ordered secret scope, and any academic, notification or settlement
-table smuggled into the phase. The R1 and R2 verifiers are re-run rather than duplicated, so the phase
-must add no column to any `commercial_*` or R2 table. Schema 25 → 28 and 26 → 28 are repeat-safe and leave
-every R1 and R2 row unchanged. **The migration has not been executed in this environment: PHP and the
-disposable WordPress + MariaDB runtime are unavailable.**
+table smuggled into the phase. It neither requires nor validates the decision-claim aggregate, which
+migration 029 owns: a database the ledger can still repair is never failed closed by a table a scheduled
+migration creates. The R1 and R2 verifiers are re-run rather than duplicated, so the phase must add no
+column to any `commercial_*` or R2 table. Schema 25 → 29 and 26 → 29 are repeat-safe and leave every R1
+and R2 row unchanged. **The migration has not been executed in this environment: PHP and the disposable
+WordPress + MariaDB runtime are unavailable.**
+
+## 029_payment_event_decision_claim_authority (Phase 2A.2-T correction round 10, candidate, unmerged)
+
+[C10-1] Additive on top of migration 028, for one reason: the per-event decision claim is an aggregate
+of this phase that must never be added to an already-completed migration. A database that completed the
+fifteen-table `028` cannot re-run it (the ledger never re-applies a completed migration), so the claim
+table is created here — exactly that one table, by a single `dbDelta`, with no backfill, no
+`UPDATE`/`INSERT`/`ALTER`, no claim inferred or taken over, nothing settled and no column added to any
+existing table — and immediately verified. A repaired installation therefore starts with an empty claim
+timeline, which is exactly the state a delivery that owes a decision expects.
+`verify_payment_event_decision_claim_schema()` runs after migration 029, on current-schema verification
+and unconditionally before the schema option may advance to 29 — the same three call sites the other
+phase verifiers use — and it rejects a missing or non-InnoDB table, a table without the declared
+identity or the `UNIQUE event_claim(provider_event_id, active_claim_slot)` arbitration index (with its
+`KEY provider_event` and `KEY claim_state`), an undeclared, raw-reference, descriptor-bearing or
+secret-bearing column, a nullable fencing generation or a malformed token digest, a `provider_event_id`
+that is not parented at `payment_provider_events.id`, a row whose `claim_state`, generation, live-claim
+shape or terminal shape violates §12.1, two live claims sharing one provider event, and a `settled`
+claim whose event carries no decision row at all. A completed-029 installation whose claim table has
+vanished fails closed and is never silently repaired; the ledger-owned repair is the scheduled migration
+itself. **The migration has not been executed in this environment: PHP and the disposable WordPress +
+MariaDB runtime are unavailable.**
 
 `025_commercial_purchase_funding_authority` (Phase 2A.2-R1, **merged and closed on `main`**) is
 additive only: it creates the commercial purchase, offer, obligation, funding, pattern,

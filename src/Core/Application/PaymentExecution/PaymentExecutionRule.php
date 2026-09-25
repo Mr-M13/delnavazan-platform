@@ -91,8 +91,13 @@ final class PaymentExecutionRule {
     public const SIGNATURE_TOLERANCE_SECONDS=300;
     public const MAX_WEBHOOK_BYTES=262144;
     public const TIMESTAMP_TOLERANCE_CLAMP_SECONDS=600;
-    /** [C9-1]/[C9-2] Decision-claim lease: how long one worker may hold an event's owed decision before a
-     * later delivery may take the claim over and complete it. Structural, never a setting. */
+    /** [C9-1]/[C9-2] Decision-claim lease: the **bounded window one owner works inside**, expressed as how
+     * long it runs from its last renewal before a later delivery may take the claim over and complete the
+     * event's decision. [C10-2] It bounds the work, not merely the row: the owner re-proves and renews the
+     * window immediately before every R1/R2 work unit, a renewal can never resurrect an expired window, and
+     * a generation whose window has closed performs no further decision or consequence work and appends
+     * nothing. One work unit is a single local R1/R2 transaction and never a provider call, so the
+     * remaining window always exceeds the unit it covers. Structural, never a setting. */
     public const DECISION_CLAIM_LEASE_SECONDS=120;
     /** [C9-1]/[C9-2] How long a delivery that cannot own the claim waits for the owner's decision before
      * it reports the event as durably still owing one. Structural, never a setting. */

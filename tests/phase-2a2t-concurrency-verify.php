@@ -56,7 +56,7 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),tru
 
 // [C9-1] The decision-claim races: an event that already owes its decision is completed by exactly one
 // worker, the loser performs no work, and the event ends with one settled claim and one terminal decision.
-if(in_array($mode,array('pending_decision_retry','undecided_event_recovery'),true)){
+if(in_array($mode,array('pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry'),true)){
     dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['intent_id'],$fixture['webhook']['cycle_id'],$fixture['prepared_event_id']),'the decision-claim race fixture must exist');
     $webhook=$fixture['webhook'];
     $prepared=(int)$fixture['prepared_event_id'];
@@ -82,5 +82,23 @@ if(in_array($mode,array('pending_decision_retry','undecided_event_recovery'),tru
     }else{
         dzn_tcv_assert($decisions===1&&$applied===1,'an event that was recorded and then left owing must gain exactly one first decision');
     }
+}
+
+// [C10-2] The stale-owner race: the first worker takes the event's decision claim and then lets its own
+// bounded window expire while it still owns it; the second worker takes the claim over and completes the
+// decision. When the first worker resumes, its closed window must stop it before any R1/R2 work unit — its
+// own R1/R2 work boundary must never be reached, while the successor's is.
+if($mode==='stale_owner_after_lease_expiry'){
+    dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['intent_id'],$fixture['webhook']['cycle_id'],$fixture['prepared_event_id']),'the stale-owner race fixture must exist');
+    $prepared=(int)$fixture['prepared_event_id'];
+    $claim=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d ORDER BY id ASC LIMIT 1",$prepared));
+    dzn_tcv_assert($claim!==null,'the stale-owner race must leave the event its single claim row');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d",$prepared))===1,'a takeover must never add a second claim row');
+    dzn_tcv_assert((string)$claim->claim_state==='settled'&&(int)$claim->claim_generation===2,'the successor generation must take the lapsed claim over and settle it exactly once');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",$prepared))===0,'no live claim may survive the completed decision');
+    dzn_tcv_assert(is_file($gate.'/w2.work'),'the takeover generation must be the worker that reaches the R1/R2 work boundary');
+    dzn_tcv_assert(!is_file($gate.'/w1.work'),'the stale generation must perform no R1/R2 work at all');
+    dzn_tcv_assert(isset($records['w1']['outcome']['events'][0])&&$records['w1']['outcome']['events'][0]['created']===false,'the stale generation must append nothing and converge on the successor decision');
+    dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the takeover generation must be the one that appends the decision');
 }
 echo "phase-2a2t-concurrency-verify: ".$mode." OK (settled=".$settled.", live=".$live.", dispatch_in_flight refusals=".$refusals.")\n";

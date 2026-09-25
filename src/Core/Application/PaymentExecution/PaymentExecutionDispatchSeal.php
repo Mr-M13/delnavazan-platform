@@ -4,8 +4,8 @@ namespace Delnavazan\Platform\Core\Application\PaymentExecution;
 /**
  * The sealed provider dispatch descriptor's own sealing helper (contract §11.6).
  *
- * It is deliberately not the credential vault: it has its own domain-separated key, its own locked
- * payload and it cannot be reached through `PaymentSecretVault`. The sealed plaintext must be exactly
+ * It is deliberately not the credential vault of §11: it has its own domain-separated key, its own
+ * locked payload and it cannot be reached through that vault. The sealed plaintext must be exactly
  * `DISPATCH_DESCRIPTOR_FIELDS` and nothing else, so the envelope cannot hold an API key, a signing
  * secret or arbitrary configuration. Only the adapter that sealed an envelope may open it, and only an
  * adapter seals or opens one (§13); Core transports a descriptor as an opaque handle.

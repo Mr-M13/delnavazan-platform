@@ -5,11 +5,52 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 ## Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter — candidate, unmerged — 2026-09-25
 
-Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260925.9`, additive on top of the Phase-V candidate
+Schema 29 / migrations `028_payment_execution_seam_provider_adapter` and
+`029_payment_event_decision_claim_authority` / build
+`phase2a2t-payment-execution-seam-stripe-adapter-20260925.10`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 9, SHA-256
-`c6c55119adb4db52ac0583f97317478dd802a2d4ce7498a696ce674f6a951c34`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 10, SHA-256
+`5c60d7baec801045217919016aa097712e2e215e9d755bb87cd3faaf4e71b343`).
+
+**Correction round 10** (build `…20260925.10`) applies the independent review of the candidate
+`5d8c379f92cef13baf0a818850661fcb7658509a` / tree `47f9062eea42aabf75fdc21bb80190c07f7fc4be`
+additively, without rewriting that history. Two blocking findings are closed:
+
+- **The decision-claim aggregate is a scheduled migration, not a late addition to a completed one.**
+  The per-event decision-claim table had been added to `028`, whose schema identity stayed `28`. A
+  database that had already completed `028` never re-applies it, so the new table was never created,
+  while the strengthened verifier failed the pre-activation guard on the missing table — an
+  unrecoverable state for an installation the ledger could have repaired. The claim aggregate is now
+  **migration `029_payment_event_decision_claim_authority`'s own storage** and the plugin declares
+  Schema `29`: `028` is restored to its fifteen-table set, its verifier neither requires nor validates
+  the claim aggregate (it tolerates the scheduled sibling), and
+  `verify_payment_event_decision_claim_schema()` runs after `029`, on current-schema verification and
+  unconditionally before the schema option may advance to `29` — the same three call sites every other
+  phase verifier uses. A completed-`028` installation is therefore repaired by the scheduled migration:
+  one additive `dbDelta` of the claim table, no backfill, no claim inferred, nothing settled.
+- **Ownership covers the whole decision operation, so an expired generation cannot resume into R1/R2.**
+  The claim's 120-second lease fenced the decision *row*, not the work the claim serialises: a worker
+  whose lease expired mid-decision could be superseded, have its decision completed by the takeover
+  generation, and then resume and execute the same R1/R2 work before its fence failure surfaced at the
+  append. The lease is now the **bounded window the owner works inside** — opened before any decision
+  work, re-proved and renewed by one fenced conditional statement (own live generation *and* an
+  unexpired lease) immediately before the R1 evidence submission and before every R2 command, and closed
+  when the decision is published. A renewal can never resurrect an expired window, so a generation whose
+  window has closed (its lease lapsed, or exactly one successor generation took the claim over) stops
+  *before* the next work unit, performs no decision or consequence work, appends nothing, and converges
+  on the owner's decision. The append stays fenced by the same generation and token.
+
+`tests/phase-2a2t-contract.php` asserts both source contracts,
+`tests/phase-2a2t-migration-runtime.php` adds the completed-`028` repair rehearsal (and the
+completed-`029`/missing-table fail-closed case whose ledger-owned repair restores it), and
+`tests/phase-2a2t-concurrency-runner.sh` adds `stale_owner_after_lease_expiry` (twenty modes): the owner
+stalls past its own lease, the successor generation takes the claim over and completes the decision, and
+the resumed stale generation is refused at the work-unit gate before its first R1/R2 unit — the suite
+records every worker's arrival at the inherited R1/R2 work hooks, so it proves the stale worker reached
+no work boundary at all, appended nothing, and left exactly one R1 settlement/evidence, one confirmed
+intent, one collected cycle, one decision and one settled generation-2 claim. No authority, capability,
+policy or provider call was added, no earlier commit was rewritten, and the recorded event row stays
+immutable — the claim is its own aggregate.
 
 **Correction round 9** (build `…20260925.9`) applies the independent review of the candidate
 `5b477b72d97a329e7bc02ce041be8958af85fe81` / tree `a45d56fb8e1cdbe9785175ff272cf8ef5947b434`
@@ -52,7 +93,7 @@ interception (registered ahead of the core handler, and receipted with its exact
 shapes), `tests/phase-2a2t-failure-runtime.php` proves the claim fence's atomicity,
 `tests/phase-2a2t-corruption-runtime.php` proves the claim aggregate fails closed, and
 `tests/phase-2a2t-concurrency-runner.sh` adds `pending_decision_retry` and `undecided_event_recovery`
-(nineteen modes). No authority, capability, policy or provider call was added, no earlier commit was
+(nineteen modes at that round; twenty after correction round 10). No authority, capability, policy or provider call was added, no earlier commit was
 rewritten, and the recorded event row stays immutable — the claim is its own aggregate.
 
 **Correction round 8** (build `…20260924.8`) applies the independent review of the candidate
@@ -110,7 +151,7 @@ commit was rewritten.
   over by exactly one fenced generation and reconciled before any re-issue.
 - **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
   §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
-  nineteen-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  twenty-mode concurrency matrix) are written and wired but **could not be executed in this environment
   because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
   mandatory acceptance gate and remains outstanding.
 - **Candidates and merge:** single coherent candidate, no merge, no deployment.

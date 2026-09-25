@@ -141,20 +141,21 @@ final class Migrator {
 		if ( in_array( '026_renewal_recurring_enrolment_authority', (array) get_option( self::COMPLETED, array() ), true ) ) { self::verify_renewal_recurring_enrolment_schema(); }
 		if ( in_array( '027_google_calendar_meet_provider_integration', (array) get_option( self::COMPLETED, array() ), true ) ) { self::verify_google_calendar_meet_provider_integration_schema(); }
 		if ( in_array( '028_payment_execution_seam_provider_adapter', (array) get_option( self::COMPLETED, array() ), true ) ) { self::verify_payment_execution_schema(); }
+		if ( in_array( '029_payment_event_decision_claim_authority', (array) get_option( self::COMPLETED, array() ), true ) ) { self::verify_payment_event_decision_claim_schema(); }
 		if ( (string) get_option( self::OPTION ) === (string) DZN_PLATFORM_SCHEMA_VERSION ) { self::verify_current_schema(); self::ensure_capabilities(); return; }
 		self::ensure_capabilities();
 		$token = wp_generate_uuid4(); $lock = get_option( self::LOCK );
 		if ( $lock && isset( $lock['at'] ) && time() - (int) $lock['at'] >= 900 ) { delete_option( self::LOCK ); }
 		if ( ! add_option( self::LOCK, array( 'token' => $token, 'at' => time() ), '', 'no' ) ) { return; }
-		try { foreach(array('001_initial_core_schema'=>array(__CLASS__,'install'),'002_principal_invitation_foundation'=>array(__CLASS__,'install_principal_invitation_foundation'),'003_invitation_recipient_snapshot'=>array(__CLASS__,'install_invitation_recipient_snapshot'),'004_teaching_eligibility_foundation'=>array(__CLASS__,'install_teaching_eligibility_foundation'),'005_teacher_availability_foundation'=>array(__CLASS__,'install_teacher_availability_foundation'),'006_booking_request_core'=>array(__CLASS__,'install_booking_request_core'),'007_booking_request_intake_privacy'=>array(__CLASS__,'install_booking_request_intake_privacy'),'008_coordination_candidate_foundation'=>array(__CLASS__,'install_coordination_candidate_foundation'),'009_teacher_availability_assent'=>array(__CLASS__,'install_teacher_availability_assent'),'010_proposal_foundation'=>array(__CLASS__,'install_proposal_foundation'),'011_provisional_acceptance_evidence'=>array(__CLASS__,'install_provisional_acceptance_evidence'),'012_student_identity_acceptance_authority'=>array(__CLASS__,'install_student_identity_acceptance_authority'),'013_final_acceptance_arrangement_foundation'=>array(__CLASS__,'install_final_acceptance_arrangement_foundation'),'014_canonical_enrolment_foundation'=>array(__CLASS__,'install_canonical_enrolment_foundation'),'015_enrolment_conversion_authority'=>array(__CLASS__,'install_enrolment_conversion_authority'),'016_teacher_assignment_foundation'=>array(__CLASS__,'install_teacher_assignment_foundation'),'017_canonical_term_foundation'=>array(__CLASS__,'install_canonical_term_foundation'),'018_canonical_term_authority'=>array(__CLASS__,'install_canonical_term_authority'),'019_canonical_enrolment_lifecycle_authority'=>array(__CLASS__,'install_canonical_enrolment_lifecycle_authority'),'020_canonical_lesson_authority'=>array(__CLASS__,'install_canonical_lesson_authority'),'021_canonical_lesson_schedule_authority'=>array(__CLASS__,'install_canonical_lesson_schedule_authority'),'022_canonical_lesson_delivery_attendance_authority'=>array(__CLASS__,'install_canonical_lesson_delivery_attendance_authority'),'023_canonical_attendance_intake_authority'=>array(__CLASS__,'install_canonical_attendance_intake_authority'),'024_post_intro_continuation_slot_reservation_authority'=>array(__CLASS__,'install_canonical_continuation_authority'),'025_commercial_purchase_funding_authority'=>array(__CLASS__,'install_commercial_purchase_authority'),'026_renewal_recurring_enrolment_authority'=>array(__CLASS__,'install_renewal_recurring_enrolment_authority'),'027_google_calendar_meet_provider_integration'=>array(__CLASS__,'install_google_calendar_meet_provider_integration'),'028_payment_execution_seam_provider_adapter'=>array(__CLASS__,'install_payment_execution_seam')) as $id=>$migration){$done=(array)get_option(self::COMPLETED,array());if(in_array($id,$done,true))continue;call_user_func($migration);self::verify_schema();if($id==='002_principal_invitation_foundation'||$id==='003_invitation_recipient_snapshot'){self::verify_principal_invitation_schema();self::verify_delivery_preparation_schema();}if($id==='004_teaching_eligibility_foundation')self::verify_teaching_eligibility_schema();if($id==='005_teacher_availability_foundation')self::verify_teacher_availability_schema();if($id==='006_booking_request_core')self::verify_booking_request_schema();if($id==='007_booking_request_intake_privacy')self::verify_booking_request_intake_privacy_schema();if($id==='008_coordination_candidate_foundation')self::verify_coordination_candidate_schema();if($id==='009_teacher_availability_assent')self::verify_teacher_availability_assent_schema();if($id==='010_proposal_foundation')self::verify_proposal_schema();if($id==='011_provisional_acceptance_evidence')self::verify_provisional_acceptance_schema();if($id==='012_student_identity_acceptance_authority')self::verify_student_identity_acceptance_authority_schema();if($id==='013_final_acceptance_arrangement_foundation')self::verify_final_acceptance_arrangement_schema();if($id==='014_canonical_enrolment_foundation')self::verify_canonical_enrolment_schema();if($id==='015_enrolment_conversion_authority')self::verify_enrolment_conversion_schema();if($id==='016_teacher_assignment_foundation')self::verify_teacher_assignment_schema();if($id==='017_canonical_term_foundation')self::verify_canonical_term_schema();if($id==='018_canonical_term_authority')self::verify_canonical_term_authority_schema();if($id==='019_canonical_enrolment_lifecycle_authority')self::verify_canonical_enrolment_lifecycle_authority_schema();if($id==='020_canonical_lesson_authority')self::verify_canonical_lesson_authority_schema();if($id==='021_canonical_lesson_schedule_authority')self::verify_canonical_lesson_schedule_authority_schema();if($id==='022_canonical_lesson_delivery_attendance_authority')self::verify_canonical_lesson_delivery_authority_schema();if($id==='023_canonical_attendance_intake_authority')self::verify_canonical_attendance_intake_schema();if($id==='024_post_intro_continuation_slot_reservation_authority')self::verify_canonical_continuation_schema();if($id==='025_commercial_purchase_funding_authority')self::verify_commercial_purchase_schema();if($id==='026_renewal_recurring_enrolment_authority')self::verify_renewal_recurring_enrolment_schema();if($id==='027_google_calendar_meet_provider_integration')self::verify_google_calendar_meet_provider_integration_schema();if($id==='028_payment_execution_seam_provider_adapter')self::verify_payment_execution_schema();$done[]=$id;update_option(self::COMPLETED,$done,false);} self::verify_canonical_lesson_schedule_authority_schema(); update_option( self::OPTION, DZN_PLATFORM_SCHEMA_VERSION, false ); }
+		try { foreach(array('001_initial_core_schema'=>array(__CLASS__,'install'),'002_principal_invitation_foundation'=>array(__CLASS__,'install_principal_invitation_foundation'),'003_invitation_recipient_snapshot'=>array(__CLASS__,'install_invitation_recipient_snapshot'),'004_teaching_eligibility_foundation'=>array(__CLASS__,'install_teaching_eligibility_foundation'),'005_teacher_availability_foundation'=>array(__CLASS__,'install_teacher_availability_foundation'),'006_booking_request_core'=>array(__CLASS__,'install_booking_request_core'),'007_booking_request_intake_privacy'=>array(__CLASS__,'install_booking_request_intake_privacy'),'008_coordination_candidate_foundation'=>array(__CLASS__,'install_coordination_candidate_foundation'),'009_teacher_availability_assent'=>array(__CLASS__,'install_teacher_availability_assent'),'010_proposal_foundation'=>array(__CLASS__,'install_proposal_foundation'),'011_provisional_acceptance_evidence'=>array(__CLASS__,'install_provisional_acceptance_evidence'),'012_student_identity_acceptance_authority'=>array(__CLASS__,'install_student_identity_acceptance_authority'),'013_final_acceptance_arrangement_foundation'=>array(__CLASS__,'install_final_acceptance_arrangement_foundation'),'014_canonical_enrolment_foundation'=>array(__CLASS__,'install_canonical_enrolment_foundation'),'015_enrolment_conversion_authority'=>array(__CLASS__,'install_enrolment_conversion_authority'),'016_teacher_assignment_foundation'=>array(__CLASS__,'install_teacher_assignment_foundation'),'017_canonical_term_foundation'=>array(__CLASS__,'install_canonical_term_foundation'),'018_canonical_term_authority'=>array(__CLASS__,'install_canonical_term_authority'),'019_canonical_enrolment_lifecycle_authority'=>array(__CLASS__,'install_canonical_enrolment_lifecycle_authority'),'020_canonical_lesson_authority'=>array(__CLASS__,'install_canonical_lesson_authority'),'021_canonical_lesson_schedule_authority'=>array(__CLASS__,'install_canonical_lesson_schedule_authority'),'022_canonical_lesson_delivery_attendance_authority'=>array(__CLASS__,'install_canonical_lesson_delivery_attendance_authority'),'023_canonical_attendance_intake_authority'=>array(__CLASS__,'install_canonical_attendance_intake_authority'),'024_post_intro_continuation_slot_reservation_authority'=>array(__CLASS__,'install_canonical_continuation_authority'),'025_commercial_purchase_funding_authority'=>array(__CLASS__,'install_commercial_purchase_authority'),'026_renewal_recurring_enrolment_authority'=>array(__CLASS__,'install_renewal_recurring_enrolment_authority'),'027_google_calendar_meet_provider_integration'=>array(__CLASS__,'install_google_calendar_meet_provider_integration'),'028_payment_execution_seam_provider_adapter'=>array(__CLASS__,'install_payment_execution_seam'),'029_payment_event_decision_claim_authority'=>array(__CLASS__,'install_payment_event_decision_claim_authority')) as $id=>$migration){$done=(array)get_option(self::COMPLETED,array());if(in_array($id,$done,true))continue;call_user_func($migration);self::verify_schema();if($id==='002_principal_invitation_foundation'||$id==='003_invitation_recipient_snapshot'){self::verify_principal_invitation_schema();self::verify_delivery_preparation_schema();}if($id==='004_teaching_eligibility_foundation')self::verify_teaching_eligibility_schema();if($id==='005_teacher_availability_foundation')self::verify_teacher_availability_schema();if($id==='006_booking_request_core')self::verify_booking_request_schema();if($id==='007_booking_request_intake_privacy')self::verify_booking_request_intake_privacy_schema();if($id==='008_coordination_candidate_foundation')self::verify_coordination_candidate_schema();if($id==='009_teacher_availability_assent')self::verify_teacher_availability_assent_schema();if($id==='010_proposal_foundation')self::verify_proposal_schema();if($id==='011_provisional_acceptance_evidence')self::verify_provisional_acceptance_schema();if($id==='012_student_identity_acceptance_authority')self::verify_student_identity_acceptance_authority_schema();if($id==='013_final_acceptance_arrangement_foundation')self::verify_final_acceptance_arrangement_schema();if($id==='014_canonical_enrolment_foundation')self::verify_canonical_enrolment_schema();if($id==='015_enrolment_conversion_authority')self::verify_enrolment_conversion_schema();if($id==='016_teacher_assignment_foundation')self::verify_teacher_assignment_schema();if($id==='017_canonical_term_foundation')self::verify_canonical_term_schema();if($id==='018_canonical_term_authority')self::verify_canonical_term_authority_schema();if($id==='019_canonical_enrolment_lifecycle_authority')self::verify_canonical_enrolment_lifecycle_authority_schema();if($id==='020_canonical_lesson_authority')self::verify_canonical_lesson_authority_schema();if($id==='021_canonical_lesson_schedule_authority')self::verify_canonical_lesson_schedule_authority_schema();if($id==='022_canonical_lesson_delivery_attendance_authority')self::verify_canonical_lesson_delivery_authority_schema();if($id==='023_canonical_attendance_intake_authority')self::verify_canonical_attendance_intake_schema();if($id==='024_post_intro_continuation_slot_reservation_authority')self::verify_canonical_continuation_schema();if($id==='025_commercial_purchase_funding_authority')self::verify_commercial_purchase_schema();if($id==='026_renewal_recurring_enrolment_authority')self::verify_renewal_recurring_enrolment_schema();if($id==='027_google_calendar_meet_provider_integration')self::verify_google_calendar_meet_provider_integration_schema();if($id==='028_payment_execution_seam_provider_adapter')self::verify_payment_execution_schema();if($id==='029_payment_event_decision_claim_authority')self::verify_payment_event_decision_claim_schema();$done[]=$id;update_option(self::COMPLETED,$done,false);} self::verify_canonical_lesson_schedule_authority_schema(); update_option( self::OPTION, DZN_PLATFORM_SCHEMA_VERSION, false ); }
 		finally { $current = get_option( self::LOCK ); if ( is_array( $current ) && ( $current['token'] ?? '' ) === $token ) { delete_option( self::LOCK ); } }
 	}
 	/** A version option is never proof that the concurrency-critical schema exists. */
 	private static function verify_current_schema(): void {
-		$required = array( '001_initial_core_schema', '002_principal_invitation_foundation', '003_invitation_recipient_snapshot', '004_teaching_eligibility_foundation', '005_teacher_availability_foundation', '006_booking_request_core', '007_booking_request_intake_privacy', '008_coordination_candidate_foundation', '009_teacher_availability_assent', '010_proposal_foundation', '011_provisional_acceptance_evidence', '012_student_identity_acceptance_authority', '013_final_acceptance_arrangement_foundation', '014_canonical_enrolment_foundation', '015_enrolment_conversion_authority', '016_teacher_assignment_foundation', '017_canonical_term_foundation', '018_canonical_term_authority', '019_canonical_enrolment_lifecycle_authority', '020_canonical_lesson_authority', '021_canonical_lesson_schedule_authority', '022_canonical_lesson_delivery_attendance_authority', '023_canonical_attendance_intake_authority', '024_post_intro_continuation_slot_reservation_authority', '025_commercial_purchase_funding_authority', '026_renewal_recurring_enrolment_authority', '027_google_calendar_meet_provider_integration', '028_payment_execution_seam_provider_adapter' );
+		$required = array( '001_initial_core_schema', '002_principal_invitation_foundation', '003_invitation_recipient_snapshot', '004_teaching_eligibility_foundation', '005_teacher_availability_foundation', '006_booking_request_core', '007_booking_request_intake_privacy', '008_coordination_candidate_foundation', '009_teacher_availability_assent', '010_proposal_foundation', '011_provisional_acceptance_evidence', '012_student_identity_acceptance_authority', '013_final_acceptance_arrangement_foundation', '014_canonical_enrolment_foundation', '015_enrolment_conversion_authority', '016_teacher_assignment_foundation', '017_canonical_term_foundation', '018_canonical_term_authority', '019_canonical_enrolment_lifecycle_authority', '020_canonical_lesson_authority', '021_canonical_lesson_schedule_authority', '022_canonical_lesson_delivery_attendance_authority', '023_canonical_attendance_intake_authority', '024_post_intro_continuation_slot_reservation_authority', '025_commercial_purchase_funding_authority', '026_renewal_recurring_enrolment_authority', '027_google_calendar_meet_provider_integration', '028_payment_execution_seam_provider_adapter', '029_payment_event_decision_claim_authority' );
 		$completed = (array) get_option( self::COMPLETED, array() );
 		foreach ( $required as $migration ) if ( ! in_array( $migration, $completed, true ) ) throw new \RuntimeException( 'Migration verification failed: completed migration ' . $migration );
-		self::verify_schema(); self::verify_principal_invitation_schema(); self::verify_delivery_preparation_schema(); self::verify_teaching_eligibility_schema(); self::verify_teacher_availability_schema(); self::verify_booking_request_schema(); self::verify_booking_request_intake_privacy_schema(); self::verify_coordination_candidate_schema(); self::verify_teacher_availability_assent_schema(); self::verify_proposal_schema(); self::verify_provisional_acceptance_schema(); self::verify_student_identity_acceptance_authority_schema(); self::verify_final_acceptance_arrangement_schema(); self::verify_canonical_enrolment_schema(); self::verify_enrolment_conversion_schema(); self::verify_teacher_assignment_schema(); self::verify_canonical_term_schema(); self::verify_canonical_term_authority_schema(); self::verify_canonical_enrolment_lifecycle_authority_schema(); self::verify_canonical_lesson_authority_schema(); self::verify_canonical_lesson_schedule_authority_schema(); self::verify_canonical_lesson_delivery_authority_schema(); self::verify_canonical_attendance_intake_schema(); self::verify_canonical_continuation_schema(); self::verify_commercial_purchase_schema(); self::verify_renewal_recurring_enrolment_schema(); self::verify_google_calendar_meet_provider_integration_schema(); self::verify_payment_execution_schema();
+		self::verify_schema(); self::verify_principal_invitation_schema(); self::verify_delivery_preparation_schema(); self::verify_teaching_eligibility_schema(); self::verify_teacher_availability_schema(); self::verify_booking_request_schema(); self::verify_booking_request_intake_privacy_schema(); self::verify_coordination_candidate_schema(); self::verify_teacher_availability_assent_schema(); self::verify_proposal_schema(); self::verify_provisional_acceptance_schema(); self::verify_student_identity_acceptance_authority_schema(); self::verify_final_acceptance_arrangement_schema(); self::verify_canonical_enrolment_schema(); self::verify_enrolment_conversion_schema(); self::verify_teacher_assignment_schema(); self::verify_canonical_term_schema(); self::verify_canonical_term_authority_schema(); self::verify_canonical_enrolment_lifecycle_authority_schema(); self::verify_canonical_lesson_authority_schema(); self::verify_canonical_lesson_schedule_authority_schema(); self::verify_canonical_lesson_delivery_authority_schema(); self::verify_canonical_attendance_intake_schema(); self::verify_canonical_continuation_schema(); self::verify_commercial_purchase_schema(); self::verify_renewal_recurring_enrolment_schema(); self::verify_google_calendar_meet_provider_integration_schema(); self::verify_payment_execution_schema(); self::verify_payment_event_decision_claim_schema();
 	}
 	private static function install(): void {
 		global $wpdb; require_once ABSPATH . 'wp-admin/includes/upgrade.php'; $p = $wpdb->prefix . 'dzn_'; $c = $wpdb->get_charset_collate();
@@ -849,11 +850,16 @@ final class Migrator {
 	 * Phase 2A.2-T payment-execution seam, provider mapping registry and Stripe adapter storage.
 	 *
 	 * Additive only: it creates the provider-account, mapping, secret, execution, dispatch, receipt,
-	 * event, decision and decision-claim storage, performs no backfill, infers no provider account or
-	 * mapping, settles nothing, creates no Term/Lesson/schedule row, adds no column to any existing
-	 * table, and calls no provider. Every provider reference is stored as a keyed digest; the only place
-	 * a raw provider reference can exist at all is the adapter-sealed dispatch descriptor, which is
-	 * authenticated ciphertext this migration never reads.
+	 * event and decision storage, performs no backfill, infers no provider account or mapping, settles
+	 * nothing, creates no Term/Lesson/schedule row, adds no column to any existing table, and calls no
+	 * provider. Every provider reference is stored as a keyed digest; the only place a raw provider
+	 * reference can exist at all is the adapter-sealed dispatch descriptor, which is authenticated
+	 * ciphertext this migration never reads.
+	 *
+	 * [C10-1] The per-event decision claim of §9.5 is deliberately **not** part of this migration: it is
+	 * created and verified by the later migration `029_payment_event_decision_claim_authority`, so an
+	 * installation that already completed 028 is repaired by a scheduled migration instead of failing
+	 * this migration's verifier. Completion of 028 therefore means exactly the fifteen tables below.
 	 */
 	private static function install_payment_execution_seam():void{
 		global $wpdb; require_once ABSPATH . 'wp-admin/includes/upgrade.php'; $p = $wpdb->prefix . 'dzn_'; $c = $wpdb->get_charset_collate();
@@ -872,7 +878,6 @@ final class Migrator {
 			"CREATE TABLE {$p}payment_provider_event_receipts (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NULL,account_selector_digest char(64) NULL,request_digest char(64) NOT NULL,signature_digest char(64) NULL,signature_key_version varchar(32) NULL,verification_state varchar(16) NOT NULL,refusal_reason_code varchar(64) NULL,source_digest char(64) NULL,body_bytes int unsigned NOT NULL,received_at datetime NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),KEY provider_received(provider_key,received_at),KEY request_digest(request_digest),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_events (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,receipt_id bigint unsigned NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NOT NULL,event_reference_digest char(64) NOT NULL,event_fact_digest char(64) NOT NULL,event_type varchar(48) NOT NULL,raw_type_digest char(64) NOT NULL,payload_digest char(64) NOT NULL,provider_occurred_at datetime NULL,received_at datetime NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY provider_event(provider_key,event_reference_digest),KEY receipt(receipt_id),KEY received_at(received_at),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_event_decisions (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_event_id bigint unsigned NOT NULL,decision_sequence int unsigned NOT NULL,decision_state varchar(24) NOT NULL,reason_code varchar(64) NULL,evidence_kind varchar(16) NULL,offer_id bigint unsigned NULL,obligation_id bigint unsigned NULL,purchase_id bigint unsigned NULL,commercial_evidence_id bigint unsigned NULL,collection_intent_id bigint unsigned NULL,renewal_cycle_id bigint unsigned NULL,renewal_cycle_state varchar(24) NULL,collection_intent_state varchar(16) NULL,r2_consequence_state varchar(16) NULL,r2_reason_code varchar(64) NULL,execution_command_id bigint unsigned NULL,decided_at datetime NOT NULL,recorded_at datetime NOT NULL,recorded_by bigint unsigned NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY decision_sequence(provider_event_id,decision_sequence),KEY event(provider_event_id),KEY offer(offer_id),KEY obligation(obligation_id),KEY purchase(purchase_id),KEY commercial_evidence(commercial_evidence_id),KEY intent(collection_intent_id),KEY cycle(renewal_cycle_id),KEY execution_command(execution_command_id)) ENGINE=InnoDB $c",
-			"CREATE TABLE {$p}payment_provider_event_decision_claims (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_event_id bigint unsigned NOT NULL,claim_state varchar(16) NOT NULL,claim_generation int unsigned NOT NULL,claim_token_digest char(64) NOT NULL,lease_expires_at datetime NULL,claimed_at datetime NOT NULL,settled_at datetime NULL,active_claim_slot tinyint unsigned NULL,created_at datetime NOT NULL,updated_at datetime NOT NULL,created_by bigint unsigned NULL,updated_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY event_claim(provider_event_id,active_claim_slot),KEY provider_event(provider_event_id),KEY claim_state(claim_state)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_secret_events (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NULL,secret_class varchar(32) NOT NULL,mode varchar(8) NULL,audit_type varchar(24) NOT NULL,key_version varchar(32) NULL,command_key_digest char(64) NULL,reason_code varchar(64) NULL,occurred_at datetime NOT NULL,recorded_at datetime NOT NULL,recorded_by bigint unsigned NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NOT NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),KEY secret_timeline(provider_key,secret_class,occurred_at),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 		);
 		foreach ( $tables as $sql ) { dbDelta( $sql ); if ( $wpdb->last_error !== '' ) throw new \RuntimeException('Migration operation failed: ' . $wpdb->last_error); }
@@ -881,13 +886,18 @@ final class Migrator {
 	/**
 	 * Fail closed unless the Phase-T execution storage is exactly as designed.
 	 *
-	 * The verifier proves the sixteen-table set, the declared identity and reference contract, the
-	 * append-only/mutable split, the digest nullability rule, the dispatch-claim arbitration shape,
-	 * [C9-1]/[C9-2] the per-event decision-claim arbitration shape, the sealed-envelope completeness rule and
-	 * the non-null secret account scope. It rejects a raw reference column, a plaintext credential
-	 * column, an academic/notification/settlement table smuggled into the phase, and a parent that does
-	 * not itself declare the identity it is referenced by — for a Phase-T table and a frozen external
-	 * authoritative table alike.
+	 * The verifier proves the fifteen-table set, the declared identity and reference contract, the
+	 * append-only/mutable split, the digest nullability rule, the dispatch-claim arbitration shape, the
+	 * sealed-envelope completeness rule and the non-null secret account scope. It rejects a raw
+	 * reference column, a plaintext credential column, an academic/notification/settlement table
+	 * smuggled into the phase, and a parent that does not itself declare the identity it is referenced
+	 * by — for a Phase-T table and a frozen external authoritative table alike.
+	 *
+	 * [C10-1] It neither requires nor validates the per-event decision claim: that aggregate belongs to
+	 * migration `029_payment_event_decision_claim_authority`, whose own verifier owns its shape. An
+	 * installation that completed 028 before the claim aggregate existed therefore still satisfies this
+	 * verifier, is repaired by the scheduled migration 029, and is then held to the claim verifier —
+	 * never the other way round, which would fail closed on a database the migration ledger can repair.
 	 */
 	private static function verify_payment_execution_schema():void{
 		global $wpdb; $p = $wpdb->prefix . 'dzn_';
@@ -906,7 +916,6 @@ final class Migrator {
 			'payment_provider_event_receipts' => array('uid','provider_key','payment_provider_account_id','account_selector_digest','request_digest','signature_digest','signature_key_version','verification_state','refusal_reason_code','source_digest','body_bytes','received_at','created_at','created_by'),
 			'payment_provider_events' => array('uid','receipt_id','provider_key','payment_provider_account_id','event_reference_digest','event_fact_digest','event_type','raw_type_digest','payload_digest','provider_occurred_at','received_at','created_at','created_by'),
 			'payment_provider_event_decisions' => array('uid','provider_event_id','decision_sequence','decision_state','reason_code','evidence_kind','offer_id','obligation_id','purchase_id','commercial_evidence_id','collection_intent_id','renewal_cycle_id','renewal_cycle_state','collection_intent_state','r2_consequence_state','r2_reason_code','execution_command_id','decided_at','recorded_at','recorded_by','created_at','created_by'),
-			'payment_provider_event_decision_claims' => array('uid','provider_event_id','claim_state','claim_generation','claim_token_digest','lease_expires_at','claimed_at','settled_at','active_claim_slot','created_at','updated_at','created_by','updated_by'),
 			'payment_provider_secret_events' => array('uid','provider_key','payment_provider_account_id','secret_class','mode','audit_type','key_version','command_key_digest','reason_code','occurred_at','recorded_at','recorded_by','created_at','created_by'),
 		);
 		foreach ( $spec as $table => $columns ) {
@@ -928,6 +937,10 @@ final class Migrator {
 		}
 		foreach ( (array) $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', $p . 'payment_%' ) ) as $table ) {
 			$short = substr( (string) $table, strlen( $p ) );
+			// [C10-1] The decision-claim aggregate is migration 029's own table: it may exist (the repair
+			// has run) or not (028 completed before the aggregate) without either state failing the
+			// fifteen-table proof of *this* migration.
+			if ( $short === 'payment_provider_event_decision_claims' ) continue;
 			if ( ! isset( $spec[ $short ] ) ) throw new \RuntimeException('Migration verification failed: table outside the declared Phase 2A.2-T set: '.$short);
 		}
 		foreach ( array('payment_provider_account_events','payment_provider_account_commands','payment_provider_object_events','payment_provider_object_commands','payment_execution_commands','payment_execution_attempts','payment_execution_results','payment_provider_event_receipts','payment_provider_events','payment_provider_event_decisions','payment_provider_secret_events') as $table ) {
@@ -965,7 +978,6 @@ final class Migrator {
 			'payment_provider_events.receipt_id'=>'payment_provider_event_receipts',
 			'payment_provider_events.payment_provider_account_id'=>'payment_provider_accounts',
 			'payment_provider_event_decisions.provider_event_id'=>'payment_provider_events',
-			'payment_provider_event_decision_claims.provider_event_id'=>'payment_provider_events',
 			'payment_provider_event_decisions.offer_id'=>'commercial_offers',
 			'payment_provider_event_decisions.obligation_id'=>'commercial_offer_obligations',
 			'payment_provider_event_decisions.purchase_id'=>'commercial_purchases',
@@ -993,7 +1005,6 @@ final class Migrator {
 			array('payment_execution_results','command_result',true),array('payment_execution_dispatches','command_dispatch',true),
 			array('payment_execution_dispatches','subject_claim',true),array('payment_execution_dispatches','subject',false),
 			array('payment_provider_events','provider_event',true),array('payment_provider_event_decisions','decision_sequence',true),
-			array('payment_provider_event_decision_claims','event_claim',true),array('payment_provider_event_decision_claims','provider_event',false),
 		) as $index ) if ( ! self::has_index( $p.$index[0], $index[1], $index[2] ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T index '.$index[1]);
 		if ( ! self::has_index_columns( $p.'payment_provider_secrets', 'secret_slot', true, array('provider_key','secret_class','payment_provider_account_id','mode','active_slot') ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T secret scope index');
 		$secretAccount = $wpdb->get_row( "SHOW COLUMNS FROM {$p}payment_provider_secrets LIKE 'payment_provider_account_id'" );
@@ -1012,7 +1023,93 @@ final class Migrator {
 			if ( $state === 'in_flight' && $claim->lease_expires_at === null ) throw new \RuntimeException('Migration verification failed: an in-flight dispatch claim must carry a lease');
 			if ( ( $state === 'claimed' || $state === 'released' ) && $claim->lease_expires_at !== null ) throw new \RuntimeException('Migration verification failed: a released or claimed dispatch claim may not carry a lease');
 		}
-		foreach ( (array) $wpdb->get_results( "SELECT * FROM {$p}payment_provider_event_decision_claims" ) as $decisionClaim ) {
+		foreach ( array('payment_terms','payment_lessons','payment_schedules','payment_notifications','payment_evidence','payment_settlements') as $forbidden ) {
+			$physical = $p . $forbidden;
+			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $physical ) ) === $physical ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T must not own academic, notification or settlement storage: '.$forbidden);
+		}
+	}
+
+	/**
+	 * Phase 2A.2-T per-event decision-claim authority (Schema 29, [C10-1]).
+	 *
+	 * The mutable claim row of §9.5 — the single owner of one provider event's owed decision — is this
+	 * migration's own aggregate, and deliberately not a late addition to the already-completed migration
+	 * 028. An installation that completed the fifteen-table migration 028 has no claim table, and 028 is
+	 * never re-applied, so the claim table is created here: additively, from the current schema, with no
+	 * backfill, no UPDATE/INSERT/ALTER, no inferred or taken-over claim and no settled obligation. A
+	 * repaired installation therefore starts with an empty claim timeline, which is exactly the state a
+	 * delivery that owes a decision expects, and the immediately following
+	 * `verify_payment_event_decision_claim_schema()` proves the repair before the schema option advances.
+	 */
+	private static function install_payment_event_decision_claim_authority():void{
+		global $wpdb; require_once ABSPATH . 'wp-admin/includes/upgrade.php'; $p = $wpdb->prefix . 'dzn_'; $c = $wpdb->get_charset_collate();
+		$tables = array(
+			"CREATE TABLE {$p}payment_provider_event_decision_claims (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_event_id bigint unsigned NOT NULL,claim_state varchar(16) NOT NULL,claim_generation int unsigned NOT NULL,claim_token_digest char(64) NOT NULL,lease_expires_at datetime NULL,claimed_at datetime NOT NULL,settled_at datetime NULL,active_claim_slot tinyint unsigned NULL,created_at datetime NOT NULL,updated_at datetime NOT NULL,created_by bigint unsigned NULL,updated_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE event_claim(provider_event_id,active_claim_slot),KEY provider_event(provider_event_id),KEY claim_state(claim_state)) ENGINE=InnoDB $c",
+		);
+		foreach ( $tables as $sql ) { dbDelta( $sql ); if ( $wpdb->last_error !== '' ) throw new \RuntimeException('Migration operation failed: ' . $wpdb->last_error); }
+	}
+
+	/**
+	 * Fail closed unless the Phase-T per-event decision claim of §9.5 is exactly as designed.
+	 *
+	 * [C10-1] This verifier owns the claim aggregate: it runs after migration 029, on current-schema
+	 * verification and unconditionally before the schema option may advance to 29. It is separate from
+	 * `verify_payment_execution_schema()` because migration 028's verifier must stay satisfiable by an
+	 * installation that completed 028 before the claim aggregate existed — the repair is *scheduled* by
+	 * migration 029, so it must be provable after 029 and must never be assumed by 028.
+	 *
+	 * It rejects: a missing table or a non-InnoDB table; a table without the declared identity
+	 * (`id`/`PRIMARY KEY`, `uid`/`UNIQUE uid`) or without the declared arbitration index
+	 * (`UNIQUE event_claim(provider_event_id, active_claim_slot)` plus `KEY provider_event` and
+	 * `KEY claim_state`); an undeclared, raw-reference, descriptor-bearing or secret-bearing column; a
+	 * nullable fencing generation or a malformed token digest; a `provider_event_id` that is not a
+	 * `bigint unsigned` parented at `payment_provider_events.id`; a row whose `claim_state` is not a
+	 * `DECISION_CLAIM_STATES` member, whose generation is not positive, whose live (`claimed`) shape does
+	 * not carry its live slot, its lease and no terminal instant, or whose terminal shape kept any of
+	 * them; two live claims sharing one provider event; and a `settled` claim whose event carries no
+	 * decision row at all.
+	 */
+	private static function verify_payment_event_decision_claim_schema():void{
+		global $wpdb; $p = $wpdb->prefix . 'dzn_';
+		$table = $p . 'payment_provider_event_decision_claims';
+		$columns = array('uid','provider_event_id','claim_state','claim_generation','claim_token_digest','lease_expires_at','claimed_at','settled_at','active_claim_slot','created_at','updated_at','created_by','updated_by');
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) throw new \RuntimeException('Migration verification failed: missing payment_provider_event_decision_claims');
+		$engine = $wpdb->get_var( $wpdb->prepare( 'SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $table ) );
+		if ( ! is_string( $engine ) || strcasecmp( $engine, 'InnoDB' ) !== 0 ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim storage must use InnoDB');
+		$identity = $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE 'id'" );
+		if ( ! $identity || strtolower( (string) $identity->Type ) !== 'bigint unsigned' || strtoupper( (string) $identity->Extra ) !== 'AUTO_INCREMENT' || $identity->Key !== 'PRI' ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim identity contract');
+		if ( ! $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE 'uid'" ) || ! self::has_index( $table, 'uid', true ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision claims need a unique public handle');
+		foreach ( $columns as $column ) if ( ! $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE '{$column}'" ) ) throw new \RuntimeException('Migration verification failed: missing payment_provider_event_decision_claims.'.$column);
+		foreach ( (array) $wpdb->get_results( "SHOW COLUMNS FROM {$table}" ) as $column ) {
+			$name = strtolower( (string) $column->Field );
+			if ( $name === 'id' || in_array( $name, $columns, true ) ) continue;
+			throw new \RuntimeException('Migration verification failed: an undeclared Phase 2A.2-T decision-claim column: '.$name);
+		}
+		foreach ( array('stripe','card','pan','cvc','iban','plaintext','secret_value','raw_body','provider_subscription','provider_intent') as $forbidden ) if ( $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE '%{$forbidden}%'" ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision claims must stay provider-neutral and secret-free: '.$forbidden);
+		if ( $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE '%descriptor%'" ) ) throw new \RuntimeException('Migration verification failed: only the dispatch claim may carry a sealed envelope: payment_provider_event_decision_claims');
+		foreach ( (array) $wpdb->get_results( "SHOW COLUMNS FROM {$table}" ) as $column ) {
+			$name = strtolower( (string) $column->Field );
+			if ( str_ends_with( $name, '_reference' ) || str_ends_with( $name, '_ref' ) ) throw new \RuntimeException('Migration verification failed: a raw reference column may not exist: payment_provider_event_decision_claims.'.$name);
+		}
+		$token = $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE 'claim_token_digest'" );
+		if ( ! $token || strtolower( (string) $token->Type ) !== 'char(64)' || $token->Null !== 'NO' ) throw new \RuntimeException('Migration verification failed: a decision-claim token digest must be a non-null char(64)');
+		$generation = $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE 'claim_generation'" );
+		if ( ! $generation || $generation->Null !== 'NO' ) throw new \RuntimeException('Migration verification failed: a decision claim always declares its fencing generation');
+		foreach ( array('lease_expires_at','settled_at','active_claim_slot') as $nullable ) {
+			$row = $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE '{$nullable}'" );
+			if ( ! $row || $row->Null !== 'YES' ) throw new \RuntimeException('Migration verification failed: '.$nullable.' must be nullable on a decision claim');
+		}
+		foreach ( array('claimed_at','created_at','updated_at') as $instant ) if ( ! $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE '{$instant}'" ) ) throw new \RuntimeException('Migration verification failed: the mutable decision claim must carry '.$instant);
+		if ( ! self::has_index_columns( $table, 'event_claim', true, array('provider_event_id','active_claim_slot') ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim arbitration index');
+		if ( ! self::has_index( $table, 'provider_event', false ) || ! self::indexLeadsWith( $table, 'provider_event_id' ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim provider-event index');
+		if ( ! self::has_index( $table, 'claim_state', false ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim state index');
+		$reference = $wpdb->get_row( "SHOW COLUMNS FROM {$table} LIKE 'provider_event_id'" );
+		if ( ! $reference || strtolower( (string) $reference->Type ) !== 'bigint unsigned' ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T reference type payment_provider_event_decision_claims.provider_event_id');
+		$parent = $p . 'payment_provider_events';
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $parent ) ) !== $parent ) throw new \RuntimeException('Migration verification failed: missing reference parent payment_provider_events');
+		$parentRow = $wpdb->get_row( "SHOW COLUMNS FROM {$parent} LIKE 'id'" );
+		if ( ! $parentRow || strtolower( (string) $parentRow->Type ) !== 'bigint unsigned' || strtoupper( (string) $parentRow->Extra ) !== 'AUTO_INCREMENT' || $parentRow->Key !== 'PRI' ) throw new \RuntimeException('Migration verification failed: reference parent identity payment_provider_events');
+		foreach ( (array) $wpdb->get_results( "SELECT * FROM {$table}" ) as $decisionClaim ) {
 			$state = (string) $decisionClaim->claim_state;
 			if ( ! in_array( $state, array('claimed','settled','released'), true ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim state');
 			if ( (int) $decisionClaim->claim_generation < 1 ) throw new \RuntimeException('Migration verification failed: a non-positive decision-claim generation');
@@ -1020,9 +1117,9 @@ final class Migrator {
 			if ( $state === 'claimed' && ( (string) $decisionClaim->active_claim_slot !== '1' || $decisionClaim->lease_expires_at === null || $decisionClaim->settled_at !== null ) ) throw new \RuntimeException('Migration verification failed: a live decision claim must carry its live slot, its lease and no terminal instant');
 			if ( $state !== 'claimed' && ( $decisionClaim->active_claim_slot !== null || $decisionClaim->lease_expires_at !== null || $decisionClaim->settled_at === null ) ) throw new \RuntimeException('Migration verification failed: a terminal decision claim must release its slot and lease and record its terminal instant');
 		}
-		$liveDecisionClaims = $wpdb->get_results( "SELECT provider_event_id,COUNT(*) AS total FROM {$p}payment_provider_event_decision_claims WHERE active_claim_slot=1 GROUP BY provider_event_id HAVING total>1" );
+		$liveDecisionClaims = $wpdb->get_results( "SELECT provider_event_id,COUNT(*) AS total FROM {$table} WHERE active_claim_slot=1 GROUP BY provider_event_id HAVING total>1" );
 		if ( $liveDecisionClaims ) throw new \RuntimeException('Migration verification failed: two live decision claims share one provider event');
-		$settledWithoutDecision = $wpdb->get_results( "SELECT claim.id FROM {$p}payment_provider_event_decision_claims claim LEFT JOIN {$p}payment_provider_event_decisions decision ON decision.provider_event_id=claim.provider_event_id WHERE claim.claim_state='settled' AND decision.id IS NULL LIMIT 1" );
+		$settledWithoutDecision = $wpdb->get_results( "SELECT claim.id FROM {$table} claim LEFT JOIN {$p}payment_provider_event_decisions decision ON decision.provider_event_id=claim.provider_event_id WHERE claim.claim_state='settled' AND decision.id IS NULL LIMIT 1" );
 		if ( $settledWithoutDecision ) throw new \RuntimeException('Migration verification failed: a settled decision claim must carry the decision it appended');
 		foreach ( array('payment_terms','payment_lessons','payment_schedules','payment_notifications','payment_evidence','payment_settlements') as $forbidden ) {
 			$physical = $p . $forbidden;

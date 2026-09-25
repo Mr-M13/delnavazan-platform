@@ -19,6 +19,13 @@ final class PaymentEventIntakeService {
     private const VIEW_CAPABILITY='dzn_view_payment_execution_authority';
     /** How often a delivery that cannot own a claim re-reads the decision the owner is publishing. */
     private const CLAIM_WAIT_INTERVAL_MICROSECONDS=25000;
+    /**
+     * [C10-2] The claim this worker currently owns, while it is inside one decision operation. Every R1/R2
+     * work unit asserts and renews this claim's bounded window before it runs, so an expired or replaced
+     * generation stops *before* its next unit instead of discovering the loss only when it appends the
+     * decision. Cleared when the operation ends, on every path including a thrown exception.
+     */
+    private ?array $ownedDecisionClaim=null;
     /** The controlled HTTP status of each refusal reason: nothing distinguishes provider from account. */
     private const HTTP_STATUS=array(
         'signature_verified'=>200,'signature_invalid'=>400,'signature_outside_tolerance'=>400,
@@ -344,12 +351,63 @@ final class PaymentEventIntakeService {
                 $this->abandonDecisionClaim($claim);
                 return $this->convergedDecision($eventId,$current);
             }
-            $decision=$decide();
+            // [C10-2] Ownership covers the entire decision operation: the claim's bounded window is
+            // opened here — before any decision work runs — renewed before every R1/R2 work unit, and
+            // closed when the decision is published. A generation that cannot renew its window performs
+            // no further work at all.
+            $this->openDecisionWindow($eventId,$claim);
+            try{
+                $decision=$decide();
+            }finally{
+                $this->closeDecisionWindow();
+            }
+        }catch(DecisionClaimWindowClosed $e){
+            // [C10-2] The window this generation worked inside has closed: its lease expired before it
+            // reached the next work unit, or exactly one successor generation took the claim over. The
+            // stale generation therefore performs no further decision or consequence work and appends
+            // nothing — it converges on the decision the current owner publishes exactly like any other
+            // delivery that cannot own the claim.
+            return $this->convergeOnOwner($eventId);
         }catch(\Throwable $e){
             $this->abandonDecisionClaim($claim);
             throw $e;
         }
         return $this->appendDecisionUnderClaim($event,$decision,$claim,$context);
+    }
+
+    /**
+     * [C10-2] Open the bounded window this worker works inside, and announce it.
+     *
+     * The window is the claim's own lease, issued at acquisition with the fencing generation and token
+     * that this worker will have to re-prove before every work unit. The hook fires *before* any decision
+     * work runs and outside the §9.7 worker context, so an observer can see which generation owns the
+     * event's decision without gaining the worker principal, and carries ids only — never a token, a
+     * payload or a provider reference.
+     */
+    private function openDecisionWindow(int $eventId,array $claim):void{
+        $this->ownedDecisionClaim=$claim;
+        PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision_claim',$eventId,(int)$claim['generation']);
+    }
+    /** Close the window: no later code path in this process may treat the claim as owned again. */
+    private function closeDecisionWindow():void{
+        $this->ownedDecisionClaim=null;
+    }
+
+    /**
+     * [C10-2] Assert and renew the bounded window immediately before one R1/R2 work unit runs.
+     *
+     * One fenced conditional statement proves this generation still owns the event's decision (`claimed`
+     * at its own generation and token, with its live slot) **and** that its lease has not expired — and
+     * only then extends the lease over the unit about to run. Exactly one affected row is required: the
+     * statement cannot resurrect an expired lease, so a worker that stalled past its window, or whose
+     * claim exactly one successor generation took over, stops here — before the unit — with
+     * `DecisionClaimWindowClosed` and performs no further decision or consequence work.
+     */
+    private function assertDecisionWorkWindow(string $unit):void{
+        $claim=$this->ownedDecisionClaim;
+        if($claim===null)throw new \LogicException('payment_event_decision_work_without_claim:'.$unit);
+        $now=PaymentExecutionSupport::now();
+        if($this->repository->renewDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$this->claimLease($now),$now)!==1)throw new DecisionClaimWindowClosed('decision_claim_window_closed:'.$unit);
     }
 
     /** The recorded decision a delivery converges on, or the recorded state when the event owes one. */
@@ -559,6 +617,9 @@ final class PaymentEventIntakeService {
             'evidence_reference'=>'dzn_phase_2a2t_event:'.(string)$event->uid,
         );
         $key='dzn_phase_2a2t_evidence:'.(string)$event->uid.':'.$evidenceKind;
+        // [C10-2] The R1 submission is one work unit of the decision operation: the owner must still hold
+        // its bounded, unexpired window before it may submit anything to R1.
+        $this->assertDecisionWorkWindow('r1_evidence_submission');
         try{
             $result=$this->payments->ingest($input,$key);
         }catch(\InvalidArgumentException $e){
@@ -630,6 +691,10 @@ final class PaymentEventIntakeService {
 
     /** Delegate exactly one R2 command with a deterministic, decision-derived key (§10.1 rule 2). */
     private function r2(array $state,string $step,string $occurredAt,?int $purchaseId=null,?int $evidenceId=null,?int $obligationId=null):void{
+        // [C10-2] Each R2 command is its own work unit: the window is re-asserted and renewed immediately
+        // before it, so a generation whose lease has expired (or whose claim a successor took over)
+        // stops before the consequence instead of running it after its fence was lost.
+        $this->assertDecisionWorkWindow('r2_'.$step);
         $reference='dzn_phase_2a2t_r2_consequence:'.(int)$state['collection_intent_id'].':'.$step;
         $input=array('evidence_channel'=>'provider_evidence','evidence_reference'=>$reference,'evidence_at'=>$occurredAt,'confirmed'=>true);
         if($step==='confirm_intent'){

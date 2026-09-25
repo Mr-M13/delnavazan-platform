@@ -11,7 +11,8 @@ case $mode in
   secret_rotation_vs_intake|unrelated_students|duplicate_command_replay|settlement_vs_r2_consequence|\
   submit_vs_cancel_in_flight|redrive_after_crash|concurrent_expired_lease|takeover_reissue_fenced|\
   fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure|\
-  conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery) ;;
+  conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|\
+  stale_owner_after_lease_expiry) ;;
   *) echo "Unknown Phase T concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives
@@ -39,12 +40,16 @@ waitfor "$gate/w1.started" || { echo "holder worker never gated"; cat "$gate/w1.
 wprun "$gate" w2 "$repo/tests/phase-2a2t-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 w2=$!
 case $mode in
-  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery)
+  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry)
     # [C8-3] Both deliveries must be in flight together, so neither worker holds a lock: each announces
     # itself in the gate directory and waits for its sibling before submitting the same provider event
     # identity, and the unique `provider_event` index arbitrates the race. [C9-1] The decision-claim
     # races use the same gate: both deliveries reach the one owed decision together, and the unique
     # `event_claim` index arbitrates which of them may complete it.
+    # [C10-2] `stale_owner_after_lease_expiry` uses the same gate in the other direction: the first
+    # worker announces itself from inside the decision it owns, ages its own lease past expiry and then
+    # waits for the second worker's record, so the successor takes the claim over *before* the first
+    # workers resumes its decision work.
     waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
     ;;
   unrelated_students)

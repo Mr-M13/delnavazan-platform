@@ -1,8 +1,8 @@
 <?php
 /**
- * Disposable Phase-T Schema 028 migration proof: fresh identity, 26→28 and 25→28 rehearsal, repeat
- * safety, retained-028/stale-version fail-closed behaviour, malformed-storage rejection and the
- * proof that no R1/R2 row or column changed. Synthetic local data only.
+ * Disposable Phase-T Schema 029 migration proof: fresh identity, 26→28 and 25→28 rehearsal, [C10-1] the
+ * completed-028 decision-claim repair, repeat safety, retained-028/stale-version fail-closed behaviour,
+ * malformed-storage rejection and the proof that no R1/R2 row or column changed. Synthetic local data only.
  */
 if(getenv('DZN_PHASE_2A2T_MIGRATION_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-T migration runtime refused.\n");exit(1);}
 use Delnavazan\Platform\Core\Infrastructure\Migration\Migrator;
@@ -11,20 +11,43 @@ function dzn_tm_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeE
 function dzn_tm_rejected(callable $call,string $needle,string $message):void{$caught=null;try{$call();}catch(Throwable$e){$caught=$e;}dzn_tm_assert($caught!==null,$message.' was accepted');dzn_tm_assert(str_contains($caught->getMessage(),$needle),$message.' rejected with an unexpected error: '.$caught->getMessage());}
 $tables=array('payment_provider_accounts','payment_provider_account_events','payment_provider_account_commands','payment_provider_objects','payment_provider_object_events','payment_provider_object_commands','payment_provider_secrets','payment_execution_commands','payment_execution_attempts','payment_execution_results','payment_execution_dispatches','payment_provider_event_receipts','payment_provider_events','payment_provider_event_decisions','payment_provider_event_decision_claims','payment_provider_secret_events');
 
-// Fresh Schema 28 identity and repeat safety: the migration is applied and then re-applied.
-dzn_tm_assert((int)DZN_PLATFORM_SCHEMA_VERSION===28,'Phase T must publish Schema 28');
+// Fresh Schema 29 identity and repeat safety: the migrations are applied and then re-applied.
+dzn_tm_assert((int)DZN_PLATFORM_SCHEMA_VERSION===29,'Phase T must publish Schema 29');
 Migrator::maybe_upgrade();
 foreach($tables as $table)dzn_tm_assert($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.$table))===$p.$table,'missing fresh Phase T table: '.$table);
 $completed=(array)get_option('dzn_platform_completed_migrations',array());
 dzn_tm_assert(in_array('028_payment_execution_seam_provider_adapter',$completed,true),'migration 028 must be recorded as completed');
+dzn_tm_assert(in_array('029_payment_event_decision_claim_authority',$completed,true),'migration 029 must be recorded as completed');
 Migrator::maybe_upgrade();
-dzn_tm_assert((string)get_option('dzn_platform_schema_version')==='28','a repeat run must leave Schema 28');
+dzn_tm_assert((string)get_option('dzn_platform_schema_version')==='29','a repeat run must leave Schema 29');
 foreach($tables as $table)dzn_tm_assert((int)$wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s',$p.$table))===1,'a repeat run must not duplicate a table: '.$table);
+
+// [C10-1] An installation that completed 028 before the decision-claim aggregate existed is repaired by
+// the scheduled migration 029, not failed by 028's verifier: with 028 completed, 029 unrecorded and no
+// claim table at all, the pre-activation path must still reach the repair and record it.
+$wpdb->query("DROP TABLE {$p}payment_provider_event_decision_claims");
+$completed=array_values(array_filter((array)get_option('dzn_platform_completed_migrations',array()),static fn($id)=>$id!=='029_payment_event_decision_claim_authority'));
+update_option('dzn_platform_completed_migrations',$completed,false);
+$wpdb->query("UPDATE {$wpdb->options} SET option_value='28' WHERE option_name='dzn_platform_schema_version'");
+Migrator::maybe_upgrade();
+dzn_tm_assert($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.'payment_provider_event_decision_claims'))===$p.'payment_provider_event_decision_claims','the completed-028 repair must recreate the decision-claim table');
+dzn_tm_assert(in_array('029_payment_event_decision_claim_authority',(array)get_option('dzn_platform_completed_migrations',array()),true),'the completed-028 repair must record migration 029');
+dzn_tm_assert((string)get_option('dzn_platform_schema_version')==='29','the completed-028 repair must reach Schema 29');
+// A completed-029 installation whose claim table has vanished is corruption while the ledger still says
+// 029 completed: it fails closed and is never silently repaired. The ledger-owned repair is the scheduled
+// migration itself, so the same state with 029 unrecorded recovers through the 029 installer.
+$wpdb->query("DROP TABLE {$p}payment_provider_event_decision_claims");
+dzn_tm_rejected(fn()=>Migrator::maybe_upgrade(),'Migration verification failed','a completed-029 installation with no decision-claim table');
+$completed=array_values(array_filter((array)get_option('dzn_platform_completed_migrations',array()),static fn($id)=>$id!=='029_payment_event_decision_claim_authority'));
+update_option('dzn_platform_completed_migrations',$completed,false);
+$wpdb->query("UPDATE {$wpdb->options} SET option_value='28' WHERE option_name='dzn_platform_schema_version'");
+Migrator::maybe_upgrade();
+dzn_tm_assert($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.'payment_provider_event_decision_claims'))===$p.'payment_provider_event_decision_claims','the scheduled 029 installer must restore the claim table it owns');
 
 // Retained 028 / stale version: the verifier still runs before the schema option advances.
 $wpdb->query("UPDATE {$wpdb->options} SET option_value='26' WHERE option_name='dzn_platform_schema_version'");
 Migrator::maybe_upgrade();
-dzn_tm_assert((string)get_option('dzn_platform_schema_version')==='28','the retained path must re-verify and advance');
+dzn_tm_assert((string)get_option('dzn_platform_schema_version')==='29','the retained path must re-verify and advance');
 
 // Every R1/R2 verifier is re-run, not duplicated: a Phase-T column may not appear on commercial storage.
 foreach(array('commercial_offers','commercial_purchases','commercial_offer_obligations','commercial_payment_evidence','collection_intents','renewal_cycles','recurring_enrolments') as $table)

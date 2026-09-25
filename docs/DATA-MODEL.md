@@ -1,17 +1,21 @@
 # Delnavazan Platform Conceptual Data Model
 
-> **Phase 2A.2-T storage (Schema 028, candidate) — not authoritative until independently reviewed and
-> merged:** provider-neutral payment execution only. Fifteen additive tables: `dzn_payment_provider_accounts`
+> **Phase 2A.2-T storage (Schema 029, candidate) — not authoritative until independently reviewed and
+> merged:** provider-neutral payment execution only. Fifteen additive seam tables in migration `028` plus
+> the one-table decision-claim aggregate of migration `029_payment_event_decision_claim_authority`
+> (sixteen in total, [C10-1]): `dzn_payment_provider_accounts`
 > and its append-only account event/command pair, `dzn_payment_provider_objects` and its append-only
 > object event/command pair, `dzn_payment_provider_secrets` (authenticated ciphertext plus its nonce and
 > versions, one active row per declared scope), `dzn_payment_execution_commands` (immutable, with no
 > terminal column of its own), `dzn_payment_execution_attempts` and `dzn_payment_execution_results`
 > (append-only, at most one of each per command, `UNIQUE command_result`), `dzn_payment_execution_dispatches`
 > (the phase's only mutable execution row — the durable dispatch claim and the only home of the
-> adapter-sealed descriptor), `dzn_payment_provider_event_receipts`, `dzn_payment_provider_events` and
-> `dzn_payment_provider_event_decisions`. Every table declares `id bigint unsigned NOT NULL AUTO_INCREMENT`
+> adapter-sealed descriptor), `dzn_payment_provider_event_receipts`, `dzn_payment_provider_events`,
+> `dzn_payment_provider_event_decisions` and `dzn_payment_provider_event_decision_claims` (the mutable
+> per-event decision claim, whose lease is the bounded window its owner re-proves and renews immediately
+> before every R1/R2 work unit it runs). Every table declares `id bigint unsigned NOT NULL AUTO_INCREMENT`
 > with `PRIMARY KEY(id)` and `uid char(26) NOT NULL` with `UNIQUE uid(uid)`; every `*_id` reference is
-> `bigint unsigned` with a declared named index and a declared parent — a Schema 028 table or a frozen
+> `bigint unsigned` with a declared named index and a declared parent — a Phase-T table or a frozen
 > external authoritative parent (`students`, `commercial_offers`, `commercial_purchases`,
 > `commercial_offer_obligations`, `commercial_payment_evidence`, `collection_intents`, `renewal_cycles`,
 > `recurring_enrolments`). No raw provider reference, credential, card field or IBAN is stored anywhere;

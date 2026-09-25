@@ -34,20 +34,29 @@ $concurrency=file_get_contents($root.'/tests/phase-2a2t-concurrency-runner.sh')
     .file_get_contents($root.'/tests/phase-2a2t-concurrency-verify.php');
 $tables=array('payment_provider_accounts','payment_provider_account_events','payment_provider_account_commands','payment_provider_objects','payment_provider_object_events','payment_provider_object_commands','payment_provider_secrets','payment_execution_commands','payment_execution_attempts','payment_execution_results','payment_execution_dispatches','payment_provider_event_receipts','payment_provider_events','payment_provider_event_decisions','payment_provider_event_decision_claims','payment_provider_secret_events');
 
-// Build/schema identity: Phase T is Schema 28, sequenced additively after the V candidate.
-if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<28)throw new RuntimeException('Missing Phase T schema identity');
+// Build/schema identity: Phase T is Schema 29 (the fifteen-table seam of 028 plus [C10-1] the decision
+// claim aggregate of 029), sequenced additively after the V candidate.
+if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<29)throw new RuntimeException('Missing Phase T schema identity');
 if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2t-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase T build identity');
 
 // Migration, storage, verifier wiring and capabilities.
 foreach(array(
     '028_payment_execution_seam_provider_adapter','install_payment_execution_seam','verify_payment_execution_schema',
+    '029_payment_event_decision_claim_authority','install_payment_event_decision_claim_authority','verify_payment_event_decision_claim_schema',
     'dzn_manage_payment_providers','dzn_manage_payment_execution','dzn_ingest_payment_provider_events',
     'dzn_view_payment_execution_authority','dzn_platform_capability_version_2a2t','$phaseTGrants','$teacherTRole',
 ) as $needle)if(!str_contains($migration.$plugin,$needle))throw new RuntimeException('Missing Phase T migration contract: '.$needle);
 if(!str_contains($migration,"if(\$id==='028_payment_execution_seam_provider_adapter')self::verify_payment_execution_schema();"))throw new RuntimeException('Migration 028 must invoke the Phase T schema verifier before it is recorded');
 if(substr_count($migration,'self::verify_payment_execution_schema();')<3)throw new RuntimeException('Phase T verifier must run after migration 028, on current-schema verification and before schema activation');
 if(!str_contains($migration,"in_array( '028_payment_execution_seam_provider_adapter', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-028 pre-activation verification is missing');
-if(!str_contains($migration,"'028_payment_execution_seam_provider_adapter' )"))throw new RuntimeException('Phase T migration must be listed as required');
+if(!str_contains($migration,"'028_payment_execution_seam_provider_adapter', '029_payment_event_decision_claim_authority' )"))throw new RuntimeException('Phase T migration must be listed as required');
+// [C10-1] The decision-claim aggregate is its own scheduled migration: it is installed, verified and
+// required exactly like migration 028, so a database that completed 028 is repaired rather than failed.
+if(!str_contains($migration,"if(\$id==='029_payment_event_decision_claim_authority')self::verify_payment_event_decision_claim_schema();"))throw new RuntimeException('[C10-1] Migration 029 must invoke its own verifier before it is recorded');
+if(substr_count($migration,'self::verify_payment_event_decision_claim_schema();')<3)throw new RuntimeException('[C10-1] The claim verifier must run after migration 029, on current-schema verification and before schema activation');
+if(!str_contains($migration,"in_array( '029_payment_event_decision_claim_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('[C10-1] Retained-029 pre-activation verification is missing');
+if(!str_contains($migration,"'029_payment_event_decision_claim_authority' )"))throw new RuntimeException('[C10-1] Migration 029 must be listed as required');
+if(!str_contains($migration,"'029_payment_event_decision_claim_authority'=>array(__CLASS__,'install_payment_event_decision_claim_authority')"))throw new RuntimeException('[C10-1] Migration 029 must be scheduled in the migration ledger');
 $installStart=strpos($migration,'private static function install_payment_execution_seam');
 $installEnd=strpos($migration,'private static function verify_payment_execution_schema');
 $install=substr($migration,$installStart,$installEnd-$installStart);
@@ -55,9 +64,32 @@ $install=substr($install,strpos($install,'{')); // body only: the signature name
 if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO')||str_contains($install,'ALTER TABLE'))throw new RuntimeException('Phase T migration must be additive only');
 if(stripos($install,'stripe_')!==false)throw new RuntimeException('Phase T storage must stay provider-neutral');
 preg_match_all('/CREATE TABLE \{\$p\}([a-z_]+)/',$install,$created);
-$createdTables=$created[1];sort($createdTables);$declared=$tables;sort($declared);
-if($createdTables!==$declared)throw new RuntimeException('Migration 028 must create exactly the sixteen declared Phase T tables');
-if(count(array_unique($createdTables))!==16)throw new RuntimeException('Migration 028 must declare each Phase T table exactly once');
+$createdTables=$created[1];sort($createdTables);
+$seamTables=array_values(array_diff($tables,array('payment_provider_event_decision_claims')));sort($seamTables);
+if($createdTables!==$seamTables)throw new RuntimeException('Migration 028 must create exactly the fifteen declared Phase T seam tables');
+if(count(array_unique($createdTables))!==15)throw new RuntimeException('Migration 028 must declare each Phase T seam table exactly once');
+// [C10-1] The decision-claim aggregate is migration 029's own table: 028 must not create it, and 029 must
+// create exactly it, so the union is the declared sixteen-table Phase-T set and each table is declared once.
+$claimStart=strpos($migration,'private static function install_payment_event_decision_claim_authority');
+$claimEnd=strpos($migration,'private static function verify_payment_event_decision_claim_schema');
+$claimInstall=substr($migration,$claimStart,$claimEnd-$claimStart);
+$claimInstall=substr($claimInstall,strpos($claimInstall,'{'));
+if(str_contains($claimInstall,'UPDATE ')||str_contains($claimInstall,'INSERT INTO')||str_contains($claimInstall,'ALTER TABLE'))throw new RuntimeException('[C10-1] Migration 029 must be additive only');
+preg_match_all('/CREATE TABLE \{\$p\}([a-z_]+)/',$claimInstall,$claimCreated);
+if($claimCreated[1]!==array('payment_provider_event_decision_claims'))throw new RuntimeException('[C10-1] Migration 029 must create exactly the decision-claim table and nothing else');
+$united=array_merge($createdTables,$claimCreated[1]);sort($united);$declared=$tables;sort($declared);
+if($united!==$declared)throw new RuntimeException('[C10-1] Migrations 028 and 029 together must create exactly the sixteen declared Phase T tables');
+if(count(array_unique($united))!==16)throw new RuntimeException('[C10-1] Each Phase T table must be declared by exactly one migration');
+// [C10-1] The repair is scheduled, never assumed: 028's verifier neither requires nor validates the claim
+// aggregate (an installation that completed 028 before the aggregate existed must still satisfy it), and it
+// tolerates the table 029 owns.
+$verifierStart=strpos($migration,'private static function verify_payment_execution_schema');
+$seamVerifier=substr($migration,$verifierStart,strpos($migration,'private static function install_payment_event_decision_claim_authority')-$verifierStart);
+$specStart=strpos($seamVerifier,'$spec = array(');
+$specBody=substr($seamVerifier,$specStart,strpos($seamVerifier,');',$specStart)-$specStart);
+if(str_contains($specBody,'payment_provider_event_decision_claims'))throw new RuntimeException('[C10-1] Migration 028\'s verifier must not require the decision-claim aggregate');
+if(str_contains($seamVerifier,'FROM {$p}payment_provider_event_decision_claims'))throw new RuntimeException('[C10-1] Migration 028\'s verifier must not validate the decision-claim rows');
+if(!str_contains($migration,"if ( \$short === 'payment_provider_event_decision_claims' ) continue;"))throw new RuntimeException('[C10-1] The seam verifier must tolerate the table migration 029 owns');
 
 // Locked Phase-T vocabulary and structural constants (§5.2).
 foreach(array(
@@ -103,7 +135,10 @@ if(!str_contains($service,'acquireLease')||!str_contains($service,'settleClaim')
 if(!str_contains($service,'providerIdempotencyKey')||!str_contains($service,"'dzn-phase2a2t-'"))throw new RuntimeException('The provider idempotency key must be deterministically re-derivable');
 if(!str_contains($service,'reconcile('))throw new RuntimeException('A takeover must reconcile before it re-issues');
 if(!str_contains($service,'proveFence'))throw new RuntimeException('A takeover re-issue must pass a conditional pre-call ownership check');
-if(strpos($service,'acquireLease')>strpos($service,'preflightDispatchDescriptor'))throw new RuntimeException('The acquisition must follow the pre-call preflight');
+// The pre-call preflight must be ordered before the lease acquisition it authorises (§8.3 step 2): the
+// assertion is written in its declared direction, so a future reordering that acquires the lease first
+// fails here.
+if(strpos($service,'acquireLease')<strpos($service,'preflightDispatchDescriptor'))throw new RuntimeException('The acquisition must follow the pre-call preflight');
 if(!str_contains($service,'sealedCommandKeyDigest')||!str_contains($service,'sealedIdempotencyKeyDigest'))throw new RuntimeException("Core's mandatory pre-lease binding comparison is missing");
 if(strpos($service,'hash_equals($preflight->sealedIdempotencyKeyDigest()')>strpos($service,'acquireLease'))throw new RuntimeException("Core's binding comparison must be ordered before the acquisition");
 if(strpos($service,'renewLease')===false)throw new RuntimeException('The takeover winner must renew its lease before acting');
@@ -139,7 +174,10 @@ foreach($allSources as $source){
     if(str_contains($source['code'],'PaymentExecutionDispatchSeal::seal(')||str_contains($source['code'],'PaymentExecutionDispatchSeal::open(')){
         if(!str_contains($source['file'],'/Integrations/'))throw new RuntimeException('Only an adapter may seal or open a dispatch descriptor: '.$source['file']);
     }
-    if(str_contains($source['code'],'sodium_crypto_secretbox')&&!str_contains($source['file'],'/Integrations/')&&!str_contains($source['file'],'PaymentExecutionDispatchSeal')&&!str_contains($source['file'],'PaymentSecretVault'))throw new RuntimeException('An unexpected sealing boundary: '.$source['file']);
+    // The sealing boundaries this phase owns are its dispatch seal, its credential vault and its adapters.
+    // The Phase-V integration secret service is an inherited, separately reviewed boundary that this phase
+    // neither adds to nor changes, so it is named explicitly rather than silently tolerated.
+    if(str_contains($source['code'],'sodium_crypto_secretbox')&&!str_contains($source['file'],'/Integrations/')&&!str_contains($source['file'],'PaymentExecutionDispatchSeal')&&!str_contains($source['file'],'PaymentSecretVault')&&!str_contains($source['file'],'IntegrationSecretService'))throw new RuntimeException('An unexpected sealing boundary: '.$source['file']);
 }
 // No port method other than the preflight opens an envelope, and the port never stores anything.
 if(substr_count($adapter,'PaymentExecutionDispatchSeal::open(')!==1)throw new RuntimeException('The adapter must open an envelope exactly once, in its preflight');
@@ -231,6 +269,24 @@ if(!str_contains($providerRepository,"'subject_claim','event_claim',"))throw new
 if(!str_contains($seam,'function decisionClaim('))throw new RuntimeException('[C9-1] the decision claim must be proved as an aggregate');
 if(!str_contains($intake,'outstandingDecisionClaims'))throw new RuntimeException('[C9-1] the live decision claims must be visible in the diagnostics');
 
+// [C10-2] Ownership covers the whole decision operation, not just the row the decision is appended
+// through: the claim's bounded lease is re-proved and renewed *before* every R1/R2 work unit, it can never
+// be renewed once it has expired, and a generation whose window has closed stops before the work instead
+// of discovering the loss when it appends.
+if(!str_contains($providerRepository,'function renewDecisionClaim('))throw new RuntimeException('[C10-2] the decision work-unit gate statement is missing');
+foreach(array("claim_state='claimed'","claim_generation=%d","claim_token_digest=%s","active_claim_slot=1","lease_expires_at IS NOT NULL AND lease_expires_at>=%s") as $needle)
+    if(!str_contains($providerRepository,$needle))throw new RuntimeException('[C10-2] the gate must re-prove the live generation and an unexpired lease: '.$needle);
+if(!str_contains($seam,'class DecisionClaimWindowClosed'))throw new RuntimeException('[C10-2] the controlled closed-window stop is missing');
+if(!str_contains($intake,'private function assertDecisionWorkWindow('))throw new RuntimeException('[C10-2] the per-work-unit window gate is missing');
+if(!str_contains($intake,'private function openDecisionWindow(')||!str_contains($intake,'private function closeDecisionWindow('))throw new RuntimeException('[C10-2] the decision window must be opened and closed around the operation');
+if(!str_contains($intake,"!==1)throw new DecisionClaimWindowClosed("))throw new RuntimeException('[C10-2] a gate that affects no row must stop the worker');
+if(!str_contains($intake,'catch(DecisionClaimWindowClosed $e)'))throw new RuntimeException('[C10-2] a closed window must be a controlled stop, never a failure');
+if(strpos($intake,'openDecisionWindow(')>strpos($intake,'$decision=$decide();'))throw new RuntimeException('[C10-2] the window must be opened before any decision work runs');
+if(strpos($intake,"assertDecisionWorkWindow('r1_evidence_submission')")>strpos($intake,'$this->payments->ingest('))throw new RuntimeException('[C10-2] the R1 submission must be gated by the window');
+if(strpos($intake,"assertDecisionWorkWindow('r2_'.")>strpos($intake,"'dzn_phase_2a2t_r2_consequence:'"))throw new RuntimeException('[C10-2] every R2 command must be gated by the window');
+if(!str_contains($intake,"PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision_claim'"))throw new RuntimeException('[C10-2] the owned claim must be observable before any decision work runs');
+if(!str_contains($rule,'It bounds the work, not merely the row'))throw new RuntimeException('[C10-2] the lease must be documented as the bounded window the owner works inside');
+
 // [C9-3] The §9.2 transport rule is configured, allowlisted and never satisfied by a client's own header.
 if(!str_contains($rule,'public static function trustedProxyHeaders('))throw new RuntimeException('[C9-3] the configured proxy-header gate is missing');
 if(!str_contains($rule,'public static function proxyHeaderIndicatesHttps('))throw new RuntimeException('[C9-3] the allowlisted proxy-header verdict is missing');
@@ -318,12 +374,19 @@ foreach(array(
     'submit_vs_cancel_in_flight','redrive_after_crash','concurrent_expired_lease','takeover_reissue_fenced',
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
     'conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery',
+    'stale_owner_after_lease_expiry',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
 if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
 if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');
 if(!str_contains($concurrency,'converge on exactly one recorded event'))throw new RuntimeException('[C8-3] the duplicate race must assert one recorded event');
 if(!str_contains($concurrency,'decision claim'))throw new RuntimeException('[C9-1] the decision-claim races must assert the claim');
-foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation','decision_claim') as $needle)
+// [C10-2] The stale-owner race must stall the owner past its own lease, prove the successor generation
+// took the claim over, and prove the stale generation reached no R1/R2 work boundary at all.
+if(!str_contains($concurrency,'lease_expires_at=%s WHERE provider_event_id=%d AND active_claim_slot=1 AND claim_generation=%d'))throw new RuntimeException('[C10-2] the stale-owner race must let the owner stall past its own lease');
+if(!str_contains($concurrency,"!is_file(\$gate.'/w1.work')")||!str_contains($concurrency,'the stale generation must perform no R1/R2 work at all'))throw new RuntimeException('[C10-2] the stale-owner race must prove the stale generation performed no R1/R2 work');
+if(!str_contains($concurrency,"is_file(\$gate.'/w2.work')"))throw new RuntimeException('[C10-2] the stale-owner race must prove the takeover generation did the work');
+if(!str_contains($concurrency,'claim_generation===2'))throw new RuntimeException('[C10-2] the stale-owner race must prove the takeover generation advanced the claim');
+foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation','decision_claim','completed-028','029') as $needle)
     if(!str_contains($migrationRuntime,$needle))throw new RuntimeException('The migration-runtime suite is incomplete: '.$needle);
 foreach(array('redrive','reconcile','dispatch_descriptor_unavailable','provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $needle)
     if(!str_contains($runtime,$needle))throw new RuntimeException('The runtime suite is incomplete: '.$needle);

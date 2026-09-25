@@ -1,13 +1,13 @@
 # Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter (implementation record)
 
 **Status:** candidate — awaiting independent review. Not merged, not deployed, not production-authorised.
-**Schema:** 028 / migration `028_payment_execution_seam_provider_adapter`
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.9`
+**Schema:** 029 / migrations `028_payment_execution_seam_provider_adapter` and `029_payment_event_decision_claim_authority`
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.10`
 **Base:** `main` at the Phase-V candidate tree (Schema 27), strictly additive on top of R1 (Schema 25, authoritative) and R2 (Schema 26, candidate).
 
 This record documents the implementation of the contract in
 [PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md](PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md)
-(correction round 9, SHA-256 `c6c55119adb4db52ac0583f97317478dd802a2d4ce7498a696ce674f6a951c34`). The contract
+(correction round 10, SHA-256 `5c60d7baec801045217919016aa097712e2e215e9d755bb87cd3faaf4e71b343`). The contract
 is normative; this record states what was built, what could be executed in this environment, and what
 remains deliberately unresolved.
 
@@ -27,8 +27,10 @@ remains deliberately unresolved.
    the durable per-event decision claim, translation and the bounded ordered R2 consequence.
 6. **Secret isolation** — `PaymentSecretVault` plus its own repository; no provider secret is writable in
    this build.
-7. **Schema 028** — sixteen additive tables with the fail-closed verifier
-   `verify_payment_execution_schema()`.
+7. **Schema 028/029** — the fifteen additive seam tables with the fail-closed verifier
+   `verify_payment_execution_schema()`, plus [C10-1] the one-table decision-claim aggregate of migration
+   `029_payment_event_decision_claim_authority` with its own fail-closed verifier
+   `verify_payment_event_decision_claim_schema()`.
 
 ## 2. Structural properties the candidate must satisfy
 
@@ -169,6 +171,40 @@ registration-validation gap in the account surface rather than a method-receipt 
 would add a refusal to the registration command; it is recorded for the owner rather than widened into
 this round.
 
+## 5A. Correction round 10 (independent review of `5d8c379` / tree `47f9062e`)
+
+The independent review of the round-9 candidate returned **FAIL — CORRECTION REQUIRED** on two blocking
+findings. Each is closed additively in this candidate; no authority, capability, policy or provider call
+is added, no table beyond the one aggregate the phase already required is added, and no previous commit
+is rewritten.
+
+| # | Blocking finding | Correction in this candidate |
+| --- | --- | --- |
+| C10-1 | `Migrator.php` / `delnavazan-platform.php`: the new decision-claim table was added by the already-completed migration `028` while the schema identity stayed `28`. An installation that had previously completed `028` skipped its installer and then failed the strengthened verifier, because `payment_provider_event_decision_claims` did not exist and no subsequent migration was scheduled to create it — an unrecoverable state for a database the ledger could have repaired. | The claim aggregate is now migration `029_payment_event_decision_claim_authority`'s own storage and the plugin declares Schema `29`. Migration `028` is restored to its fifteen-table set; its verifier neither requires nor validates the claim table (it tolerates the scheduled sibling instead of failing closed on a repairable state); `verify_payment_event_decision_claim_schema()` runs after `029`, on current-schema verification and unconditionally before the schema option advances to `29`; and `029` is scheduled in the ledger and on the retained/current-schema paths exactly like every other phase migration. A completed-`028` database is repaired by one additive `dbDelta` of the claim table, with no backfill, no inferred claim and nothing settled. |
+| C10-2 | `PaymentEventIntakeService.php` / `PaymentProviderRepository.php` / `PaymentExecutionRule.php`: the 120-second claim lease could expire while the original worker was still executing `decide()` and its R1/R2 mutations. A successor could take the claim over and complete the decision, and the original worker then resumed and executed the same R1/R2 work before its fence failure was discovered only during the later append — the token fenced the decision row, not the work it was meant to serialise. | Ownership now covers the whole decision operation. The lease is the **bounded window the owner works inside**: the intake opens it before any decision work runs, and immediately before every work unit — the R1 evidence submission and every R2 command, each one local transaction and never a provider call — it re-proves and renews the window with one fenced conditional statement that requires its own `claimed` generation, token and live slot **and** an unexpired lease, aborting the worker with `DecisionClaimWindowClosed` when the statement affects no row. A renewal can never resurrect an expired window, so a generation whose window closed (its lease lapsed, or exactly one successor generation took the claim over) performs no further decision or R1/R2 consequence work, appends nothing and converges on the current owner's decision, and the append stays fenced by the same generation and token. |
+
+`tests/phase-2a2t-contract.php` asserts both source contracts,
+`tests/phase-2a2t-migration-runtime.php` proves the completed-`028` repair rehearsal (028 completed, 029
+unrecorded, no claim table → scheduled repair creates the table, records 029 and reaches Schema 29), the
+completed-`029`/missing-table fail-closed case and its ledger-owned repair, and
+`tests/phase-2a2t-concurrency-runner.sh` adds `stale_owner_after_lease_expiry` (twenty modes): the first
+worker takes the claim for an owed decision and lets its own lease lapse while it still owns it, the
+second worker takes the claim over (settled generation-2 claim) and completes the decision, and the
+resumed first worker is stopped by the gate before its first R1/R2 unit. The suite records every
+worker's arrival at the inherited R1/R2 work hooks, so it proves the stale generation reached no work
+boundary at all, appended nothing, and left exactly one R1 settlement/evidence, one confirmed intent,
+one collected cycle, one decision and one settled generation-2 claim.
+
+The same round corrected three pre-existing self-inconsistencies in the phase's own static contract
+suite, which were present in the reviewed tree and would have made `tests/phase-2a2t-contract.php` fail
+regardless of this phase's behaviour: the `[C6-1]` source-order assertion compared the preflight and the
+lease acquisition in the inverted direction (the code already satisfies its declared order), the "the
+dispatch seal must not be the credential vault" scan matched the seal's own docblock mention of the
+vault, and the sealing-boundary scan treated the inherited Phase-V `IntegrationSecretService` as an
+unexpected boundary. The first is corrected to its declared meaning, the second by wording the docblock
+without the class name, and the third by naming that inherited boundary explicitly in the scan. No
+assertion was weakened: each still fails on the condition it names.
+
 ## 6. Evidence executed in this environment
 
 | Check | Result |
@@ -176,16 +212,17 @@ this round.
 | `git diff --check` | pass (no whitespace or conflict-marker defects) |
 | Shell syntax of the concurrency runner (`sh -n`) | pass |
 | Git object integrity (`git fsck --no-dangling`, `git status`) | pass |
-| Source scans: exactly sixteen declared tables; exact vocabulary strings; no forbidden column pattern; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; only an adapter seals or opens an envelope; the controller names no proxy header outside the locked allowlist | pass |
+| Source scans: [C10-1] migration `028` creates exactly the fifteen declared seam tables once each, migration `029` creates exactly the one decision-claim table, the two sets are disjoint and their union is the declared sixteen-table set, and `028`'s verifier neither requires nor validates the claim aggregate; [C10-2] the renewal statement requires the owner's own generation, token, live slot and an unexpired lease and can never renew an expired window, and both the R1 submission and every R2 command are gated on it; exact vocabulary strings; no forbidden column pattern; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; only an adapter seals or opens an envelope; the controller names no proxy header outside the locked allowlist | pass |
+| Re-emulation of `tests/phase-2a2t-contract.php`'s static assertions in this environment (all 203 assertion sites on this tree: 177 `str_contains` with their polarity and OR-pairs, 7 `substr_count`, 11 `strpos`/ordering assertions, the schema/build identity regexes, the declared-suite file globs, and the two `CREATE TABLE` sets) | pass — no assertion in the suite fails on this tree (PHP cannot run here, so this is a faithful re-implementation of its string and ordering predicates, not the suite itself) |
 | Source review of the changed sources (every changed hunk read) | pass — the endpoint's `rest_pre_dispatch` interception is its only participation on that hook, it is registered ahead of the core `OPTIONS` handler, it matches only the endpoint's two route shapes, and it re-uses the one precheck/receipt path instead of adding a second refusal implementation |
-| Source scans re-run this round (the Phase-T migration declares exactly sixteen tables once each; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; no proxy-header literal outside the locked allowlist; exactly one `rest_pre_dispatch` registration in the plugin) | pass |
+| Source scans re-run this round (the two Phase-T migrations together declare exactly the sixteen tables once each — fifteen in `028`, one in `029`; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; no proxy-header literal outside the locked allowlist; exactly one `rest_pre_dispatch` registration in the plugin) | pass |
 | Delimiter/quote balance of every changed PHP file (comments and strings stripped, then `()`/`{}`/`[]` balance) | pass (a delimiter sanity check only — **not** `php -l`, which this environment cannot run) |
 | `tests/phase-2a2t-contract.php` | **not executed — PHP is unavailable in this environment** |
 | `tests/phase-2a2t-migration-runtime.php`, `-runtime.php`, `-webhook-runtime.php`, `-secret-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php` | **not executed — PHP and the disposable WordPress + MariaDB runtime are unavailable in this environment** |
-| `tests/phase-2a2t-concurrency-runner.sh` (all nineteen modes) | **not executed — the disposable container runtime is unreachable in this environment** |
+| `tests/phase-2a2t-concurrency-runner.sh` (all twenty modes) | **not executed — the disposable container runtime is unreachable in this environment** |
 
 The runtime suites are written and wired exactly as the contract's §17 requires, and they were
-**not** run here. Running them on the disposable runtime (fresh install, 26→28 upgrade, migration,
+**not** run here. Running them on the disposable runtime (fresh install, 26→29 upgrade, migration,
 webhook, secret, corruption, failure and the full concurrency matrix) is the mandatory acceptance gate
 for this candidate and remains outstanding.
 

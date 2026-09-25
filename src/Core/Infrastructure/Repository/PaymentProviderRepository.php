@@ -183,6 +183,27 @@ final class PaymentProviderRepository {
             $tokenDigest,$leaseUntil,$now,$now,$claimId,$observedGeneration,$now
         ));
     }
+    /**
+     * [C10-2] Fenced, lease-bounded ownership re-assertion immediately before one decision work unit.
+     *
+     * One conditional statement proves, and only then extends, the bounded window the owner is about to
+     * work inside: the claim must still be `claimed` at this worker's own `claim_generation` and
+     * `claim_token_digest`, still carry its live slot, **and** still hold an unexpired
+     * `lease_expires_at`. The affected-row count is the proof — `1` means this generation owns the
+     * event's decision and its window covers the unit about to run, `0` means the window has closed (the
+     * lease expired before the unit began, or a successor generation took the claim over) and the caller
+     * must perform no further decision or R1/R2 consequence work at all.
+     *
+     * The statement can never resurrect an expired lease (`lease_expires_at >= $now` is a condition, not
+     * an assignment target), so an expired generation stops instead of continuing past its window.
+     */
+    public function renewDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $leaseUntil,string $now):int{
+        global $wpdb;
+        return (int)$wpdb->query($wpdb->prepare(
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET lease_expires_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s",
+            $leaseUntil,$now,$claimId,$expectedGeneration,$tokenDigest,$now
+        ));
+    }
 
     public function duplicate(\Throwable $e):?string{
         if(!preg_match("/Duplicate entry .* for key ['`](?:[^'`.]+\\.)?([^'`]+)['`]/i",$e->getMessage(),$m))return null;

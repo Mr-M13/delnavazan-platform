@@ -1,6 +1,6 @@
 # Delnavazan Platform Module Boundaries
 
-> **Phase 2A.2-T candidate boundary (Schema 028, not authoritative until independently reviewed and
+> **Phase 2A.2-T candidate boundary (Schema 029, not authoritative until independently reviewed and
 > merged):** Core gains the provider-neutral payment-execution seam — the port, the request/outcome
 > vocabulary, the provider registry, the execution command/attempt/result authority with its single
 > mutable dispatch claim, the provider account and mapping registry, the provider-event intake and the
