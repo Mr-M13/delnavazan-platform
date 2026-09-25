@@ -149,7 +149,7 @@ foreach(array(
     array($migrationRuntime,'DZN_PHASE_2A2V_RUNTIME_TEST','migration'),array($runtime,'DZN_PHASE_2A2V_RUNTIME_TEST','authority'),
     array($corruption,'DZN_PHASE_2A2V_RUNTIME_TEST','corruption'),array($failure,'DZN_PHASE_2A2V_RUNTIME_TEST','failure'),
 ) as $gate)if(!str_contains($gate[0],$gate[1])||!str_contains($gate[0],$gate[2])||!str_contains($gate[0],'wp_get_environment_type'))throw new RuntimeException('Phase V runtime artefact must be harness-gated: '.$gate[2]);
-foreach(array('connect','revoke','authorization','projection','completion','duplicate','conflict','archival','unrelated','provider_event_sequence_race','ingest_vs_canonical_authority') as $mode)
+foreach(array('connect','revoke','authorization','projection','completion','duplicate','conflict','archival','unrelated','provider_event_sequence_race','cross_lesson_event_key_race','ingest_vs_canonical_authority') as $mode)
     if(!str_contains($concurrency,$mode))throw new RuntimeException('Concurrency matrix is missing mode: '.$mode);
 if(!str_contains($contractAdapters,'implements ProviderOAuthPort')||!str_contains($contractAdapters,'ProviderCalendarPort')||!str_contains($contractAdapters,'ProviderMeetingPort')||!str_contains($contractAdapters,'ProviderEventNormalizer'))throw new RuntimeException('The deterministic contract adapters must implement all four ports');
 if(!str_contains($contractAdapters,'[redacted]'))throw new RuntimeException('The deterministic adapters must never record credential material');
@@ -191,4 +191,17 @@ $sequenceInsert=strpos($ingest,'insertIngestEvent(');
 $sequenceRelease=strpos($ingest,'releaseProviderEventSequence');
 if($sequenceAcquire===false||$sequenceInsert===false||$sequenceRelease===false||!($sequenceAcquire<$sequenceInsert&&$sequenceInsert<$sequenceRelease))throw new RuntimeException('The ingest must serialise the sequence before the receipt insert and release it after the transaction');
 if(!str_contains($ingest,'}finally{'))throw new RuntimeException('The provider-scoped sequence lock must be released on every path');
+// One provider event key is decided under that same provider-scoped lock: the committed head is
+// re-read under it before a new receipt is inserted, so a contender that loses the race for the key
+// decides from the committed winner instead of colliding with it on the unique index.
+$recheck=strpos($ingest,'$existing=$this->repository->ingestEvent($providerCode,$eventKeyDigest,true);',$sequenceAcquire);
+if($recheck===false||$recheck>$sequenceInsert)throw new RuntimeException('The ingest must re-read the committed receipt under the provider-scoped serialisation before it inserts a new one');
+// Immutable-ingest contract: a materially changed context is durably recorded as a conflict on every
+// path — including the durable unique-index guard — and is never merely rejected.
+if(!str_contains($ingest,'conflictReceipt(')||!str_contains($ingest,'conflictResult('))throw new RuntimeException('A changed provider-event context must be recorded through the durable conflict recorder');
+if(!str_contains($repository,'conflict_identity'))throw new RuntimeException('A conflict receipt must converge on the recorded conflict identity');
+$guard=strpos($ingest,"duplicate(\$e)==='provider_event'");
+$guardedConflict=strpos($ingest,'return $this->conflictReceipt(');
+if($guard===false||$guardedConflict===false||$guardedConflict<$guard)throw new RuntimeException('A changed winner of the provider-event key race must be recorded as a durable conflict');
+if(str_contains($ingest,"throw new IdempotencyConflictException('Idempotency conflict');"))throw new RuntimeException('A materially changed provider-event context must never be reduced to a bare idempotency conflict');
 echo "Phase 2A.2-V contract static test passed\n";

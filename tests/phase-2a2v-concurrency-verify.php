@@ -86,6 +86,32 @@ if($mode==='connect_vs_revoke'){
         dzn_vcv_assert($count('provider_ingest_outcomes','provider_ingest_event_id=%d AND outcome=%s',array($receiptId,'admitted'))>=1,'converged duplicate retries must leave a recorded admission');
         dzn_vcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT outcome FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt DESC,id DESC LIMIT 1",$receiptId))==='admitted','the effective outcome of a converged duplicate must be the recorded admission');
     }
+}elseif($mode==='cross_lesson_event_key_race'){
+    // One provider event key delivered twice — same instant, materially changed context, two different
+    // Lessons. The delivery that lost the race may never be answered with a rejection or a duplicate-key
+    // persistence failure: exactly one immutable receipt survives, for the Lesson that won, and the
+    // loser's changed context must be durably recorded as the one conflict receipt for that key.
+    $lessonA=(int)$state['lesson_id'];$lessonB=(int)($state['occurrence_b']['lesson_id']??0);
+    dzn_vcv_assert($lessonB>0&&$lessonB!==$lessonA,'the race must name two distinct canonical Lessons');
+    $receipts=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE provider_code=%s AND lesson_id=%d",'google_meet',$lessonA),ARRAY_A)?:array();
+    $conflicts=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}provider_event_conflicts WHERE provider_code=%s AND lesson_id=%d",'google_meet',$lessonB),ARRAY_A)?:array();
+    dzn_vcv_assert(count($receipts)===1,'one provider event key must leave exactly one immutable receipt');
+    dzn_vcv_assert($count('provider_ingest_events','lesson_id=%d',array($lessonB))===0,'the losing delivery may never add a second receipt for the same provider event key');
+    dzn_vcv_assert(count($conflicts)===1,'a materially changed context must leave exactly one durable conflict receipt');
+    dzn_vcv_assert((int)$conflicts[0]['provider_ingest_event_id']===(int)$receipts[0]['id'],'the conflict receipt must name the immutable receipt it diverged from');
+    dzn_vcv_assert(hash_equals((string)$receipts[0]['provider_event_key_digest'],(string)$conflicts[0]['provider_event_key_digest']),'the conflict receipt must belong to the provider event key of that receipt');
+    dzn_vcv_assert((string)$conflicts[0]['conflict_kind']==='cross_lesson','the conflict receipt must classify the divergence as cross_lesson');
+    dzn_vcv_assert((int)$receipts[0]['event_sequence']>0,'a converged provider event must keep its original receipt fields');
+    dzn_vcv_assert($w2['ok']===true&&is_array($w2['outcome']??null)&&!empty($w2['outcome']['conflict']),'a changed context must be durably recorded as a conflict, never merely rejected');
+    dzn_vcv_assert((string)($w2['outcome']['processing_state']??'')==='conflicted','the losing delivery must report the conflict the contract requires');
+    dzn_vcv_assert((int)($w2['outcome']['conflict_id']??0)===(int)$conflicts[0]['id'],'the losing delivery must report the conflict receipt it recorded');
+    dzn_vcv_assert((int)($w2['outcome']['ingest_event_id']??0)===(int)$receipts[0]['id'],'the losing delivery must report the immutable receipt it diverged from');
+    dzn_vcv_assert(empty($w1['outcome']['conflict']),'the holder must not be answered with a conflict for its own first delivery');
+    foreach(array('w1'=>$w1,'w2'=>$w2) as $worker=>$contender){
+        $message=(string)($contender['message']??'');
+        dzn_vcv_assert(!str_contains($message,'Duplicate entry'),$worker.' must never be answered with a duplicate-key persistence failure');
+        dzn_vcv_assert(stripos($message,'idempotency')===false,$worker.' must never reduce a materially changed context to a bare idempotency conflict');
+    }
 }elseif($mode==='mapping_revoke_vs_ingest'){
     dzn_vcv_assert($count('integration_connections','teacher_id=%d AND active_slot=1',array($teacherId))===1,'a mapping revocation must never disturb the active connection');
     dzn_vcv_assert($count('provider_identity_mappings','id=%d AND mapping_state=%s',array((int)$state['identity_mapping_id'],'revoked'))===1,'the identity mapping must be recorded as revoked');

@@ -51,10 +51,12 @@ if($mode==='authorization_replay'){
     if($mode==='mapping_revoke_vs_ingest'){
         $state['identity_mapping_id']=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}provider_identity_mappings WHERE connection_id=%d AND mapping_state='verified' LIMIT 1",$connectionA));
     }
-    if($mode==='provider_event_sequence_race'){
+    if($mode==='provider_event_sequence_race'||$mode==='cross_lesson_event_key_race'){
         // A second occurrence in the same provider on a *different* Lesson: the two contenders therefore
         // lock different canonical chains, and the only shared serialisation is the provider-scoped
-        // receipt sequence the ingest allocates before it writes an immutable receipt.
+        // lock the ingest takes over the provider event key — which is also what serialises the receipt
+        // sequence it allocates before it writes an immutable receipt. The cross-lesson key race
+        // delivers the *same* event key to both of those Lessons with a materially different context.
         $fundedB=dzn_r2_fix_funded_enrolment($fixture['sources'][1],$mode.'-b',2);
         $targetB=$wpdb->get_row($wpdb->prepare("SELECT version.* FROM {$p}canonical_lesson_schedule_versions version INNER JOIN {$p}lessons lesson ON lesson.id=version.lesson_id WHERE lesson.term_id=%d AND version.applicable_slot=1 ORDER BY version.id LIMIT 1",(int)$fundedB['term_id']));
         dzn_vcs_assert($targetB!==null,'the second occurrence must leave one applicable canonical schedule version');

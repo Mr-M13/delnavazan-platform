@@ -7,7 +7,7 @@ repo=$DZN_PHASE_2A2V_REPO
 wpdir=$DZN_PHASE_2A2V_WP_DIR
 net=$DZN_PHASE_2A2V_NET
 case $mode in
-  connect_vs_revoke|authorization_replay|projection_vs_release|projection_vs_completion|duplicate_vs_conflicting_event|provider_event_sequence_race|ingest_vs_canonical_authority|mapping_revoke_vs_ingest|teacher_archival_vs_connection|unrelated_teacher) ;;
+  connect_vs_revoke|authorization_replay|projection_vs_release|projection_vs_completion|duplicate_vs_conflicting_event|cross_lesson_event_key_race|provider_event_sequence_race|ingest_vs_canonical_authority|mapping_revoke_vs_ingest|teacher_archival_vs_connection|unrelated_teacher) ;;
   *) echo "Unknown Phase V concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives

@@ -6,13 +6,33 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ## Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration — candidate, unmerged — 2026-09-25
 
 Schema 27 / migration `027_google_calendar_meet_provider_integration` / build
-`phase2a2v-provider-neutral-google-calendar-meet-20260925.4`. Reconstructed candidate: the previously
+`phase2a2v-provider-neutral-google-calendar-meet-20260925.5`. Reconstructed candidate: the previously
 recorded Phase-V candidate `3724edb3c36959f3657e6b495ab96f26d347c476` / tree
 `5402cf890e2db898bccb15ba8ffc97176ced6457` was lost from every workspace, backup object store, reflog
 and remote branch, so this slice was rebuilt from the approved provider-neutral contract, the
 authoritative current code/docs and the preserved Phase-V run evidence. It is additive on top of the
 materialised R1/R2 base and renumbers nothing. See
 `docs/PHASE-2A-2V-GOOGLE-CALENDAR-MEET-PROVIDER-NEUTRAL-INTEGRATION.md`.
+
+**Correction round 5** (build `…20260925.5`) applies the independent-review finding against the
+candidate `389a5463877a2ae92eaefd7020789a5ad33d2943` / tree
+`d2965765ff8d5afb824f83f5a44d19b9ca65a410`, additively and without rewriting that history:
+
+- Concurrent deliveries of one provider event key with materially changed contexts on *different*
+  Lessons could lose the durable conflict receipt the immutable-ingest contract requires. Both
+  contenders could observe no receipt before either took the provider-scoped sequence lock; the
+  winner committed, and the loser met the unique `provider_event` index, found the winner's fact
+  digest different and threw `IdempotencyConflictException` without recording a conflict, so a
+  materially changed context was merely rejected instead of durably recorded. The provider event key
+  itself is now decided under that provider-scoped serialisation: the lock is taken before the
+  committed head is read and held until the deciding transaction has ended, the committed receipt is
+  re-read under it, and a contended loser records the durable conflict exactly as the sequential case
+  does. The unique `provider_event` index stays as the durable guard, and a delivery that still loses
+  that index race is routed through the same recorder (`conflictReceipt()` → `recordConflict()`)
+  rather than being reduced to a bare rejection; `recordConflict()` converges on the recorded row
+  under the unique `conflict_identity` index when two contenders carry the identical changed context.
+  The concurrency matrix gains the `cross_lesson_event_key_race` mode and the static contract now pins
+  the re-read under the lock and the durable conflict routing.
 
 **Correction round 4** (build `…20260925.4`) applies the independent-review findings against the
 candidate `d9c47b60d085817009a0734e51886154352b6359` / tree
@@ -132,6 +152,18 @@ candidate `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree
   runner, the extended static contract in `tests/phase-2a2v-contract.php` (declared lock order,
   revalidations, chain-before-mapping in the acknowledgement, and sequence serialisation before the
   receipt insert), `git diff --check` and a complete `git status` review.
+- Evidence for correction round 5: the environment constraint is unchanged, so every suite in the
+  phase's test surface is once again marked NOT EXECUTED HERE and must be re-run in the reviewer's
+  disposable harness before acceptance. What was executed here: a structural balance check over every
+  touched PHP file (delimiters, strings and comments scanned as tokens), a line-by-line review of the
+  corrected path against the finding (a trace of the provider-scoped key decision through
+  `lockProviderEventSequence()`, the re-read of the committed receipt, `duplicate()`, `conflict()` and
+  `insertConflict()` to the durable conflict receipt, and a trace of the two-Lesson race the new mode
+  stages), a symbol-resolution check over the touched files, `sh -n` over the extended concurrency
+  runner, the extended static contract in `tests/phase-2a2v-contract.php` (re-read under the
+  provider-scoped serialisation before the insert, durable conflict routing on the guarded path, and
+  no bare idempotency-conflict rejection of a materially changed context), `git diff --check` and a
+  complete `git status` review.
 
 ## Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority — candidate, unmerged — 2026-09-23
 

@@ -102,6 +102,23 @@ try{
             $result['outcome']=$ingest->ingest($delivery($state,$join),$key('race-ingest-2'));
         }
         $result['ok']=true;
+    }elseif($mode==='cross_lesson_event_key_race'){
+        // One provider event key delivered twice at the same instant with a materially changed context:
+        // the holder writes the receipt for its Lesson and keeps that transaction open, while the
+        // contender names a *different* Lesson with the same key. The canonical chains are disjoint, so
+        // the two only meet on the provider-scoped lock: the loser must re-read the committed winner and
+        // leave the durable conflict receipt its changed context requires rather than being rejected.
+        $other=is_array($state['occurrence_b']??null)?$state['occurrence_b']:null;
+        if($other===null)throw new RuntimeException('cross-lesson provider event key race fixture missing');
+        if($worker==='w1'){
+            $result['action']='ingest_provider_event';
+            $hold('dzn_phase_2a2v_after_ingest_write');
+            $result['outcome']=$ingest->ingest($delivery($state,(string)$given['join_at_utc']),$key('race-cross-lesson-a'));
+        }else{
+            $result['action']='ingest_same_provider_event_key_other_lesson';
+            $result['outcome']=$ingest->ingest($envelope((int)$other['lesson_id'],(int)$other['schedule_version_id'],$eventKey,(string)$given['join_at_utc'],(string)$given['observed_at'],(string)$given['leave_at_utc']),$key('race-cross-lesson-b'));
+        }
+        $result['ok']=true;
     }elseif($mode==='provider_event_sequence_race'){
         // Two distinct event keys for two different Lessons arrive together. The holder keeps its receipt
         // transaction open, so the contender has to take a sequence that is distinct from the one the

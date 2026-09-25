@@ -1,6 +1,6 @@
 # Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (implementation record)
 
-Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 4 APPLIED — NOT INDEPENDENTLY
+Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 5 APPLIED — NOT INDEPENDENTLY
 REVIEWED / NOT MERGED / NOT DEPLOYED.** No live credential, no provider traffic, no production data,
 no Theme change, no deployment and no public cutover is authorised by this document or by the code it
 describes.
@@ -33,16 +33,25 @@ describes.
 > `lockLessonRoots()` and the non-atomic `MAX(event_sequence)+1` receipt allocation. Section 11
 > records each finding and the exact correction. History remains additive: nothing was reset, rebased,
 > amended or force-pushed.
+>
+> **Correction round 5.** Independent review of the round-4 candidate
+> `389a5463877a2ae92eaefd7020789a5ad33d2943` / tree `d2965765ff8d5afb824f83f5a44d19b9ca65a410`
+> returned FAIL / CORRECTION REQUIRED with one blocking finding: two concurrent deliveries of the same
+> provider event key with changed contexts on different Lessons could lose the durable conflict receipt,
+> because the loser of the unique-index race met an `IdempotencyConflictException` instead of
+> `recordConflict()`. Section 13 records the finding and the exact correction. History remains additive:
+> nothing was reset, rebased, amended or force-pushed, and this round is a strictly additive change on
+> top of that candidate.
 
 ## 1. Identity
 
 | Item | Value |
 | --- | --- |
 | Authoritative base | manager checkout `559b1736621c9ed32e41dd2b785dd0f040dcb647` (tree `4e7fb1736b4a30de323cd25fe5dd4b6ceaad65a1`) |
-| Superseded candidates | `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c` (round-1 review FAIL; retained in history) and `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree `5850a5a405800cd981c667d36d99328394af6b49` (round-2 review FAIL; retained in history) |
+| Superseded candidates | `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c` (round-1 review FAIL; retained in history), `d9eec89715f20c8d12c61173e4c7b6e9c5769fef` / tree `5850a5a405800cd981c667d36d99328394af6b49` (round-2 review FAIL; retained in history), `d9c47b60d085817009a0734e51886154352b6359` / tree `bc02802f40a780b19750d5e349e44f98f206739d` (round-3 review FAIL; retained in history) and `389a5463877a2ae92eaefd7020789a5ad33d2943` / tree `d2965765ff8d5afb824f83f5a44d19b9ca65a410` (round-4 review FAIL; retained in history) |
 | Candidate schema | **27** |
 | Candidate migration | `027_google_calendar_meet_provider_integration` |
-| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.3` (correction round 3) |
+| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.5` (correction round 5) |
 | Candidate SHA / tree | recorded by the host materialisation; a commit cannot embed its own hash |
 
 The preflight contract named `26` / `026_google_calendar_meet_provider_integration` as *placeholders
@@ -189,7 +198,7 @@ Core never imports `Delnavazan\Platform\Integrations\*`; the adapters are inject
 | `tests/phase-2a2v-runtime.php` | Consent lifecycle with deterministic digest replay, exact-lifecycle completion with a competing pending consent, sealing, mappings, calendar/Meet projection against the exact canonical version, pending→acknowledged promotion, stale-version refusal, retraction without canonical mutation, authenticated Phase-P evidence seam, immutable receipt with an appended admission, duplicate convergence, durable conflict, capability denial, object-level reads including the view-capability requirement, digest-only persistence. | NOT EXECUTED HERE |
 | `tests/phase-2a2v-corruption-runtime.php` | Corrupt connection state/identity digest, credential versions and sealed material, mapping shapes (including a pending projection), provider-event context/state/proof, handoff outcome, conflict kind and command evidence; every path fails closed and recovers after repair. | NOT EXECUTED HERE |
 | `tests/phase-2a2v-failure-runtime.php` | Injected write boundaries at the connection, projection and ingest gates: full rollback, no orphan provider reference, no falsely replayable command, no Phase-P fact from a rolled-back ingest, and no reported admission for a receipt whose handoff outcome is absent. | NOT EXECUTED HERE |
-| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay` (two processes consuming one identical authorization state with one identical command key), `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `provider_event_sequence_race` (two distinct event keys for two different Lessons delivered together — disjoint canonical chains, one provider-scoped receipt sequence), `ingest_vs_canonical_authority` (a provider ingest raced against a canonical schedule authority holding the complete canonical chain), `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay` (two processes consuming one identical authorization state with one identical command key), `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `cross_lesson_event_key_race` (one event key delivered twice with a materially changed context on two different Lessons — one immutable receipt for the winner, one durable conflict receipt for the loser), `provider_event_sequence_race` (two distinct event keys for two different Lessons delivered together — disjoint canonical chains, one provider-scoped receipt sequence), `ingest_vs_canonical_authority` (a provider ingest raced against a canonical schedule authority holding the complete canonical chain), `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
 
 Runtime suites are gated on `DZN_PHASE_2A2V_RUNTIME_TEST` ∈
 `migration|authority|corruption|failure|concurrency` and refuse to run outside WP-CLI on a
@@ -207,6 +216,39 @@ DZN_PHASE_2A2V_REPO=<repo> DZN_PHASE_2A2V_WP_DIR=<wp> DZN_PHASE_2A2V_NET=<net> \
 ```
 
 ## 7. Evidence executed for this correction round
+
+### Correction round 5
+
+The environment constraint is unchanged: no PHP interpreter is on the `PATH`, no Docker runtime is
+reachable (the Docker CLI reports `permission denied while trying to connect to the docker API`) and
+network access is restricted, so no PHP file could be linted and no suite could be executed here.
+Executed instead, against the reviewed finding:
+
+- a structural balance check over every touched PHP file (delimiters, strings and comments scanned as
+  tokens; all clean);
+- a line-by-line review of the corrected path: the re-read of the committed receipt under the
+  provider-scoped lock was traced against the two-Lesson race the new mode stages, and the
+  unique-index guard was traced through `duplicate()`, `conflict()` and `insertConflict()` to the
+  conflict receipt it must leave;
+- a symbol-resolution check over every touched PHP file: every referenced class, method and helper
+  (`GET_LOCK`/`RELEASE_LOCK` are driver statements, not PHP symbols) resolves to an imported,
+  same-namespace or fully-qualified name; `IdempotencyConflictException` is deliberately no longer
+  raised by the ingest seam, and the class itself is untouched for the callers that own it;
+- a static contract extension in `tests/phase-2a2v-contract.php` that now *machine-checks* the
+  re-read of the committed receipt under the provider-scoped serialisation before the insert, the
+  presence of the durable conflict recorder on the guarded path and the absence of any bare
+  `IdempotencyConflictException` rejection of a materially changed context, and that lists the new
+  concurrency mode;
+- `sh -n tests/phase-2a2v-concurrency-runner.sh` (the runner script gains one mode);
+- `git diff --check` and a complete `git status` review before publication;
+- `php -l` over every touched PHP file: **NOT EXECUTED** (no PHP runtime in this environment) and must
+  be run in the disposable harness before merge, together with the runtime suites.
+
+Every suite in §6, including the two that need no WordPress, is marked NOT EXECUTED HERE. This round
+changed source and test surface that those suites assert on — in particular the ingest seam and the
+concurrency matrix — so the earlier candidate's results do not carry over and must be reproduced by the
+reviewer's harness before this candidate is accepted. No live credential, no provider traffic, no
+production data, no Theme change and no deployment were used or produced.
 
 ### Correction round 4
 
@@ -463,11 +505,11 @@ write of any kind to Phase-M/N/O/P storage — the only writes remain the ten Ph
 Phase-P intake seam. No new table, column, index or migration was introduced by this round, and the
 schema stays Schema 27 / migration `027_google_calendar_meet_provider_integration`.
 
-## 12. Declared canonical lock order and the provider-scoped receipt sequence
+## 12. Declared canonical lock order, the provider-scoped receipt sequence and the immutable conflict
 
-Two invariants make the Phase-V storage safe to share with the canonical authorities. Both are stated
-here so that §5, the repository docblock, the static contract and the concurrency matrix all describe
-the same rule.
+Three invariants make the Phase-V storage safe to share with the canonical authorities. All are stated
+here so that §5, the repository docblock, the static contract and the concurrency matrix describe the
+same rules.
 
 **Canonical lock order.** Anything that needs both a canonical aggregate and a Phase-V integration row
 takes the canonical chain first, in exactly this order: Student–Course identity root → Enrolment →
@@ -485,3 +527,57 @@ different Lessons hold disjoint canonical chains, the sequence is allocated unde
 serialisation: `lockProviderEventSequence()` is taken before the head is read, `maxEventSequence()+1`
 is computed inside that serialisation, and `releaseProviderEventSequence()` runs after the receipt
 transaction has ended. The unique `(provider_code,event_sequence)` index remains the durable guard.
+
+**Immutable conflict receipt.** `provider_event_key_digest` is unique per `provider_code`, so one
+provider event key has exactly one immutable receipt, and that same provider-scoped lock decides the
+key itself: the committed head is re-read under it before a new receipt is inserted, so a contender
+that loses the race decides from the committed winner rather than from a stale absence. A materially
+changed context — including one that arrives on a *different* Lesson and therefore holds a different
+canonical chain — is then routed through `recordConflict()`, which appends the durable conflict receipt
+under the unique `conflict_identity` index and converges on the recorded row if a concurrent contender
+already wrote it. The unique `provider_event` index stays as the durable guard behind the
+serialisation, and a delivery that still loses that index race is routed through the same recorder, so
+no path reduces a materially changed context to a bare rejection.
+
+## 13. Correction round 5 — blocking finding and its resolution
+
+Reviewed candidate `389a5463877a2ae92eaefd7020789a5ad33d2943` / tree
+`d2965765ff8d5afb824f83f5a44d19b9ca65a410` (HEAD of the reviewed round-4 candidate, materialised in
+this workspace as commit `389a5463…`). The single finding is corrected in code and in the test surface
+that asserts the corrected behaviour:
+
+1. **A concurrent changed-context delivery of one provider event key could lose its durable conflict
+   receipt.** Two deliveries of the same provider event key can name different Lessons, so they take
+   different canonical chains and their `lockLessonRoots()` calls do not meet. Both could observe no
+   receipt before either took the provider-scoped sequence lock; the winner then committed, and the
+   loser — attempting its own insert — met the unique `provider_event` index, saw that the winner's
+   `event_fact_digest` differed and threw `IdempotencyConflictException` without ever calling
+   `recordConflict()`. The immutable-ingest contract requires the opposite: every materially changed
+   context is durably *recorded* as a conflict, not merely rejected, so the losing delivery silently
+   produced no evidence at all. *Corrected:* the provider event key itself is now decided under the
+   provider-scoped serialisation. `lockProviderEventSequence()` is taken **before** the committed head
+   is read (for every path that would insert a new receipt) and is held until the deciding transaction
+   has ended, and the committed receipt is re-read under that lock, so a contender that loses the race
+   reads the committed winner and — because its context materially differs — records the durable
+   conflict exactly as the sequential case does. The unique `provider_event` index is preserved
+   unchanged as the durable guard behind the serialisation, and a delivery that still loses that index
+   race is now routed through the same recorder (`conflictReceipt()` → `recordConflict()`) instead of
+   being reduced to a bare rejection; `recordConflict()` converges on the recorded row when two
+   contenders carry the identical changed context, so the unique `conflict_identity` index keeps
+   exactly one durable conflict receipt and no contender is answered with a driver failure in its
+   place. The concurrency matrix gains the `cross_lesson_event_key_race` mode: one event key is
+   delivered twice at the same instant with a materially changed context on two different Lessons
+   while the holder's receipt transaction is still open, and the verifier asserts that exactly one
+   immutable receipt survives (for the winning Lesson), that no second receipt is created for the
+   losing Lesson, that exactly one conflict receipt exists for that key classifying the divergence as
+   `cross_lesson` and naming both the receipt and the losing Lesson, that the losing contender reports
+   that conflict rather than a failure, and that neither contender is answered with a duplicate-key
+   persistence failure or with a bare idempotency conflict.
+
+Behaviour that the review confirmed and that this round deliberately preserves: the authenticated
+envelope boundary, the immutable provider-event receipt with append-only handoff outcomes, admission
+written only after a successful Phase-P handoff, the provider-scoped receipt sequence, the declared
+canonical lock order, the pending→acknowledged projection boundary, and no write of any kind to
+Phase-M/N/O/P storage — the only writes remain the ten Phase-V tables and the Phase-P intake seam. No
+new table, column, index or migration was introduced by this round, and the schema stays Schema 27 /
+migration `027_google_calendar_meet_provider_integration`.

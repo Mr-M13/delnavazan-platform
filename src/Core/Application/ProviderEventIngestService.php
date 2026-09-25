@@ -24,10 +24,13 @@ use Delnavazan\Platform\Core\Support\Identifier;
  * Admission is a separate appended outcome, written only after the handoff succeeded, so a receipt can
  * never be read — or returned to a retrying caller — as admitted when Phase P never saw the fact.
  *
- * A new receipt takes the next provider-scoped `event_sequence` under the provider sequence lock, which
- * is held until its transaction has committed: two deliveries that name different Lessons lock different
- * canonical chains, yet they still take distinct sequences instead of colliding on the unique
- * `(provider_code,event_sequence)` index.
+ * Every decision about one provider event key is taken under the same provider-scoped lock: it is
+ * acquired before the committed head is read, and it is held until the deciding transaction has ended.
+ * Two deliveries that name different Lessons lock different canonical chains and can therefore only
+ * meet on that shared lock, so a new receipt takes the next `event_sequence` without colliding on the
+ * unique `(provider_code,event_sequence)` index — and a contender that loses the race re-reads the
+ * committed winner and leaves a durable conflict receipt for its changed context instead of being
+ * merely rejected by the unique `provider_event` index.
  */
 final class ProviderEventIngestService {
     public function __construct(
@@ -78,12 +81,24 @@ final class ProviderEventIngestService {
         try{
             $this->repository->lockLessonRoots($lessonId);
             $existing=$this->repository->ingestEvent($providerCode,$eventKeyDigest,true);
+            if(!$existing){
+                // One provider event key is decided under one provider-scoped lock, taken before the
+                // committed head is read. Two deliveries of the *same* key can name different Lessons,
+                // so they lock different canonical chains and meet for the first time here: the loser
+                // re-reads the winner below and, because its context materially differs, leaves a
+                // durable conflict receipt for it instead of colliding on the unique `provider_event`
+                // index. The lock is held until this transaction has ended, so it also serialises the
+                // provider-scoped `event_sequence` taken inside.
+                $this->repository->lockProviderEventSequence($providerCode);
+                $sequenceLocked=true;
+                $existing=$this->repository->ingestEvent($providerCode,$eventKeyDigest,true);
+            }
             if($existing){
                 if(!hash_equals((string)$existing->event_fact_digest,$eventFactDigest)){
                     $kind=$this->conflictKind($existing,$context,$lessonId,$scheduleVersionId);
                     $conflictId=$this->recordConflict($existing,$providerCode,$eventKeyDigest,$kind,$eventFactDigest,$lessonId,$scheduleVersionId,(string)$facts['observed_at'],$now,$actor);
                     $this->repository->commit();
-                    return array('ingest_event_id'=>(int)$existing->id,'conflict_id'=>$conflictId,'conflict_kind'=>$kind,'processing_state'=>'conflicted','conflict'=>true,'idempotent'=>false,'operation'=>'ingest_provider_event');
+                    return $this->conflictResult((int)$existing->id,$conflictId,$kind);
                 }
                 // Exact duplicate. The receipt must still satisfy the aggregate contract, and it is
                 // only ever reported as admitted when an admitted handoff outcome already exists for
@@ -100,11 +115,9 @@ final class ProviderEventIngestService {
                 $this->repository->commit();
                 $duplicate=true;
             }else{
-                // The provider-scoped sequence lock is taken before the head is read and released only
-                // after this transaction has ended, so a delivery for a different Lesson can never take
-                // the same `event_sequence` while this receipt is still uncommitted.
-                $this->repository->lockProviderEventSequence($providerCode);
-                $sequenceLocked=true;
+                // The provider-scoped sequence lock taken above is still held, so a delivery for a
+                // different Lesson can never take the same `event_sequence` while this receipt is
+                // still uncommitted.
                 $eventId=$this->repository->insertIngestEvent(array(
                     'uid'=>Identifier::uid(),'connection_id'=>isset($delivery['connection_id'])?(int)$delivery['connection_id']:null,
                     'provider_code'=>$providerCode,'provider_event_key_digest'=>$eventKeyDigest,'event_fact_digest'=>$eventFactDigest,
@@ -127,9 +140,14 @@ final class ProviderEventIngestService {
             }
         }catch(\Throwable$e){
             $this->repository->rollback();
+            // Durable guard. The unique `provider_event` index still adjudicates the key if the
+            // provider-scoped lock could not be taken, so a delivery that loses that index race owes
+            // the same durable conflict receipt as the contender that read the committed winner: a
+            // materially changed context is recorded, never merely rejected.
             $winner=$this->repository->duplicate($e)==='provider_event'?$this->repository->ingestEvent($providerCode,$eventKeyDigest):null;
             if(!$winner)throw $e;
-            if(!hash_equals((string)$winner->event_fact_digest,$eventFactDigest))throw new IdempotencyConflictException('Idempotency conflict');
+            if(!hash_equals((string)$winner->event_fact_digest,$eventFactDigest))
+                return $this->conflictReceipt($winner,$providerCode,$eventKeyDigest,$eventFactDigest,$context,$lessonId,$scheduleVersionId,(string)$facts['observed_at'],$actor);
             $eventId=(int)$winner->id;$duplicate=true;
         }finally{
             // The lock is not transactional, so it is always released once the receipt transaction — and
@@ -241,15 +259,55 @@ final class ProviderEventIngestService {
         return 'changed_payload';
     }
 
+    /**
+     * The single durable conflict receipt a materially changed context is owed.
+     *
+     * Exactly one row may exist for one provider event key and one changed context digest, so the
+     * insert converges on the recorded row when a concurrent contender carrying the identical changed
+     * context has already written it — the conflict is recorded either way, and the caller is never
+     * answered with a driver failure in its place.
+     */
     private function recordConflict(object $existing,string $providerCode,string $eventKeyDigest,string $kind,string $conflictingDigest,int $lessonId,int $scheduleVersionId,string $observedAt,string $now,int $actor):int{
         if($found=$this->repository->conflict($providerCode,$eventKeyDigest,$conflictingDigest))return(int)$found->id;
-        return $this->repository->insertConflict(array(
-            'uid'=>Identifier::uid(),'provider_ingest_event_id'=>(int)$existing->id,'provider_code'=>$providerCode,
-            'provider_event_key_digest'=>$eventKeyDigest,'conflict_kind'=>$kind,'conflicting_fact_digest'=>$conflictingDigest,
-            'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
-            'observed_at'=>ProviderIntegrationRule::utc($observedAt)?$observedAt:$now,
-            'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
-        ));
+        try{
+            return $this->repository->insertConflict(array(
+                'uid'=>Identifier::uid(),'provider_ingest_event_id'=>(int)$existing->id,'provider_code'=>$providerCode,
+                'provider_event_key_digest'=>$eventKeyDigest,'conflict_kind'=>$kind,'conflicting_fact_digest'=>$conflictingDigest,
+                'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
+                'observed_at'=>ProviderIntegrationRule::utc($observedAt)?$observedAt:$now,
+                'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor,
+            ));
+        }catch(\Throwable$e){
+            if($this->repository->duplicate($e)==='conflict_identity')
+                if($found=$this->repository->conflict($providerCode,$eventKeyDigest,$conflictingDigest))return(int)$found->id;
+            throw $e;
+        }
+    }
+
+    /**
+     * Record the durable conflict receipt for a delivery that lost the race for its provider event key.
+     *
+     * The receipt row is immutable and is never overwritten, so the divergence is appended in its own
+     * transaction: the winner's receipt stays exactly as it was committed and the loser leaves the
+     * conflict evidence the contract requires for every materially changed context.
+     */
+    private function conflictReceipt(object $existing,string $providerCode,string $eventKeyDigest,string $conflictingDigest,array $context,int $lessonId,int $scheduleVersionId,string $observedAt,int $actor):array{
+        $now=gmdate('Y-m-d H:i:s');
+        $kind=$this->conflictKind($existing,$context,$lessonId,$scheduleVersionId);
+        $this->repository->begin();
+        try{
+            $conflictId=$this->recordConflict($existing,$providerCode,$eventKeyDigest,$kind,$conflictingDigest,$lessonId,$scheduleVersionId,$observedAt,$now,$actor);
+            $this->repository->commit();
+        }catch(\Throwable$e){
+            $this->repository->rollback();
+            throw $e;
+        }
+        return $this->conflictResult((int)$existing->id,$conflictId,$kind);
+    }
+
+    /** The reported outcome of a durably recorded conflict: the original receipt is named, never changed. */
+    private function conflictResult(int $eventId,int $conflictId,string $kind):array{
+        return array('ingest_event_id'=>$eventId,'conflict_id'=>$conflictId,'conflict_kind'=>$kind,'processing_state'=>'conflicted','conflict'=>true,'idempotent'=>false,'operation'=>'ingest_provider_event');
     }
 
     /**
