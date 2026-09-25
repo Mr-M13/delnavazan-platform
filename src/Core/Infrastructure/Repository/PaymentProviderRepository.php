@@ -137,13 +137,60 @@ final class PaymentProviderRepository {
         return $wpdb->get_results("SELECT * FROM {$this->p}payment_provider_event_decisions ORDER BY id ASC")?:array();
     }
 
+    // --- the per-event decision claim (the phase's own mutable intake row, [C9-1]/[C9-2]) ------------
+    public function insertDecisionClaim(array $data):int{return $this->insert('payment_provider_event_decision_claims',$data);}
+    public function decisionClaim(int $id,bool $lock=false):?object{return $this->one("SELECT * FROM {$this->p}payment_provider_event_decision_claims WHERE id=%d".($lock?' FOR UPDATE':''),$id);}
+    /**
+     * [C9-1] The live claim of one event, or nothing when the event owes no claimed decision.
+     *
+     * `UNIQUE event_claim (provider_event_id, active_claim_slot)` — never this read — is what arbitrates
+     * two workers, exactly as the dispatch claim's `subject_claim` index arbitrates two commands.
+     */
+    public function liveDecisionClaim(int $providerEventId,bool $lock=false):?object{
+        return $this->one("SELECT * FROM {$this->p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1".($lock?' FOR UPDATE':''),$providerEventId);
+    }
+    public function decisionClaims():array{
+        global $wpdb;
+        return $wpdb->get_results("SELECT * FROM {$this->p}payment_provider_event_decision_claims ORDER BY id ASC")?:array();
+    }
+    /**
+     * [C9-2] Fenced `claimed → settled`: one affected row is the proof this generation still owns the event.
+     *
+     * It is the first statement of the transaction that appends the decision, so the claim row's lock
+     * serialises the next `decision_sequence` allocation a losing or replaced owner might otherwise
+     * derive at the same time.
+     */
+    public function settleDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $now):int{
+        global $wpdb;
+        return (int)$wpdb->query($wpdb->prepare(
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s",
+            $now,$now,$claimId,$expectedGeneration,$tokenDigest
+        ));
+    }
+    /** [C9-2] Fenced `claimed → released`: the owner appended no decision and frees the event's live slot. */
+    public function releaseDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $now):int{
+        global $wpdb;
+        return (int)$wpdb->query($wpdb->prepare(
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='released',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s",
+            $now,$now,$claimId,$expectedGeneration,$tokenDigest
+        ));
+    }
+    /** [C9-2] Conditional expired-lease takeover: one statement bumps the generation and issues a fresh lease. */
+    public function takeoverDecisionClaim(int $claimId,int $observedGeneration,string $tokenDigest,string $leaseUntil,string $now):int{
+        global $wpdb;
+        return (int)$wpdb->query($wpdb->prepare(
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='claimed',claim_generation=claim_generation+1,claim_token_digest=%s,lease_expires_at=%s,claimed_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at<%s",
+            $tokenDigest,$leaseUntil,$now,$now,$claimId,$observedGeneration,$now
+        ));
+    }
+
     public function duplicate(\Throwable $e):?string{
         if(!preg_match("/Duplicate entry .* for key ['`](?:[^'`.]+\\.)?([^'`]+)['`]/i",$e->getMessage(),$m))return null;
         $key=strtolower((string)$m[1]);
         return in_array($key,array(
             'uid','reference_code','provider_account','provider_object','canonical_object','secret_slot',
             'account_sequence','object_sequence','provider_event','decision_sequence','request_digest',
-            'command_key_digest','command_result','command_dispatch','subject_claim',
+            'command_key_digest','command_result','command_dispatch','subject_claim','event_claim',
         ),true)?$key:null;
     }
 

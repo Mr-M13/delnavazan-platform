@@ -17,6 +17,8 @@ use Delnavazan\Platform\Core\Support\Identifier;
 final class PaymentEventIntakeService {
     private const CAPABILITY='dzn_ingest_payment_provider_events';
     private const VIEW_CAPABILITY='dzn_view_payment_execution_authority';
+    /** How often a delivery that cannot own a claim re-reads the decision the owner is publishing. */
+    private const CLAIM_WAIT_INTERVAL_MICROSECONDS=25000;
     /** The controlled HTTP status of each refusal reason: nothing distinguishes provider from account. */
     private const HTTP_STATUS=array(
         'signature_verified'=>200,'signature_invalid'=>400,'signature_outside_tolerance'=>400,
@@ -102,6 +104,10 @@ final class PaymentEventIntakeService {
      * **re-delivered** body: the body is verified against the recorded account's single active signing
      * secret against the exact bytes supplied, the resulting event identity must equal the recorded
      * one, and only then is the owed decision appended — exactly once. Safe to run repeatedly.
+     *
+     * [C9-1] The drain appends nothing directly: like every other delivery it goes through the event's
+     * decision claim, so a drain that races a webhook redelivery produces one decision, and the loser
+     * converges on it rather than running the translation and the R2 consequence a second time.
      */
     public function drain(int $eventId,string $rawBody,array $headers):array{
         PaymentExecutionSupport::requireCapability(self::CAPABILITY);
@@ -109,10 +115,8 @@ final class PaymentEventIntakeService {
         $event=$this->repository->event($eventId);
         if(!$event)throw new \InvalidArgumentException('payment_provider_event_required');
         PaymentExecutionIntegrity::event($event);
-        $last=$this->repository->latestDecision($eventId);
-        if($last&&!$this->decisionIsPending($last)){
-            return array('event_id'=>$eventId,'decision_id'=>(int)$last->id,'decision_state'=>(string)$last->decision_state,'created'=>false,'converged'=>true);
-        }
+        $last=$this->decisionForEvent($eventId);
+        if(!$this->decisionIsOwed($last))return $this->convergedDecision($eventId,$last);
         $receipt=$this->repository->receipt((int)$event->receipt_id);
         if(!$receipt||$receipt->payment_provider_account_id===null)throw new \RuntimeException('payment_event_receipt_corrupt');
         $account=$this->accounts->resolveByReferenceCode((string)$this->selectorOf($event,$receipt));
@@ -132,8 +136,7 @@ final class PaymentEventIntakeService {
         // facts — a drain may never translate a payload the event never recorded.
         if(!hash_equals((string)$event->event_fact_digest,$this->factDigest((string)$event->provider_key,(string)$event->event_reference_digest,$match)))
             return $this->recordConflict($event);
-        $decision=$this->appendDecision($event,$this->decide($event,$match),'drain');
-        return array('event_id'=>$eventId,'decision_id'=>$decision['decision_id'],'decision_state'=>$decision['decision_state'],'created'=>true);
+        return $this->completeDecision($event,fn():array=>$this->decide($event,$match),'drain');
     }
 
     public function receipts(int $limit=50):array{
@@ -159,15 +162,52 @@ final class PaymentEventIntakeService {
     public function outstandingEvents():int{
         PaymentExecutionSupport::requireCapability(self::VIEW_CAPABILITY);
         $outstanding=0;
-        foreach($this->repository->events() as $event){
-            $last=$this->repository->latestDecision((int)$event->id);
-            if(!$last||$this->decisionIsPending($last))$outstanding++;
-        }
+        foreach($this->repository->events() as $event)if($this->decisionIsOwed($this->decisionForEvent((int)$event->id)))$outstanding++;
         return $outstanding;
+    }
+
+    /**
+     * [C9-1] Live per-event decision claims by state, age and fencing generation (§13).
+     *
+     * Never a claim token, a payload or a provider reference: an operator sees which events one worker is
+     * currently completing, how long it has held them and which generation owns them.
+     */
+    public function outstandingDecisionClaims():array{
+        PaymentExecutionSupport::requireCapability(self::VIEW_CAPABILITY);
+        $rows=array();
+        foreach($this->repository->decisionClaims() as $claim){
+            PaymentExecutionIntegrity::decisionClaim($claim);
+            if((string)$claim->claim_state!=='claimed')continue;
+            $rows[]=array(
+                'claim_id'=>(int)$claim->id,'provider_event_id'=>(int)$claim->provider_event_id,
+                'claim_state'=>(string)$claim->claim_state,'claim_generation'=>(int)$claim->claim_generation,
+                'age_seconds'=>max(0,time()-(int)strtotime((string)$claim->claimed_at.' UTC')),
+            );
+        }
+        return $rows;
     }
 
     private function decisionIsPending(object $decision):bool{
         return (string)$decision->r2_consequence_state==='pending'||(string)$decision->reason_code==='payment_worker_principal_required';
+    }
+    /** An event owes a decision while it has none at all, or while its latest one is still pending. */
+    private function decisionIsOwed(?object $decision):bool{
+        return $decision===null||$this->decisionIsPending($decision);
+    }
+    /**
+     * [C9-1] The decision that decides one event: the newest row that is not the controlled conflict record.
+     *
+     * A conflict row records that a *different* delivery carried materially different facts; it never
+     * discharges the event's own decision and never replaces it, so "does this event still owe a decision"
+     * is asked of the non-conflict timeline. An event whose only rows are conflict records still owes its
+     * first decision.
+     */
+    private function decisionForEvent(int $providerEventId):?object{
+        $latest=$this->repository->latestDecision($providerEventId);
+        if($latest&&(string)$latest->reason_code!=='conflicting_provider_event')return $latest;
+        foreach(array_reverse($this->repository->decisions($providerEventId)) as $decision)
+            if((string)$decision->reason_code!=='conflicting_provider_event')return $decision;
+        return null;
     }
 
     /** One verified event: durable identity first, then idempotency, conflict or a first decision. */
@@ -185,7 +225,9 @@ final class PaymentEventIntakeService {
         $event=$this->repository->event((int)$inserted['event_id']);
         if(!$event)throw new \RuntimeException('payment_event_corrupt');
         if(!$inserted['created'])return $this->convergeExisting($event,$factDigest,$envelope);
-        return $this->appendDecision($event,$this->decide($event,$envelope));
+        // [C9-1] The event this worker created still owes its first decision, and that decision is owned
+        // by exactly one worker: the claim is taken before any R1/R2 work is run.
+        return $this->completeDecision($event,fn():array=>$this->decide($event,$envelope),'first_decision');
     }
 
     /**
@@ -196,12 +238,15 @@ final class PaymentEventIntakeService {
      * not applicable. Materially different facts preserve the original event unchanged and append the
      * controlled `conflicting_provider_event` decision — a worker that lost the insert race must never
      * translate its own view of the facts.
+     *
+     * [C9-1] Convergence never means "no decision": an event that was recorded and then left owing — a
+     * worker that committed the event row and died before its first decision, which the round-8 candidate
+     * returned as `recorded` forever — is completed here by the next delivery, through the same
+     * serialised claim path a first decision and a pending retry take.
      */
     private function convergeExisting(object $existing,string $factDigest,ProviderEventEnvelope $envelope):array{
         if(hash_equals((string)$existing->event_fact_digest,$factDigest)){
-            $last=$this->repository->latestDecision((int)$existing->id);
-            if($last&&$this->decisionIsPending($last))return $this->appendDecision($existing,$this->decide($existing,$envelope),'duplicate_pending');
-            return array('event_id'=>(int)$existing->id,'decision_id'=>$last?(int)$last->id:null,'decision_state'=>$last?(string)$last->decision_state:'recorded','converged'=>true,'created'=>false);
+            return $this->completeDecision($existing,fn():array=>$this->decide($existing,$envelope),'duplicate');
         }
         return $this->recordConflict($existing);
     }
@@ -237,21 +282,235 @@ final class PaymentEventIntakeService {
         return array('event_id'=>$eventId,'created'=>true);
     }
 
+    /**
+     * The controlled conflict decision: the original event is preserved unchanged and no evidence is
+     * ever submitted for the changed facts ([C8-4]).
+     *
+     * [C9-1] It is appended through the same per-event claim as every other decision, so two concurrent
+     * deliveries of one event identity with different facts append exactly one conflict row, and the R1
+     * commercial exception is recorded once, by the one worker that appended it.
+     */
     private function recordConflict(object $event):array{
-        $decision=$this->appendDecision($event,array(
-            'decision_state'=>'conflicted','reason_code'=>'conflicting_provider_event','evidence_kind'=>null,
-            'offer_id'=>null,'obligation_id'=>null,'purchase_id'=>null,'commercial_evidence_id'=>null,
-            'collection_intent_id'=>null,'renewal_cycle_id'=>null,'renewal_cycle_state'=>null,
-            'collection_intent_state'=>null,'r2_consequence_state'=>'not_applicable','r2_reason_code'=>null,
-            'execution_command_id'=>null,'recorded_by'=>null,
-        ));
-        $this->exceptions->recordAfterFailure(array(
+        $result=$this->completeDecision($event,fn():array=>$this->conflictDecision(),'conflict',true);
+        if(!empty($result['created']))$this->exceptions->recordAfterFailure(array(
             'reason_code'=>'conflicting_payment_evidence','severity'=>'warning',
             'summary'=>'A provider event was re-delivered with materially different facts',
             'safe_detail'=>'conflicting_provider_event',
             'fingerprint_value'=>((int)$event->id).':'.(string)$event->event_reference_digest,
         ));
-        return $decision;
+        return $result;
+    }
+    private function conflictDecision():array{
+        return array(
+            'decision_state'=>'conflicted','reason_code'=>'conflicting_provider_event','evidence_kind'=>null,
+            'offer_id'=>null,'obligation_id'=>null,'purchase_id'=>null,'commercial_evidence_id'=>null,
+            'collection_intent_id'=>null,'renewal_cycle_id'=>null,'renewal_cycle_state'=>null,
+            'collection_intent_state'=>null,'r2_consequence_state'=>'not_applicable','r2_reason_code'=>null,
+            'execution_command_id'=>null,'recorded_by'=>null,
+        );
+    }
+
+    /**
+     * [C9-1]/[C9-2] The one serialised path that appends a decision for one event.
+     *
+     * A decision is appended by **exactly one worker**: the worker must own the event's live decision
+     * claim *before* it runs any R1/R2 work, the claim's generation and token fence the append inside the
+     * same transaction that records the row, and a delivery that cannot own the claim performs no work at
+     * all — it re-reads what the owner recorded and converges. The claim therefore covers the three
+     * cases a redelivery may legitimately complete: the first decision of a newly recorded event, the
+     * first decision of an event that was recorded and then left owing (a worker that died between the
+     * event insert and its decision), and the terminal consequence of a decision that is still `pending`
+     * or was refused for want of the §9.7 worker principal.
+     *
+     * `$alwaysAppends` is true only for the controlled conflict decision: materially different facts for
+     * a recorded event identity owe their own conflict row even though a terminal decision already
+     * exists, because a duplicate must never converge on changed facts (§9.5).
+     */
+    private function completeDecision(object $event,callable $decide,string $context,bool $alwaysAppends=false):array{
+        $eventId=(int)$event->id;
+        $last=$this->decisionForEvent($eventId);
+        if(!$alwaysAppends&&!$this->decisionIsOwed($last))return $this->convergedDecision($eventId,$last);
+        $claim=$this->acquireDecisionClaim($eventId);
+        // A conflict row is owed unconditionally, so its worker waits, bounded, for the event's own
+        // decision to be published rather than dropping the changed facts because one owner was busy.
+        if($claim===null&&$alwaysAppends)$claim=$this->awaitDecisionClaim($eventId);
+        if($claim===null)return $this->convergeOnOwner($eventId);
+        try{
+            // The owner always re-reads under its own claim before it does any work: a generation that
+            // took over an abandoned claim may find that the owed decision was already completed, and a
+            // decision that is no longer owed is never appended a second time.
+            $current=$this->decisionForEvent($eventId);
+            if(!$alwaysAppends&&!$this->decisionIsOwed($current)){
+                $this->abandonDecisionClaim($claim);
+                return $this->convergedDecision($eventId,$current);
+            }
+            $decision=$decide();
+        }catch(\Throwable $e){
+            $this->abandonDecisionClaim($claim);
+            throw $e;
+        }
+        return $this->appendDecisionUnderClaim($event,$decision,$claim,$context);
+    }
+
+    /** The recorded decision a delivery converges on, or the recorded state when the event owes one. */
+    private function convergedDecision(int $eventId,?object $decision):array{
+        return array(
+            'event_id'=>$eventId,'decision_id'=>$decision?(int)$decision->id:null,
+            'decision_state'=>$decision?(string)$decision->decision_state:'recorded',
+            'reason_code'=>$decision?$decision->reason_code:'recorded',
+            'converged'=>true,'pending'=>false,'created'=>false,
+        );
+    }
+
+    /**
+     * [C9-1]/[C9-2] Take the live decision claim of one event, or report that another worker owns it.
+     *
+     * The unique `event_claim` index — never a read — is the arbiter between two workers that both saw a
+     * decision owed: the insert reports whether this worker claimed the event, and a worker that meets
+     * the index runs no decision and no consequence work. An abandoned live claim (its lease has expired)
+     * is taken over by exactly one conditional statement that issues a new fencing generation and token;
+     * every other worker observes zero affected rows and converges instead of working.
+     */
+    private function acquireDecisionClaim(int $providerEventId):?array{
+        $now=PaymentExecutionSupport::now();
+        $live=$this->repository->liveDecisionClaim($providerEventId);
+        if($live){
+            PaymentExecutionIntegrity::decisionClaim($live);
+            if(!$this->claimIsAbandoned($live,$now))return null;
+            $token=$this->claimToken();
+            if($this->repository->takeoverDecisionClaim((int)$live->id,(int)$live->claim_generation,$token,$this->claimLease($now),$now)!==1)return null;
+            return array('claim_id'=>(int)$live->id,'generation'=>(int)$live->claim_generation+1,'token'=>$token);
+        }
+        $token=$this->claimToken();
+        $this->repository->begin();
+        try{
+            $claimId=$this->repository->insertDecisionClaim(array(
+                'uid'=>Identifier::uid(),'provider_event_id'=>$providerEventId,'claim_state'=>'claimed',
+                'claim_generation'=>1,'claim_token_digest'=>$token,'lease_expires_at'=>$this->claimLease($now),
+                'claimed_at'=>$now,'settled_at'=>null,'active_claim_slot'=>1,'created_at'=>$now,'updated_at'=>$now,
+                'created_by'=>$this->recordedBy(),'updated_by'=>$this->recordedBy(),
+            ));
+            $this->repository->commit();
+        }catch(\Throwable $e){
+            $this->repository->rollback();
+            // A worker that meets `UNIQUE event_claim` adopts nothing: it owns no decision work at all.
+            if($this->repository->duplicate($e)==='event_claim')return null;
+            throw $e;
+        }
+        return array('claim_id'=>$claimId,'generation'=>1,'token'=>$token);
+    }
+
+    /**
+     * [C9-1]/[C9-2] Bounded re-attempts of the decision claim, for the one row every changed-facts
+     * delivery owes.
+     *
+     * It never performs decision work of its own and never waits longer than the structural window; when
+     * the window closes the caller converges, and the next delivery or drain records the conflict.
+     */
+    private function awaitDecisionClaim(int $providerEventId):?array{
+        $deadline=microtime(true)+PaymentExecutionRule::DECISION_CLAIM_WAIT_MILLISECONDS/1000;
+        do{
+            usleep(self::CLAIM_WAIT_INTERVAL_MICROSECONDS);
+            $claim=$this->acquireDecisionClaim($providerEventId);
+            if($claim!==null)return $claim;
+        }while(microtime(true)<$deadline);
+        return null;
+    }
+
+    /**
+     * [C9-1]/[C9-2] Converge without doing any work: the loser of the claim re-reads the owner's decision.
+     *
+     * The wait is bounded and finite, and it never appends, translates or runs an R1/R2 consequence. If
+     * the owner is still working when the wait ends, the delivery reports the event as durably still
+     * owing its decision — the §9.5 pending state, visible in the read model and completed by the next
+     * delivery or drain, never by a second worker here.
+     */
+    private function convergeOnOwner(int $providerEventId):array{
+        $deadline=microtime(true)+PaymentExecutionRule::DECISION_CLAIM_WAIT_MILLISECONDS/1000;
+        do{
+            $last=$this->decisionForEvent($providerEventId);
+            if(!$this->decisionIsOwed($last))return $this->convergedDecision($providerEventId,$last);
+            if($this->repository->liveDecisionClaim($providerEventId)===null)break;
+            usleep(self::CLAIM_WAIT_INTERVAL_MICROSECONDS);
+        }while(microtime(true)<$deadline);
+        $last=$this->decisionForEvent($providerEventId);
+        if(!$this->decisionIsOwed($last))return $this->convergedDecision($providerEventId,$last);
+        return array(
+            'event_id'=>$providerEventId,'decision_id'=>$last?(int)$last->id:null,
+            'decision_state'=>$last?(string)$last->decision_state:'recorded',
+            'reason_code'=>$last?$last->reason_code:'decision_claim_in_flight',
+            'converged'=>false,'pending'=>true,'context'=>'claim_in_flight','created'=>false,
+        );
+    }
+
+    /**
+     * [C9-1]/[C9-2] Append the decision under the claim's fence, or write nothing at all.
+     *
+     * The conditional `claimed → settled` transition and the decision insert are **one transaction**: the
+     * affected-row count proves this generation still owns the event and takes the claim row's lock, so
+     * the next `decision_sequence` is allocated under that lock and two workers can never derive the same
+     * one. An owner that lost its fence — an expired claim another generation took over — rolls back,
+     * writes no decision and converges on whatever the successor recorded.
+     */
+    private function appendDecisionUnderClaim(object $event,array $decision,array $claim,string $context):array{
+        $now=PaymentExecutionSupport::now();
+        $this->repository->begin();
+        try{
+            if($this->repository->settleDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$now)!==1){
+                $this->repository->rollback();
+                return $this->convergeOnOwner((int)$event->id);
+            }
+            $decisionId=$this->repository->insertDecision(array(
+                'uid'=>Identifier::uid(),'provider_event_id'=>(int)$event->id,
+                'decision_sequence'=>$this->repository->maxDecisionSequence((int)$event->id),
+                'decision_state'=>$decision['decision_state'],'reason_code'=>$decision['reason_code'],
+                'evidence_kind'=>$decision['evidence_kind']??null,'offer_id'=>$decision['offer_id']??null,
+                'obligation_id'=>$decision['obligation_id']??null,'purchase_id'=>$decision['purchase_id']??null,
+                'commercial_evidence_id'=>$decision['commercial_evidence_id']??null,
+                'collection_intent_id'=>$decision['collection_intent_id']??null,'renewal_cycle_id'=>$decision['renewal_cycle_id']??null,
+                'renewal_cycle_state'=>$decision['renewal_cycle_state']??null,'collection_intent_state'=>$decision['collection_intent_state']??null,
+                'r2_consequence_state'=>$decision['r2_consequence_state']??'not_applicable','r2_reason_code'=>$decision['r2_reason_code']??null,
+                'execution_command_id'=>$decision['execution_command_id']??null,'decided_at'=>$now,'recorded_at'=>$now,
+                'recorded_by'=>$decision['recorded_by']??$this->recordedBy(),'created_at'=>$now,'created_by'=>$decision['recorded_by']??$this->recordedBy(),
+            ));
+            $this->repository->commit();
+        }catch(\Throwable $e){
+            $this->repository->rollback();
+            $this->abandonDecisionClaim($claim);
+            throw $e;
+        }
+        PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision',(int)$event->id,$decisionId);
+        return array(
+            'event_id'=>(int)$event->id,'decision_id'=>$decisionId,'decision_state'=>$decision['decision_state'],
+            'reason_code'=>$decision['reason_code'],'r2_consequence_state'=>$decision['r2_consequence_state']??'not_applicable',
+            'context'=>$context,'converged'=>false,'pending'=>false,'created'=>true,
+        );
+    }
+
+    /**
+     * Free the live slot after this worker appended nothing.
+     *
+     * A release that cannot be written is not fatal: the claim's lease is the durable recovery path, so a
+     * claim this worker still owns expires and exactly one later generation takes it over.
+     */
+    private function abandonDecisionClaim(array $claim):void{
+        try{
+            $this->repository->releaseDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],PaymentExecutionSupport::now());
+        }catch(\Throwable $ignored){
+            // Deliberately swallowed: the lease, not this statement, is what makes the claim recoverable.
+        }
+    }
+
+    /** A live claim is abandoned once its lease has expired; a live claim always carries one ([C9-1]). */
+    private function claimIsAbandoned(object $claim,string $now):bool{
+        $lease=$claim->lease_expires_at===null?null:(string)$claim->lease_expires_at;
+        return $lease!==null&&$lease<$now;
+    }
+    private function claimLease(string $now):string{
+        return gmdate('Y-m-d H:i:s',strtotime($now.' UTC')+PaymentExecutionRule::DECISION_CLAIM_LEASE_SECONDS);
+    }
+    private function claimToken():string{
+        return hash('sha256',Identifier::uid().'|'.bin2hex(random_bytes(32)));
     }
 
     /**
@@ -387,33 +646,6 @@ final class PaymentEventIntakeService {
             $input['kind']='refund';
             (new RefundReviewService())->recordRefundEvidence($input,$reference);
         }
-    }
-
-    private function appendDecision(object $event,array $decision,string $context='new'):array{
-        $now=PaymentExecutionSupport::now();
-        $recordedBy=$decision['recorded_by']??$this->recordedBy();
-        $this->repository->begin();
-        try{
-            $decisionId=$this->repository->insertDecision(array(
-                'uid'=>Identifier::uid(),'provider_event_id'=>(int)$event->id,
-                'decision_sequence'=>$this->repository->maxDecisionSequence((int)$event->id),
-                'decision_state'=>$decision['decision_state'],'reason_code'=>$decision['reason_code'],
-                'evidence_kind'=>$decision['evidence_kind']??null,'offer_id'=>$decision['offer_id']??null,
-                'obligation_id'=>$decision['obligation_id']??null,'purchase_id'=>$decision['purchase_id']??null,
-                'commercial_evidence_id'=>$decision['commercial_evidence_id']??null,
-                'collection_intent_id'=>$decision['collection_intent_id']??null,'renewal_cycle_id'=>$decision['renewal_cycle_id']??null,
-                'renewal_cycle_state'=>$decision['renewal_cycle_state']??null,'collection_intent_state'=>$decision['collection_intent_state']??null,
-                'r2_consequence_state'=>$decision['r2_consequence_state']??'not_applicable','r2_reason_code'=>$decision['r2_reason_code']??null,
-                'execution_command_id'=>$decision['execution_command_id']??null,'decided_at'=>$now,'recorded_at'=>$now,
-                'recorded_by'=>$recordedBy,'created_at'=>$now,'created_by'=>$recordedBy,
-            ));
-            $this->repository->commit();
-        }catch(\Throwable $e){
-            $this->repository->rollback();
-            throw $e;
-        }
-        PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision',(int)$event->id,$decisionId);
-        return array('event_id'=>(int)$event->id,'decision_id'=>$decisionId,'decision_state'=>$decision['decision_state'],'reason_code'=>$decision['reason_code'],'r2_consequence_state'=>$decision['r2_consequence_state']??'not_applicable','context'=>$context,'created'=>true);
     }
 
     private function refusal(string $reason,string $state='refused'):array{

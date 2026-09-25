@@ -2,11 +2,11 @@
 
 ## 028_payment_execution_seam_provider_adapter (Phase 2A.2-T, candidate, unmerged)
 
-Additive on top of the Phase-V candidate at Schema 27. It creates exactly fifteen tables
+Additive on top of the Phase-V candidate at Schema 27. It creates exactly sixteen tables
 (`payment_provider_accounts`, `_account_events`, `_account_commands`, `payment_provider_objects`,
 `_object_events`, `_object_commands`, `payment_provider_secrets`, `payment_execution_commands`,
 `payment_execution_attempts`, `payment_execution_results`, `payment_execution_dispatches`,
-`payment_provider_event_receipts`, `payment_provider_events`, `payment_provider_event_decisions`,
+`payment_provider_event_receipts`, `payment_provider_events`, `payment_provider_event_decisions`, `payment_provider_event_decision_claims`,
 `payment_provider_secret_events`), performs no backfill, infers no provider account, mapping, secret or
 event, adds no column to any existing table, opens no provider connection and makes no external call.
 `verify_payment_execution_schema()` runs after migration 028, on current-schema verification and

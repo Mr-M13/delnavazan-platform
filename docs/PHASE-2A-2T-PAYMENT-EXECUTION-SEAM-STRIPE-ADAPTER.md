@@ -2,12 +2,12 @@
 
 **Status:** candidate — awaiting independent review. Not merged, not deployed, not production-authorised.
 **Schema:** 028 / migration `028_payment_execution_seam_provider_adapter`
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260924.8`
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.9`
 **Base:** `main` at the Phase-V candidate tree (Schema 27), strictly additive on top of R1 (Schema 25, authoritative) and R2 (Schema 26, candidate).
 
 This record documents the implementation of the contract in
 [PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md](PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md)
-(correction round 8, SHA-256 `fb611d36627544ade01d5fa8935a4b98b11893cc1f465ddc5d1179d256b796ad`). The contract
+(correction round 9, SHA-256 `c6c55119adb4db52ac0583f97317478dd802a2d4ce7498a696ce674f6a951c34`). The contract
 is normative; this record states what was built, what could be executed in this environment, and what
 remains deliberately unresolved.
 
@@ -24,10 +24,10 @@ remains deliberately unresolved.
 4. **Stripe adapter** — `src/Integrations/Payment/Stripe/`: protocol translation, normalisation,
    redaction, exact-raw-body signature verification and the single public webhook route.
 5. **Webhook intake** — `PaymentEventIntakeService`: durable receipt, verification, event identity,
-   translation and the bounded ordered R2 consequence.
+   the durable per-event decision claim, translation and the bounded ordered R2 consequence.
 6. **Secret isolation** — `PaymentSecretVault` plus its own repository; no provider secret is writable in
    this build.
-7. **Schema 028** — fifteen additive tables with the fail-closed verifier
+7. **Schema 028** — sixteen additive tables with the fail-closed verifier
    `verify_payment_execution_schema()`.
 
 ## 2. Structural properties the candidate must satisfy
@@ -51,6 +51,15 @@ remains deliberately unresolved.
   `dispatch_descriptor_unavailable` result — the one claim/result pairing §8.2 rule 5 permits. A
   generation-1 `in_flight` claim whose capability cannot be consumed takes the provably call-free no-call
   abort; a takeover generation never takes it and keeps the ordinary `in_flight` pending behaviour.
+- **An event decision is owned by exactly one claim.** [C9-1]/[C9-2] Every decision — the first decision
+  of a new event, the first decision of an event that was recorded and then left owing one, the terminal
+  consequence of a `pending` decision and a `drain()` — is appended only by the worker that owns the
+  event's live decision claim. The claim is taken before any translation or R1/R2 consequence runs, its
+  generation and token fence the `claimed → settled` transition inside the transaction that inserts the
+  decision (so the next `decision_sequence` is allocated under the claim row's lock), and a delivery that
+  cannot own the claim performs no work at all: it re-reads the owner's decision, waits a bounded
+  structural window and converges. An expired claim is taken over by exactly one generation, so a worker
+  that died holding one never strands the event.
 - **Unresolved policy stays unresolved.** `provider_recurring_semantics_unresolved` is recorded and acted
   upon by nothing; there is no advance charge instant, no lapse, no recovery threshold and no refund
   consequence; `subscription` mappings are inert; the refund path records and routes for review with
@@ -88,7 +97,24 @@ remains deliberately unresolved.
 - **Webhook transport.** The controller performs the §9.2 request checks (method, HTTPS, content type,
   body size, request shape) and passes a controlled `precheck_refusal` reason to the intake service, so a
   refusal decided before parsing is still durably receipted and the body is never read to resolve the
-  account.
+  account. [C9-3] The HTTPS check is the complete §9.2 rule: direct TLS, the local development
+  environment, or a proxy header the operator has configured this site to trust
+  (`PaymentExecutionRule::TRUSTED_PROXY_OPTION`) and that is a member of the locked
+  `HTTPS_PROXY_HEADERS` allowlist. The option names headers, never authority — an unset, empty,
+  malformed or non-member configuration trusts nothing — so a client can never satisfy the requirement
+  with its own `X-Forwarded-Proto`, and only a leftmost `https` in the header's scheme chain counts.
+- **Every registered method is receipted, `OPTIONS` included.** [C9-4] WordPress answers `OPTIONS` in
+  `rest_handle_options_request()`, a `rest_pre_dispatch` filter, so no route registration can deliver one
+  to a callback. `StripeWebhookController::register()` therefore also registers the endpoint's own
+  `rest_pre_dispatch` interception ahead of that handler; it answers only an `OPTIONS` delivery to this
+  endpoint's two route shapes and runs the same controlled `process()` path a routed
+  `GET`/`PUT`/`PATCH`/`DELETE` takes, so an `OPTIONS` delivery is receipted
+  `refused`/`method_not_allowed` with its exact raw body and never becomes an event.
+- **The event row stays immutable.** [C9-1]/[C9-2] The decision claim is its own aggregate
+  (`payment_provider_event_decision_claims`), never a column on `payment_provider_events`, so the
+  recorded event identity is still write-once and the claim's lifecycle is never mixed into it. A
+  `conflicting_provider_event` row is likewise not the event's decision: whether an event still owes a
+  decision is asked of its non-conflict decision timeline.
 - **No scheduler.** `drain()` and `redrive()` are explicit, idempotent entry points for a later scheduler
   owned by another phase; no `cron` or `wp_schedule_*` call exists anywhere in `src/`.
 
@@ -110,24 +136,60 @@ proves the routing/receipt, attribution and drain behaviour; `tests/phase-2a2t-c
 `duplicate_webhook` a real duplicate-delivery race and adds `conflicting_duplicate_webhook` (seventeen
 modes total, up from sixteen).
 
-## 5. Evidence executed in this environment
+## 5. Correction round 9 (independent review of `5b477b7` / tree `a45d56fb`)
+
+The independent review of the round-8 candidate returned **FAIL — CORRECTION REQUIRED** on four blocking
+findings. Each is closed additively in this candidate; no authority, capability, policy or provider call
+is added, and no previous commit is rewritten.
+
+| # | Blocking finding | Correction in this candidate |
+| --- | --- | --- |
+| C9-1 | `convergeExisting()` returned `recorded` when the recorded event had no decision row at all, so an event that was inserted and then left owing its decision (a crash between the event insert and its first decision) was never completed by a redelivery. | The one serialised decision path treats "no decision at all" as an owed decision: an identical redelivery takes the event's decision claim and appends the first decision exactly once. An event owes a decision while its **non-conflict** decision timeline is empty or still `pending`, so `converged = recorded` can no longer mean "undecided forever". |
+| C9-2 | Pending-decision retries were not concurrency-safe: two deliveries could both read the same `pending` decision, both run `decide()` and the R1/R2 consequence, and both allocate the same next `decision_sequence`, so one failed on the unique index after performing work. | A durable per-event **decision claim** (`payment_provider_event_decision_claims`) with `UNIQUE event_claim (provider_event_id, active_claim_slot)` is taken before any decision work runs. The winner alone may translate and run the consequence; the claim's generation and token fence the settlement inside the same transaction that inserts the decision; the loser performs no work and converges on what the owner recorded; an expired claim is taken over by exactly one new generation. |
+| C9-3 | The HTTPS precheck ignored the declared `PaymentExecutionRule::HTTPS_PROXY_HEADERS` and had no configured-proxy trust path, so a TLS-terminated deployment relying on a trusted `X-Forwarded-Proto: https` had every webhook refused as `https_required`. | The §9.2 transport rule is now complete and input-only: direct TLS, the local environment, or a proxy header that the operator has configured this site to trust and that is a member of the locked allowlist. An unconfigured, empty, malformed or non-allowlisted configuration trusts nothing, so a client can never mark its own delivery secure, and only a leftmost `https` in the scheme chain passes. |
+| C9-4 | The route declared `OPTIONS`, but registering a method does not deliver that method to a callback: WordPress answers `OPTIONS` in `rest_handle_options_request()`, a `rest_pre_dispatch` filter that runs before normal route dispatch, so an `OPTIONS` delivery was answered with no receipt at all — breaking the invariant that every registered method is durably receipted. | The endpoint now registers its own `rest_pre_dispatch` interception at priority `1`, ahead of the core handler's `10`. It answers only an `OPTIONS` delivery to this endpoint's two registered route shapes (case-insensitively, with an optional trailing separator) and returns every other filter input untouched, so no other route is affected. A matched delivery runs the same controlled `process()` path as a routed `GET`/`PUT`/`PATCH`/`DELETE`: `refused`/`method_not_allowed`, `405`, the exact raw body digest and byte count, exactly one receipt and no event. |
+
+`tests/phase-2a2t-contract.php` asserts all four source contracts; `tests/phase-2a2t-webhook-runtime.php`
+proves the recorded-event recovery, the claim's own shape, the takeover of an abandoned claim, the
+transport matrix and the `OPTIONS` interception (registered ahead of the core handler, receipted with the
+exact raw body and never answered without one); `tests/phase-2a2t-failure-runtime.php` proves the claim
+fence's atomicity; `tests/phase-2a2t-corruption-runtime.php` proves the claim aggregate fails closed; and
+`tests/phase-2a2t-concurrency-runner.sh` adds `pending_decision_retry` and `undecided_event_recovery`
+(nineteen modes total, up from seventeen).
+
+The same round corrected one disposable-fixture defect the `OPTIONS` proof exposed: the webhook suite's
+account selector was 41 characters long, but the route declares the account segment as
+`[A-Za-z0-9_-]{1,32}`, so every REST-level delivery in that suite (`GET`, the proxy `POST` and the new
+`OPTIONS`) would have been answered `rest_no_route` and receipted nothing — the routing proofs were
+testing the fixture, not the endpoint. The selector now fits the declared segment, and the suite asserts
+that it does. **Known observation, deliberately not corrected in this bounded round:**
+`PaymentProviderAccountService::register()` does not bound `reference_code` to that 32-character segment,
+so an operator could register a selector whose webhook URL can never match the route. That is a
+registration-validation gap in the account surface rather than a method-receipt defect, and closing it
+would add a refusal to the registration command; it is recorded for the owner rather than widened into
+this round.
+
+## 6. Evidence executed in this environment
 
 | Check | Result |
 | --- | --- |
 | `git diff --check` | pass (no whitespace or conflict-marker defects) |
 | Shell syntax of the concurrency runner (`sh -n`) | pass |
 | Git object integrity (`git fsck --no-dangling`, `git status`) | pass |
-| Source scans: exactly fifteen declared tables; exact vocabulary strings; no forbidden column pattern; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; only an adapter seals or opens an envelope | pass |
+| Source scans: exactly sixteen declared tables; exact vocabulary strings; no forbidden column pattern; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; only an adapter seals or opens an envelope; the controller names no proxy header outside the locked allowlist | pass |
+| Source review of the changed sources (every changed hunk read) | pass — the endpoint's `rest_pre_dispatch` interception is its only participation on that hook, it is registered ahead of the core `OPTIONS` handler, it matches only the endpoint's two route shapes, and it re-uses the one precheck/receipt path instead of adding a second refusal implementation |
+| Source scans re-run this round (the Phase-T migration declares exactly sixteen tables once each; no `wp_schedule_*`/`curl_*`/`wp_remote_*` in Core; `wp_set_current_user` only inside `PaymentExecutionWorkerContext`; no proxy-header literal outside the locked allowlist; exactly one `rest_pre_dispatch` registration in the plugin) | pass |
+| Delimiter/quote balance of every changed PHP file (comments and strings stripped, then `()`/`{}`/`[]` balance) | pass (a delimiter sanity check only — **not** `php -l`, which this environment cannot run) |
 | `tests/phase-2a2t-contract.php` | **not executed — PHP is unavailable in this environment** |
 | `tests/phase-2a2t-migration-runtime.php`, `-runtime.php`, `-webhook-runtime.php`, `-secret-runtime.php`, `-corruption-runtime.php`, `-failure-runtime.php` | **not executed — PHP and the disposable WordPress + MariaDB runtime are unavailable in this environment** |
-| `tests/phase-2a2t-concurrency-runner.sh` (all seventeen modes) | **not executed — the disposable container runtime is unreachable in this environment** |
+| `tests/phase-2a2t-concurrency-runner.sh` (all nineteen modes) | **not executed — the disposable container runtime is unreachable in this environment** |
 
 The runtime suites are written and wired exactly as the contract's §17 requires, and they were
 **not** run here. Running them on the disposable runtime (fresh install, 26→28 upgrade, migration,
 webhook, secret, corruption, failure and the full concurrency matrix) is the mandatory acceptance gate
 for this candidate and remains outstanding.
 
-## 6. Explicit non-authorisation
+## 7. Explicit non-authorisation
 
 No live Stripe API call, credential, webhook secret value, charge, refund, payout, provider dashboard
 change, notification delivery, Theme/NIU change, Amelia write/removal, deployment, production access,
@@ -135,10 +197,10 @@ production cutover or merge occurred or is authorised by this record. `LIVE_EXEC
 `PROVISIONABLE_PROVIDERS` are empty, so the Stripe adapter is provably incapable of an outbound call and
 no code path can store a Stripe credential — not even through the capability-authorised vault surface.
 
-## 7. Definition of done — outstanding items
+## 8. Definition of done — outstanding items
 
 1. Execute every §17 suite on the disposable runtime and record the results.
 2. Confirm the Schema 027/028 ledger assumption is recorded either way (Phase S owning 027, or 027
    deliberately skipped) as the contract's §19 prerequisite requires.
-3. Independent review of the corrected candidate commit and tree (correction round 8 closes the four
-   blocking findings the review of `91bf288cd1cf4d5c08e7c99cb310a4d0743113b1` raised).
+3. Independent review of the corrected candidate commit and tree (correction round 9 closes the four
+   blocking findings the review of `5b477b72d97a329e7bc02ce041be8958af85fe81` raised).

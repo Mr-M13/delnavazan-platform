@@ -32,7 +32,7 @@ $concurrency=file_get_contents($root.'/tests/phase-2a2t-concurrency-runner.sh')
     .file_get_contents($root.'/tests/phase-2a2t-concurrency-setup.php')
     .file_get_contents($root.'/tests/phase-2a2t-concurrency-worker.php')
     .file_get_contents($root.'/tests/phase-2a2t-concurrency-verify.php');
-$tables=array('payment_provider_accounts','payment_provider_account_events','payment_provider_account_commands','payment_provider_objects','payment_provider_object_events','payment_provider_object_commands','payment_provider_secrets','payment_execution_commands','payment_execution_attempts','payment_execution_results','payment_execution_dispatches','payment_provider_event_receipts','payment_provider_events','payment_provider_event_decisions','payment_provider_secret_events');
+$tables=array('payment_provider_accounts','payment_provider_account_events','payment_provider_account_commands','payment_provider_objects','payment_provider_object_events','payment_provider_object_commands','payment_provider_secrets','payment_execution_commands','payment_execution_attempts','payment_execution_results','payment_execution_dispatches','payment_provider_event_receipts','payment_provider_events','payment_provider_event_decisions','payment_provider_event_decision_claims','payment_provider_secret_events');
 
 // Build/schema identity: Phase T is Schema 28, sequenced additively after the V candidate.
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<28)throw new RuntimeException('Missing Phase T schema identity');
@@ -56,8 +56,8 @@ if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO')||str_c
 if(stripos($install,'stripe_')!==false)throw new RuntimeException('Phase T storage must stay provider-neutral');
 preg_match_all('/CREATE TABLE \{\$p\}([a-z_]+)/',$install,$created);
 $createdTables=$created[1];sort($createdTables);$declared=$tables;sort($declared);
-if($createdTables!==$declared)throw new RuntimeException('Migration 028 must create exactly the fifteen declared Phase T tables');
-if(count(array_unique($createdTables))!==15)throw new RuntimeException('Migration 028 must declare each Phase T table exactly once');
+if($createdTables!==$declared)throw new RuntimeException('Migration 028 must create exactly the sixteen declared Phase T tables');
+if(count(array_unique($createdTables))!==16)throw new RuntimeException('Migration 028 must declare each Phase T table exactly once');
 
 // Locked Phase-T vocabulary and structural constants (§5.2).
 foreach(array(
@@ -75,8 +75,12 @@ foreach(array(
     "SECRET_CLASSES=array('webhook_signing_secret','api_key')","CIPHER='sodium_secretbox_v1'",
     "PROVISIONABLE_PROVIDERS=array()","SECRET_AUDIT_TYPES=array('stored','rotated','retired','revoked','write_refused','decrypt_failed')",
     "VERIFICATION_STATES=array('verified','refused')","R2_CONSEQUENCE_STATES=array('not_applicable','pending','applied','refused')",
+    "DECISION_CLAIM_STATES=array('claimed','settled','released')",
     "SIGNATURE_TOLERANCE_SECONDS=300","MAX_WEBHOOK_BYTES=262144","TIMESTAMP_TOLERANCE_CLAMP_SECONDS=600",
     "DISPATCH_LEASE_SECONDS=120","DISPATCH_CALL_TIMEOUT_SECONDS=30","DISPATCH_LEASE_MARGIN_SECONDS=60",
+    "DECISION_CLAIM_LEASE_SECONDS=120","DECISION_CLAIM_WAIT_MILLISECONDS=1000",
+    "HTTPS_PROXY_HEADERS=array('HTTP_X_FORWARDED_PROTO')","TRUSTED_PROXY_OPTION='dzn_platform_payment_trusted_proxy'",
+    "TRUSTED_PROXY_HTTPS_VALUE='https'",
     "DISPATCH_DESCRIPTOR_DOMAIN='payment_dispatch_descriptor_v1'",
     "DESCRIPTOR_PREFLIGHT_STATES=array('ok','dispatch_descriptor_unavailable')","LIVE_EXECUTION_PROVIDERS=array()",
     "'dispatch_descriptor_unavailable','dispatch_descriptor_incomplete',",
@@ -205,6 +209,59 @@ if(!str_contains($intake,"if(\$existing)return \$this->convergeExisting(\$existi
 if(!str_contains($intake,'$this->factDigest((string)$event->provider_key,(string)$event->event_reference_digest,$match)'))throw new RuntimeException('[C8-4] the drain must recompute the recorded event fact digest');
 if(!str_contains($intake,'return $this->recordConflict($event);'))throw new RuntimeException('[C8-4] a changed drain payload must append the controlled conflict decision');
 
+// [C9-1] Every decision is appended by exactly one claimed worker, and an event that still owes one is
+// always completed — including an event that was recorded and then left with no decision at all.
+if(!str_contains($intake,'private function completeDecision('))throw new RuntimeException('[C9-1] the serialised decision path is missing');
+if(!str_contains($intake,'private function acquireDecisionClaim('))throw new RuntimeException('[C9-1] the per-event decision claim is missing');
+if(!str_contains($intake,'private function appendDecisionUnderClaim('))throw new RuntimeException('[C9-1] the fenced decision append is missing');
+if(!str_contains($intake,'private function convergeOnOwner('))throw new RuntimeException('[C9-1] the loser of a claim must converge instead of working');
+if(!str_contains($intake,'private function decisionForEvent('))throw new RuntimeException('[C9-1] the owed-decision timeline must exclude conflict records');
+if(!str_contains($intake,"if(!\$alwaysAppends&&!\$this->decisionIsOwed(\$last))return \$this->convergedDecision(\$eventId,\$last);"))throw new RuntimeException('[C9-1] an event that owes no decision must converge before any claim');
+if(!str_contains($intake,"if(\$claim===null)return \$this->convergeOnOwner(\$eventId);"))throw new RuntimeException('[C9-1] a worker that cannot own the claim must not do any work');
+if(!str_contains($intake,"return \$this->completeDecision(\$event,fn():array=>\$this->decide(\$event,\$envelope),'first_decision');"))throw new RuntimeException('[C9-1] a newly recorded event must take its first decision through the claim');
+if(!str_contains($intake,"return \$this->completeDecision(\$existing,fn():array=>\$this->decide(\$existing,\$envelope),'duplicate');"))throw new RuntimeException('[C9-1] a duplicate must converge or complete an owed decision through the claim');
+if(str_contains($intake,'function appendDecision('))throw new RuntimeException('[C9-1] no decision may be appended outside the claim fence');
+if(strpos($intake,'settleDecisionClaim')>strpos($intake,'maxDecisionSequence'))throw new RuntimeException('[C9-1] the claim fence must precede the decision-sequence allocation');
+if(strpos($intake,'acquireDecisionClaim')>strpos($intake,"\$decision=\$decide();"))throw new RuntimeException('[C9-1] the claim must be acquired before any decision work runs');
+foreach(array('insertDecisionClaim','liveDecisionClaim','settleDecisionClaim','releaseDecisionClaim','takeoverDecisionClaim') as $method)
+    if(!str_contains($providerRepository,'function '.$method.'('))throw new RuntimeException('[C9-1] missing decision-claim method: '.$method);
+if(!str_contains($providerRepository,'UNIQUE KEY event_claim')&&!str_contains($providerRepository,'active_claim_slot=1'))throw new RuntimeException('[C9-1] the decision claim must arbitrate on its live slot');
+if(!str_contains($providerRepository,'claim_generation=claim_generation+1'))throw new RuntimeException('[C9-1] a decision-claim takeover must advance the fencing generation');
+if(!str_contains($providerRepository,"'subject_claim','event_claim',"))throw new RuntimeException('[C9-1] the decision-claim unique index must be an arbitrated duplicate key');
+if(!str_contains($seam,'function decisionClaim('))throw new RuntimeException('[C9-1] the decision claim must be proved as an aggregate');
+if(!str_contains($intake,'outstandingDecisionClaims'))throw new RuntimeException('[C9-1] the live decision claims must be visible in the diagnostics');
+
+// [C9-3] The §9.2 transport rule is configured, allowlisted and never satisfied by a client's own header.
+if(!str_contains($rule,'public static function trustedProxyHeaders('))throw new RuntimeException('[C9-3] the configured proxy-header gate is missing');
+if(!str_contains($rule,'public static function proxyHeaderIndicatesHttps('))throw new RuntimeException('[C9-3] the allowlisted proxy-header verdict is missing');
+if(!str_contains($rule,'HTTPS_PROXY_HEADERS'))throw new RuntimeException('[C9-3] the locked proxy-header allowlist is missing');
+if(!str_contains($rule,'TRUSTED_PROXY_OPTION'))throw new RuntimeException('[C9-3] the operator proxy configuration is missing');
+if(!str_contains($controller,'public static function transportIsHttps('))throw new RuntimeException('[C9-3] the §9.2 transport verdict is missing');
+if(!str_contains($controller,'PaymentExecutionRule::trustedProxyHeaders()'))throw new RuntimeException('[C9-3] the controller must trust only the configured allowlisted proxy headers');
+if(!str_contains($controller,'PaymentExecutionRule::proxyHeaderIndicatesHttps('))throw new RuntimeException('[C9-3] the controller must use the allowlisted proxy-header verdict');
+if(!str_contains($controller,'self::transportIsHttps(self::requestHeaders($request))'))throw new RuntimeException('[C9-3] the precheck must decide the transport from the request headers');
+if(str_contains($controller,'x-forwarded-proto')||str_contains($controller,'HTTP_X_FORWARDED_PROTO'))throw new RuntimeException('[C9-3] the controller must never name a proxy header outside the locked allowlist');
+if(!str_contains($rule,"if(!in_array(\$headerName,self::trustedProxyHeaders(),true))return false;"))throw new RuntimeException('[C9-3] an unconfigured proxy header must never mark a delivery secure');
+
+// [C9-4] OPTIONS is answered ahead of WordPress's own OPTIONS handler, through the one controlled path.
+// WordPress answers OPTIONS in `rest_handle_options_request()`, a `rest_pre_dispatch` filter, so the route
+// method set alone can never deliver one to the controller: the endpoint must intercept its own routes first.
+if(!str_contains($controller,'rest_pre_dispatch'))throw new RuntimeException('[C9-4] the endpoint must intercept its own OPTIONS delivery on rest_pre_dispatch');
+if(!str_contains($controller,'public static function interceptOptions('))throw new RuntimeException('[C9-4] the OPTIONS interception is missing');
+if(!str_contains($controller,"add_filter('rest_pre_dispatch',array(__CLASS__,'interceptOptions'),self::OPTIONS_INTERCEPT_PRIORITY,3)"))throw new RuntimeException('[C9-4] the interception must be registered on the pre-dispatch hook with the request');
+if(!preg_match('/OPTIONS_INTERCEPT_PRIORITY=([0-9]+)/',$controller,$interceptPriority)||(int)$interceptPriority[1]>=10)
+    throw new RuntimeException('[C9-4] the interception must outrank WordPress default OPTIONS handler (rest_handle_options_request, priority 10)');
+if(!str_contains($controller,'ROUTE_NAMESPACE=')||!str_contains($controller,'ROUTE_PROVIDER=')||!str_contains($controller,'ROUTE_ACCOUNT='))
+    throw new RuntimeException('[C9-4] the registered route shapes must be declared once and shared with the interception');
+if(substr_count($controller,'register_rest_route(self::ROUTE_NAMESPACE,')!==2)throw new RuntimeException('[C9-4] both webhook routes must be registered from those shared shapes');
+if(!str_contains($controller,"'#^/'.self::ROUTE_NAMESPACE.self::ROUTE_PROVIDER"))throw new RuntimeException('[C9-4] the interception must match exactly the endpoint route shapes');
+$interceptStart=strpos($controller,'public static function interceptOptions(');
+$interceptEnd=strpos($controller,'private static function optionsRoutePattern(');
+$interceptBody=substr($controller,$interceptStart,$interceptEnd-$interceptStart);
+if(!str_contains($interceptBody,'self::process('))throw new RuntimeException('[C9-4] the interception must run the one controlled path, never a second refusal implementation');
+if(!str_contains($interceptBody,"!=='OPTIONS'"))throw new RuntimeException('[C9-4] only an OPTIONS delivery may be intercepted');
+if(!str_contains($webhookRuntime,"'/^[A-Za-z0-9_-]{1,32}$/'"))throw new RuntimeException('[C9-4] the runtime suite must prove its disposable account selector fits the route account segment');
+
 // §9.7: the bounded worker principal is adopted, proved and restored.
 if(!str_contains($support,'dzn_platform_payment_worker_principal'))throw new RuntimeException('The worker principal option is missing');
 foreach(array("'dzn_ingest_payment_provider_events'","'dzn_ingest_commercial_payment_evidence'","'dzn_manage_collection_intents'","'dzn_manage_renewal_cycles'") as $capability)
@@ -244,6 +301,8 @@ foreach(array(
     "evidence must be append-only","digest nullability","reference type","reference parent","reference parent identity",
     "reference index","secret scope index","may never be unscoped","two live dispatch claims share one arbitration subject",
     "a claim may only coexist with its own descriptor refusal","an incomplete sealed descriptor","non-positive dispatch generation",
+    "Phase 2A.2-T decision-claim state","two live decision claims share one provider event",
+    "a settled decision claim must carry the decision it appended","a non-positive decision-claim generation",
     "must not own academic, notification or settlement storage",
 ) as $needle)if(!str_contains($migration,$needle))throw new RuntimeException('The Phase T verifier is incomplete: '.$needle);
 foreach(array("'payment_terms'","'payment_lessons'","'payment_schedules'","'payment_notifications'","'payment_evidence'","'payment_settlements'") as $table)
@@ -258,16 +317,17 @@ foreach(array(
     'secret_rotation_vs_intake','unrelated_students','duplicate_command_replay','settlement_vs_r2_consequence',
     'submit_vs_cancel_in_flight','redrive_after_crash','concurrent_expired_lease','takeover_reissue_fenced',
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
-    'conflicting_duplicate_webhook',
+    'conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
 if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
 if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');
 if(!str_contains($concurrency,'converge on exactly one recorded event'))throw new RuntimeException('[C8-3] the duplicate race must assert one recorded event');
-foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation') as $needle)
+if(!str_contains($concurrency,'decision claim'))throw new RuntimeException('[C9-1] the decision-claim races must assert the claim');
+foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation','decision_claim') as $needle)
     if(!str_contains($migrationRuntime,$needle))throw new RuntimeException('The migration-runtime suite is incomplete: '.$needle);
 foreach(array('redrive','reconcile','dispatch_descriptor_unavailable','provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $needle)
     if(!str_contains($runtime,$needle))throw new RuntimeException('The runtime suite is incomplete: '.$needle);
-foreach(array('signature_invalid','signature_outside_tolerance','webhook_account_unresolved','conflicting_provider_event','stale_provider_event','payment_worker_principal_required','method_not_allowed','payload_too_large','request_digest','unmapped_provider_object','ambiguous_obligation_attribution','active_slot') as $needle)
+foreach(array('signature_invalid','signature_outside_tolerance','webhook_account_unresolved','conflicting_provider_event','stale_provider_event','payment_worker_principal_required','method_not_allowed','payload_too_large','request_digest','unmapped_provider_object','ambiguous_obligation_attribution','active_slot','recorded_event_recovery','trusted_proxy','rest_pre_dispatch','interceptOptions','OPTIONS') as $needle)
     if(!str_contains($webhookRuntime,$needle))throw new RuntimeException('The webhook suite is incomplete: '.$needle);
 foreach(array('provider_secret_write_not_authorised','write_refused','decrypt_failed','REDACTED_SECRET') as $needle)
     if(!str_contains($secretRuntime,$needle))throw new RuntimeException('The secret suite is incomplete: '.$needle);

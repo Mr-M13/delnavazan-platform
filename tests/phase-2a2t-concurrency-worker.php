@@ -13,6 +13,10 @@
  *   identity at the same moment. The unique `provider_event` index and the recorded immutable fact digest
  *   — never a read-then-insert — decide which worker owns the event and whether the other converges or
  *   records the controlled conflict.
+ * - [C9-1] the decision-claim races (`pending_decision_retry`, `undecided_event_recovery`): two workers
+ *   deliver one body for an event that already owes its decision (a deferred decision, or no decision row
+ *   at all). The unique `event_claim` index decides which worker may run the translation and the R2
+ *   consequence; the other performs no work and converges on the decision the owner appended.
  */
 if(getenv('DZN_PHASE_2A2T_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-T concurrency worker refused.\n");exit(1);}
 use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeService,PaymentExecutionDispatchSeal,PaymentExecutionService,PaymentExecutionSupport,PaymentProviderRegistry,ProviderReferenceClaims};
@@ -26,7 +30,7 @@ $fixture=get_option('dzn_phase_2a2t_concurrency_fixture');
 dzn_tcw_assert(is_array($fixture)&&count($fixture['rows']??array())>=2,'the concurrency fixture must exist');
 wp_set_current_user(1);
 $mode=(string)$fixture['mode'];
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery'),true)){
     if(!defined('DZN_PLATFORM_PAYMENT_TEST_VAULT'))define('DZN_PLATFORM_PAYMENT_TEST_VAULT',true);
     PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
     dzn_tcw_assert(isset($fixture['webhook']['selector'],$fixture['webhook']['body'],$fixture['webhook']['body_changed']),'the duplicate-webhook race fixture must exist');

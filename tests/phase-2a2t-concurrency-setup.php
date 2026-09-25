@@ -4,8 +4,9 @@ if(getenv('DZN_PHASE_2A2T_RUNTIME_TEST')!=='concurrency'||!defined('WP_CLI')||!W
 require __DIR__.'/phase-2a2r1-fixture.php';
 require __DIR__.'/phase-2a2r2-fixture.php';
 use Delnavazan\Platform\Core\Application\{CollectionIntentService,RenewalCycleService};
-use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderObjectService,PaymentProviderRegistry,PaymentSecretVault,ProviderReferenceClaims};
+use Delnavazan\Platform\Core\Application\PaymentExecution\{PaymentEventIntakeService,PaymentExecutionSupport,PaymentProviderAccountService,PaymentProviderObjectService,PaymentProviderRegistry,PaymentSecretVault,ProviderReferenceClaims};
 use Delnavazan\Platform\Integrations\Payment\ContractPaymentAdapter;
+use Delnavazan\Platform\Integrations\Payment\Stripe\{StripeEventTranslator,StripeSignatureVerifier};
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_tcs_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
 function dzn_tcs_key(string $label):string{return 'dzn-2a2tc-'.$label.'-'.wp_generate_uuid4();}
@@ -15,7 +16,7 @@ $fixture=get_option('dzn_phase_2a2j_fixture');
 dzn_tcs_assert(is_array($fixture)&&count($fixture['sources']??array())>=3,'Phase-J production fixture required');
 dzn_r1_fix_reset(array('commercial_commands','commercial_capacity_claim_intervals','commercial_capacity_claims','commercial_recurring_patterns','commercial_obligation_settlements','commercial_payment_facts','commercial_payment_evidence','commercial_term_funding_plans','commercial_entitlements','commercial_purchases','commercial_offer_obligations','commercial_offer_policies','commercial_offer_adjustments','commercial_offers','commercial_promotion_redemptions','commercial_account_adjustment_events','commercial_account_adjustments','commercial_promotions','commercial_prices','commercial_products','commercial_policies','commercial_account_roots','commercial_exceptions','canonical_continuation_commands','canonical_continuation_interventions','canonical_continuation_reservations','canonical_continuation_decisions','canonical_continuation_cases','canonical_continuation_slot_authorities'));
 dzn_r2_fix_reset();
-foreach(array('payment_provider_secret_events','payment_provider_event_decisions','payment_provider_events','payment_provider_event_receipts','payment_execution_dispatches','payment_execution_results','payment_execution_attempts','payment_execution_commands','payment_provider_secrets','payment_provider_object_commands','payment_provider_object_events','payment_provider_objects','payment_provider_account_commands','payment_provider_account_events','payment_provider_accounts') as $table)
+foreach(array('payment_provider_secret_events','payment_provider_event_decisions','payment_provider_event_decision_claims','payment_provider_events','payment_provider_event_receipts','payment_execution_dispatches','payment_execution_results','payment_execution_attempts','payment_execution_commands','payment_provider_secrets','payment_provider_object_commands','payment_provider_object_events','payment_provider_objects','payment_provider_account_commands','payment_provider_account_events','payment_provider_accounts') as $table)
     dzn_tcs_assert($wpdb->query("DELETE FROM {$p}{$table}")!==false,'Failed to reset disposable Phase T storage: '.$table);
 wp_set_current_user(1);
 dzn_r1_fix_availability($fixture['teachers']??array());
@@ -54,12 +55,14 @@ foreach($fixtures as $index=>$row){
 }
 PaymentProviderRegistry::registerExecutionPort(new ContractPaymentAdapter());
 $fixturePayload=array('mode'=>$mode,'account_id'=>$accountId,'rows'=>$fixtures);
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery'),true)){
     // [C8-3] The duplicate-delivery race needs the two disposable intake inputs the execution fixtures do
     // not use: a worker principal holding exactly the §9.7 capability set, and a synthetic signing secret
     // held by the constant-gated disposable test vault. The event body is fixed here, so both workers
     // deliver byte-identical facts (or, for the conflicting mode, the same event identity with a different
     // recorded fact) and only the unique `provider_event` index and the recorded fact digest can decide.
+    // [C9-1] The decision-claim races reuse the same inputs and additionally leave one durably recorded
+    // event *owing its decision*, so both workers reach the one serialised decision path together.
     $principal=wp_insert_user(array('user_login'=>'dzn-t-conc-principal-'.wp_generate_uuid4(),'user_pass'=>wp_generate_password(24),'role'=>'subscriber'));
     $principalUser=get_user_by('id',(int)$principal);
     foreach(PaymentExecutionSupport::WORKER_CAPABILITIES as $capability)$principalUser->add_cap($capability);
@@ -78,5 +81,27 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook'),tru
         'obligation_id'=>(int)$row['obligation_id'],'intent_id'=>(int)$row['intent_id'],'cycle_id'=>(int)$row['cycle_id'],
         'body'=>$webhookBody(time()),'body_changed'=>$webhookBody(time()-1),
     );
+    if(in_array($mode,array('pending_decision_retry','undecided_event_recovery'),true)){
+        // The prepared pre-state of the decision race. The first delivery is made here with the §9.7
+        // worker principal deliberately unset, so the event is durable and its decision is deferred; the
+        // recovery mode then removes the decision row entirely, which is exactly the crash window between
+        // the durable event row and its first decision. The principal is restored before the two workers
+        // deliver the same body concurrently.
+        delete_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION);
+        PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
+        $preparedBody=(string)$fixturePayload['webhook']['body'];
+        $preparedSignature='t='.time().',v1='.hash_hmac('sha256',time().'.'.$preparedBody,$webhookSecret);
+        (new PaymentEventIntakeService())->receive('stripe',$selector,$preparedBody,array('stripe-signature'=>$preparedSignature));
+        $preparedEvent=(int)$wpdb->get_var("SELECT id FROM {$p}payment_provider_events ORDER BY id DESC LIMIT 1");
+        dzn_tcs_assert($preparedEvent>0,'the prepared decision race must record its provider event');
+        dzn_tcs_assert((string)$wpdb->get_var($wpdb->prepare("SELECT reason_code FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d ORDER BY id DESC LIMIT 1",$preparedEvent))==='payment_worker_principal_required','the prepared decision race must start from a deferred decision');
+        update_option(PaymentExecutionSupport::WORKER_PRINCIPAL_OPTION,(int)$principal,false);
+        if($mode==='undecided_event_recovery'){
+            $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$preparedEvent));
+            $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d",$preparedEvent));
+            dzn_tcs_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$preparedEvent))===0,'the recovery race must start with an event that owes its first decision');
+        }
+        $fixturePayload['prepared_event_id']=$preparedEvent;
+    }
 }
 update_option('dzn_phase_2a2t_concurrency_fixture',$fixturePayload,false);

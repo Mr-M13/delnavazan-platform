@@ -849,11 +849,11 @@ final class Migrator {
 	 * Phase 2A.2-T payment-execution seam, provider mapping registry and Stripe adapter storage.
 	 *
 	 * Additive only: it creates the provider-account, mapping, secret, execution, dispatch, receipt,
-	 * event and decision storage, performs no backfill, infers no provider account or mapping, settles
-	 * nothing, creates no Term/Lesson/schedule row, adds no column to any existing table, and calls no
-	 * provider. Every provider reference is stored as a keyed digest; the only place a raw provider
-	 * reference can exist at all is the adapter-sealed dispatch descriptor, which is authenticated
-	 * ciphertext this migration never reads.
+	 * event, decision and decision-claim storage, performs no backfill, infers no provider account or
+	 * mapping, settles nothing, creates no Term/Lesson/schedule row, adds no column to any existing
+	 * table, and calls no provider. Every provider reference is stored as a keyed digest; the only place
+	 * a raw provider reference can exist at all is the adapter-sealed dispatch descriptor, which is
+	 * authenticated ciphertext this migration never reads.
 	 */
 	private static function install_payment_execution_seam():void{
 		global $wpdb; require_once ABSPATH . 'wp-admin/includes/upgrade.php'; $p = $wpdb->prefix . 'dzn_'; $c = $wpdb->get_charset_collate();
@@ -872,6 +872,7 @@ final class Migrator {
 			"CREATE TABLE {$p}payment_provider_event_receipts (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NULL,account_selector_digest char(64) NULL,request_digest char(64) NOT NULL,signature_digest char(64) NULL,signature_key_version varchar(32) NULL,verification_state varchar(16) NOT NULL,refusal_reason_code varchar(64) NULL,source_digest char(64) NULL,body_bytes int unsigned NOT NULL,received_at datetime NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),KEY provider_received(provider_key,received_at),KEY request_digest(request_digest),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_events (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,receipt_id bigint unsigned NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NOT NULL,event_reference_digest char(64) NOT NULL,event_fact_digest char(64) NOT NULL,event_type varchar(48) NOT NULL,raw_type_digest char(64) NOT NULL,payload_digest char(64) NOT NULL,provider_occurred_at datetime NULL,received_at datetime NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY provider_event(provider_key,event_reference_digest),KEY receipt(receipt_id),KEY received_at(received_at),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_event_decisions (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_event_id bigint unsigned NOT NULL,decision_sequence int unsigned NOT NULL,decision_state varchar(24) NOT NULL,reason_code varchar(64) NULL,evidence_kind varchar(16) NULL,offer_id bigint unsigned NULL,obligation_id bigint unsigned NULL,purchase_id bigint unsigned NULL,commercial_evidence_id bigint unsigned NULL,collection_intent_id bigint unsigned NULL,renewal_cycle_id bigint unsigned NULL,renewal_cycle_state varchar(24) NULL,collection_intent_state varchar(16) NULL,r2_consequence_state varchar(16) NULL,r2_reason_code varchar(64) NULL,execution_command_id bigint unsigned NULL,decided_at datetime NOT NULL,recorded_at datetime NOT NULL,recorded_by bigint unsigned NULL,created_at datetime NOT NULL,created_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY decision_sequence(provider_event_id,decision_sequence),KEY event(provider_event_id),KEY offer(offer_id),KEY obligation(obligation_id),KEY purchase(purchase_id),KEY commercial_evidence(commercial_evidence_id),KEY intent(collection_intent_id),KEY cycle(renewal_cycle_id),KEY execution_command(execution_command_id)) ENGINE=InnoDB $c",
+			"CREATE TABLE {$p}payment_provider_event_decision_claims (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_event_id bigint unsigned NOT NULL,claim_state varchar(16) NOT NULL,claim_generation int unsigned NOT NULL,claim_token_digest char(64) NOT NULL,lease_expires_at datetime NULL,claimed_at datetime NOT NULL,settled_at datetime NULL,active_claim_slot tinyint unsigned NULL,created_at datetime NOT NULL,updated_at datetime NOT NULL,created_by bigint unsigned NULL,updated_by bigint unsigned NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),UNIQUE KEY event_claim(provider_event_id,active_claim_slot),KEY provider_event(provider_event_id),KEY claim_state(claim_state)) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}payment_provider_secret_events (id bigint unsigned NOT NULL AUTO_INCREMENT,uid char(26) NOT NULL,provider_key varchar(32) NOT NULL,payment_provider_account_id bigint unsigned NULL,secret_class varchar(32) NOT NULL,mode varchar(8) NULL,audit_type varchar(24) NOT NULL,key_version varchar(32) NULL,command_key_digest char(64) NULL,reason_code varchar(64) NULL,occurred_at datetime NOT NULL,recorded_at datetime NOT NULL,recorded_by bigint unsigned NOT NULL,created_at datetime NOT NULL,created_by bigint unsigned NOT NULL,PRIMARY KEY(id),UNIQUE KEY uid(uid),KEY secret_timeline(provider_key,secret_class,occurred_at),KEY provider_account(payment_provider_account_id)) ENGINE=InnoDB $c",
 		);
 		foreach ( $tables as $sql ) { dbDelta( $sql ); if ( $wpdb->last_error !== '' ) throw new \RuntimeException('Migration operation failed: ' . $wpdb->last_error); }
@@ -880,12 +881,13 @@ final class Migrator {
 	/**
 	 * Fail closed unless the Phase-T execution storage is exactly as designed.
 	 *
-	 * The verifier proves the fifteen-table set, the declared identity and reference contract, the
-	 * append-only/mutable split, the digest nullability rule, the dispatch-claim arbitration shape, the
-	 * sealed-envelope completeness rule and the non-null secret account scope. It rejects a raw
-	 * reference column, a plaintext credential column, an academic/notification/settlement table
-	 * smuggled into the phase, and a parent that does not itself declare the identity it is referenced
-	 * by — for a Phase-T table and a frozen external authoritative table alike.
+	 * The verifier proves the sixteen-table set, the declared identity and reference contract, the
+	 * append-only/mutable split, the digest nullability rule, the dispatch-claim arbitration shape,
+	 * [C9-1]/[C9-2] the per-event decision-claim arbitration shape, the sealed-envelope completeness rule and
+	 * the non-null secret account scope. It rejects a raw reference column, a plaintext credential
+	 * column, an academic/notification/settlement table smuggled into the phase, and a parent that does
+	 * not itself declare the identity it is referenced by — for a Phase-T table and a frozen external
+	 * authoritative table alike.
 	 */
 	private static function verify_payment_execution_schema():void{
 		global $wpdb; $p = $wpdb->prefix . 'dzn_';
@@ -904,6 +906,7 @@ final class Migrator {
 			'payment_provider_event_receipts' => array('uid','provider_key','payment_provider_account_id','account_selector_digest','request_digest','signature_digest','signature_key_version','verification_state','refusal_reason_code','source_digest','body_bytes','received_at','created_at','created_by'),
 			'payment_provider_events' => array('uid','receipt_id','provider_key','payment_provider_account_id','event_reference_digest','event_fact_digest','event_type','raw_type_digest','payload_digest','provider_occurred_at','received_at','created_at','created_by'),
 			'payment_provider_event_decisions' => array('uid','provider_event_id','decision_sequence','decision_state','reason_code','evidence_kind','offer_id','obligation_id','purchase_id','commercial_evidence_id','collection_intent_id','renewal_cycle_id','renewal_cycle_state','collection_intent_state','r2_consequence_state','r2_reason_code','execution_command_id','decided_at','recorded_at','recorded_by','created_at','created_by'),
+			'payment_provider_event_decision_claims' => array('uid','provider_event_id','claim_state','claim_generation','claim_token_digest','lease_expires_at','claimed_at','settled_at','active_claim_slot','created_at','updated_at','created_by','updated_by'),
 			'payment_provider_secret_events' => array('uid','provider_key','payment_provider_account_id','secret_class','mode','audit_type','key_version','command_key_digest','reason_code','occurred_at','recorded_at','recorded_by','created_at','created_by'),
 		);
 		foreach ( $spec as $table => $columns ) {
@@ -962,6 +965,7 @@ final class Migrator {
 			'payment_provider_events.receipt_id'=>'payment_provider_event_receipts',
 			'payment_provider_events.payment_provider_account_id'=>'payment_provider_accounts',
 			'payment_provider_event_decisions.provider_event_id'=>'payment_provider_events',
+			'payment_provider_event_decision_claims.provider_event_id'=>'payment_provider_events',
 			'payment_provider_event_decisions.offer_id'=>'commercial_offers',
 			'payment_provider_event_decisions.obligation_id'=>'commercial_offer_obligations',
 			'payment_provider_event_decisions.purchase_id'=>'commercial_purchases',
@@ -989,6 +993,7 @@ final class Migrator {
 			array('payment_execution_results','command_result',true),array('payment_execution_dispatches','command_dispatch',true),
 			array('payment_execution_dispatches','subject_claim',true),array('payment_execution_dispatches','subject',false),
 			array('payment_provider_events','provider_event',true),array('payment_provider_event_decisions','decision_sequence',true),
+			array('payment_provider_event_decision_claims','event_claim',true),array('payment_provider_event_decision_claims','provider_event',false),
 		) as $index ) if ( ! self::has_index( $p.$index[0], $index[1], $index[2] ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T index '.$index[1]);
 		if ( ! self::has_index_columns( $p.'payment_provider_secrets', 'secret_slot', true, array('provider_key','secret_class','payment_provider_account_id','mode','active_slot') ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T secret scope index');
 		$secretAccount = $wpdb->get_row( "SHOW COLUMNS FROM {$p}payment_provider_secrets LIKE 'payment_provider_account_id'" );
@@ -1007,6 +1012,18 @@ final class Migrator {
 			if ( $state === 'in_flight' && $claim->lease_expires_at === null ) throw new \RuntimeException('Migration verification failed: an in-flight dispatch claim must carry a lease');
 			if ( ( $state === 'claimed' || $state === 'released' ) && $claim->lease_expires_at !== null ) throw new \RuntimeException('Migration verification failed: a released or claimed dispatch claim may not carry a lease');
 		}
+		foreach ( (array) $wpdb->get_results( "SELECT * FROM {$p}payment_provider_event_decision_claims" ) as $decisionClaim ) {
+			$state = (string) $decisionClaim->claim_state;
+			if ( ! in_array( $state, array('claimed','settled','released'), true ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T decision-claim state');
+			if ( (int) $decisionClaim->claim_generation < 1 ) throw new \RuntimeException('Migration verification failed: a non-positive decision-claim generation');
+			if ( preg_match('/^[0-9a-f]{64}$/D', (string) $decisionClaim->claim_token_digest ) !== 1 ) throw new \RuntimeException('Migration verification failed: a malformed decision-claim token');
+			if ( $state === 'claimed' && ( (string) $decisionClaim->active_claim_slot !== '1' || $decisionClaim->lease_expires_at === null || $decisionClaim->settled_at !== null ) ) throw new \RuntimeException('Migration verification failed: a live decision claim must carry its live slot, its lease and no terminal instant');
+			if ( $state !== 'claimed' && ( $decisionClaim->active_claim_slot !== null || $decisionClaim->lease_expires_at !== null || $decisionClaim->settled_at === null ) ) throw new \RuntimeException('Migration verification failed: a terminal decision claim must release its slot and lease and record its terminal instant');
+		}
+		$liveDecisionClaims = $wpdb->get_results( "SELECT provider_event_id,COUNT(*) AS total FROM {$p}payment_provider_event_decision_claims WHERE active_claim_slot=1 GROUP BY provider_event_id HAVING total>1" );
+		if ( $liveDecisionClaims ) throw new \RuntimeException('Migration verification failed: two live decision claims share one provider event');
+		$settledWithoutDecision = $wpdb->get_results( "SELECT claim.id FROM {$p}payment_provider_event_decision_claims claim LEFT JOIN {$p}payment_provider_event_decisions decision ON decision.provider_event_id=claim.provider_event_id WHERE claim.claim_state='settled' AND decision.id IS NULL LIMIT 1" );
+		if ( $settledWithoutDecision ) throw new \RuntimeException('Migration verification failed: a settled decision claim must carry the decision it appended');
 		foreach ( array('payment_terms','payment_lessons','payment_schedules','payment_notifications','payment_evidence','payment_settlements') as $forbidden ) {
 			$physical = $p . $forbidden;
 			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $physical ) ) === $physical ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-T must not own academic, notification or settlement storage: '.$forbidden);

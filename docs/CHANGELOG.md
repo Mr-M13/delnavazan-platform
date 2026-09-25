@@ -6,10 +6,54 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 ## Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter — candidate, unmerged — 2026-09-25
 
 Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260924.8`, additive on top of the Phase-V candidate
+`phase2a2t-payment-execution-seam-stripe-adapter-20260925.9`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 8, SHA-256
-`fb611d36627544ade01d5fa8935a4b98b11893cc1f465ddc5d1179d256b796ad`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 9, SHA-256
+`c6c55119adb4db52ac0583f97317478dd802a2d4ce7498a696ce674f6a951c34`).
+
+**Correction round 9** (build `…20260925.9`) applies the independent review of the candidate
+`5b477b72d97a329e7bc02ce041be8958af85fe81` / tree `a45d56fb8e1cdbe9785175ff272cf8ef5947b434`
+additively, without rewriting that history. Four blocking findings are closed:
+
+- **An event that still owes a decision is always completed.** The convergence path returned `recorded`
+  when the recorded event had no decision row at all, so an event that was inserted and then left owing
+  its first decision — a crash between the event insert and its decision — was never completed by a
+  redelivery. No decision at all is now an owed decision: the redelivery takes the event's decision claim,
+  runs the first decision and appends it exactly once. A `conflicting_provider_event` row is not the
+  event's decision, so the owed-decision test reads the non-conflict decision timeline.
+- **A pending-decision retry is owned by exactly one worker.** Two deliveries could both read the same
+  `pending` decision, both run `decide()` and the R1/R2 consequence, and both allocate the same next
+  `decision_sequence`, so one failed on the unique index after performing work. A durable per-event
+  decision claim (`payment_provider_event_decision_claims`, `UNIQUE event_claim (provider_event_id,
+  active_claim_slot)`) is now taken **before** any decision work runs: the winner alone may translate and
+  run the consequence, the claim's generation and token fence the `claimed → settled` transition inside
+  the transaction that inserts the decision, the loser performs no work at all and converges on the
+  owner's decision, and an expired claim is taken over by exactly one new generation.
+- **The HTTPS requirement has a configured, allowlisted proxy path.** The precheck ignored the declared
+  `PaymentExecutionRule::HTTPS_PROXY_HEADERS` and had no configured-proxy trust path, so a TLS-terminated
+  deployment relying on a trusted `X-Forwarded-Proto: https` had every webhook refused `https_required`.
+  The transport rule is now direct TLS, the local environment, or a proxy header the operator has
+  configured this site to trust and that is a member of the locked allowlist; an unconfigured, empty,
+  malformed or non-allowlisted configuration trusts nothing, and only a leftmost `https` passes.
+- **`OPTIONS` is receipted like every other registered method.** Declaring the method in the route's
+  method set never delivered it: WordPress answers `OPTIONS` in `rest_handle_options_request()`, a
+  `rest_pre_dispatch` filter that runs before normal route dispatch, so an `OPTIONS` delivery was answered
+  with no receipt at all. The endpoint now registers its own `rest_pre_dispatch` interception at priority
+  `1` — ahead of the core handler's `10` — for exactly its two route shapes, returns every other filter
+  input untouched, and sends a matched delivery through the same controlled precheck and receipt as a
+  routed `GET`/`PUT`/`PATCH`/`DELETE`: `refused`/`method_not_allowed`, `405`, the exact raw body digest and
+  byte count, exactly one receipt and never an event. The same round corrected the webhook suite's
+  disposable account selector, which was longer than the route's declared 32-character account segment
+  and therefore could never reach the endpoint the routing proofs were meant to exercise.
+
+`tests/phase-2a2t-contract.php` asserts the four source contracts, `tests/phase-2a2t-webhook-runtime.php`
+proves the recovery, the claim shape, the abandoned-claim takeover, the transport matrix and the `OPTIONS`
+interception (registered ahead of the core handler, and receipted with its exact raw body from both route
+shapes), `tests/phase-2a2t-failure-runtime.php` proves the claim fence's atomicity,
+`tests/phase-2a2t-corruption-runtime.php` proves the claim aggregate fails closed, and
+`tests/phase-2a2t-concurrency-runner.sh` adds `pending_decision_retry` and `undecided_event_recovery`
+(nineteen modes). No authority, capability, policy or provider call was added, no earlier commit was
+rewritten, and the recorded event row stays immutable — the claim is its own aggregate.
 
 **Correction round 8** (build `…20260924.8`) applies the independent review of the candidate
 `91bf288cd1cf4d5c08e7c99cb310a4d0743113b1` / tree `dec38b700c70f116cae53a1df64db011dbd99081`
@@ -66,7 +110,7 @@ commit was rewritten.
   over by exactly one fenced generation and reconciled before any re-issue.
 - **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
   §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
-  seventeen-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  nineteen-mode concurrency matrix) are written and wired but **could not be executed in this environment
   because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
   mandatory acceptance gate and remains outstanding.
 - **Candidates and merge:** single coherent candidate, no merge, no deployment.

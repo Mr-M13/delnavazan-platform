@@ -2,12 +2,13 @@
 namespace Delnavazan\Platform\Core\Application\PaymentExecution;
 
 /**
- * Fail-closed Phase 2A.2-T aggregate proof (contract §8.2, §12.3, §12.4, §14).
+ * Fail-closed Phase 2A.2-T aggregate proof (contract §8.2, §9.5, §12.3, §12.4, §14).
  *
  * Every Phase-T aggregate is proved before it is returned as authority: a command is immutable with no
- * terminal column of its own, the dispatch claim is the only mutable execution row, a result names its
- * own attempt exactly once, and an append-only receipt/event/decision row carries only controlled
- * vocabulary. A malformed aggregate is refused, never repaired and never presented as authority.
+ * terminal column of its own, the dispatch claim is the only mutable execution row, [C9-1] the per-event
+ * decision claim is the only mutable intake row, a result names its own attempt exactly once, and an
+ * append-only receipt/event/decision row carries only controlled vocabulary. A malformed aggregate is
+ * refused, never repaired and never presented as authority.
  */
 final class PaymentExecutionIntegrity {
     /** The effective command state, derived — never stored twice (rule 1). */
@@ -127,6 +128,30 @@ final class PaymentExecutionIntegrity {
         $consequenceReason=$decision->r2_reason_code===null?null:(string)$decision->r2_reason_code;
         if($consequenceReason!==null&&!PaymentExecutionRule::member($consequenceReason,PaymentExecutionRule::R2_CONSEQUENCE_REASONS))throw new \RuntimeException('payment_event_decision_corrupt');
         if((int)$decision->decision_sequence<1)throw new \RuntimeException('payment_event_decision_corrupt');
+    }
+
+    /**
+     * [C9-1]/[C9-2] The per-event decision claim: the phase's own mutable intake row, with its exact shape.
+     *
+     * A live `claimed` row holds the event's only claim slot under a lease and carries a token and a
+     * positive generation; a terminal `settled`/`released` row has released the slot, cleared its lease
+     * and recorded the instant it ended. Anything else — an unknown state, a missing or extra live slot,
+     * a lease on a terminal row, a missing lease on a live row, a malformed token or a non-positive
+     * generation — is refused, never repaired and never treated as ownership of a decision.
+     */
+    public static function decisionClaim(object $claim):void{
+        $state=(string)$claim->claim_state;
+        if(!PaymentExecutionRule::member($state,PaymentExecutionRule::DECISION_CLAIM_STATES))throw new \RuntimeException('payment_event_decision_claim_corrupt');
+        if((int)$claim->claim_generation<1)throw new \RuntimeException('payment_event_decision_claim_corrupt');
+        if(preg_match('/^[0-9a-f]{64}$/D',(string)$claim->claim_token_digest)!==1)throw new \RuntimeException('payment_event_decision_claim_corrupt');
+        $slot=$claim->active_claim_slot===null?null:(int)$claim->active_claim_slot;
+        $lease=$claim->lease_expires_at===null?null:(string)$claim->lease_expires_at;
+        $settled=$claim->settled_at===null?null:(string)$claim->settled_at;
+        if($state==='claimed'){
+            if($slot!==1||$lease===null||$settled!==null)throw new \RuntimeException('payment_event_decision_claim_corrupt');
+            return;
+        }
+        if($slot!==null||$lease!==null||$settled===null)throw new \RuntimeException('payment_event_decision_claim_corrupt');
     }
 
     public static function account(object $account):void{

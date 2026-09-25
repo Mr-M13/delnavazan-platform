@@ -82,11 +82,21 @@ final class PaymentExecutionRule {
         'renewal_cycle_not_collectable','collection_intent_not_submitted','obligation_not_settled',
         'accepted_payment_evidence_required',
     );
+    /** [C9-1] Durable per-event decision-claim lifecycle: the phase's own mutable intake row, the
+     * single owner of one event's owed decision. `claimed` is live under a lease; `settled` ends a claim
+     * whose owner appended the decision; `released` ends a claim whose owner appended nothing. */
+    public const DECISION_CLAIM_STATES=array('claimed','settled','released');
 
     /** Structural constants: never configurable. */
     public const SIGNATURE_TOLERANCE_SECONDS=300;
     public const MAX_WEBHOOK_BYTES=262144;
     public const TIMESTAMP_TOLERANCE_CLAMP_SECONDS=600;
+    /** [C9-1]/[C9-2] Decision-claim lease: how long one worker may hold an event's owed decision before a
+     * later delivery may take the claim over and complete it. Structural, never a setting. */
+    public const DECISION_CLAIM_LEASE_SECONDS=120;
+    /** [C9-1]/[C9-2] How long a delivery that cannot own the claim waits for the owner's decision before
+     * it reports the event as durably still owing one. Structural, never a setting. */
+    public const DECISION_CLAIM_WAIT_MILLISECONDS=1000;
     /** Dispatch-claim lease: how long one owner may hold an `in_flight` claim before a re-drive may
      * take it over and reconcile instead of re-issuing. Structural, never a setting. */
     public const DISPATCH_LEASE_SECONDS=120;
@@ -137,6 +147,52 @@ final class PaymentExecutionRule {
 
     /** The proxy-header set that may be trusted only when the site is configured behind a proxy. */
     public const HTTPS_PROXY_HEADERS=array('HTTP_X_FORWARDED_PROTO');
+    /** [C9-3] The operator-provisioned option that declares which proxy header this site trusts. It
+     * holds header names, never authority: only a member of `HTTPS_PROXY_HEADERS` is ever honoured, and
+     * an unset, empty, malformed or non-member configuration trusts no header at all, so no client can
+     * mark its own delivery secure. */
+    public const TRUSTED_PROXY_OPTION='dzn_platform_payment_trusted_proxy';
+    /** [C9-3] The only proxy-header value that marks a delivery as client-facing TLS. */
+    public const TRUSTED_PROXY_HTTPS_VALUE='https';
+
+    /**
+     * [C9-3] The proxy headers this site is configured to trust — always a subset of the locked
+     * `HTTPS_PROXY_HEADERS` allowlist, never a header named by a request.
+     *
+     * The operator option is the configuration signal of §9.2 ("only when the site is configured behind
+     * a proxy"); every name it may contribute is intersected with the allowlist, so an unconfigured site,
+     * an empty value, a malformed value and a name outside the allowlist all trust nothing at all.
+     */
+    public static function trustedProxyHeaders():array{
+        if(!function_exists('get_option'))return array();
+        $configured=trim((string)get_option(self::TRUSTED_PROXY_OPTION,''));
+        if($configured==='')return array();
+        $trusted=array();
+        // A name may be written in either the server form (`HTTP_X_FORWARDED_PROTO`) or the header form
+        // (`X-Forwarded-Proto`), because both spellings name the same request header; what is *never*
+        // tolerated is a name outside the allowlist.
+        foreach(preg_split('/[^A-Za-z0-9_-]+/',$configured,-1,PREG_SPLIT_NO_EMPTY) as $name){
+            $name=strtoupper(str_replace('-','_',$name));
+            if(!str_starts_with($name,'HTTP_'))$name='HTTP_'.$name;
+            if(in_array($name,self::HTTPS_PROXY_HEADERS,true))$trusted[$name]=true;
+        }
+        return array_keys($trusted);
+    }
+
+    /**
+     * [C9-3] One *trusted* proxy header's verdict on the client-facing scheme.
+     *
+     * The header name must be trusted by configuration and a member of the locked allowlist; the value
+     * is read as the provider-facing convention does — a comma-separated chain whose leftmost element is
+     * the original client scheme — and only a leftmost `https` marks the delivery secure. No other value,
+     * and no untrusted header whatever its value, may do so.
+     */
+    public static function proxyHeaderIndicatesHttps(string $headerName,?string $value):bool{
+        $headerName=strtoupper(trim($headerName));
+        if(!in_array($headerName,self::trustedProxyHeaders(),true))return false;
+        $chain=explode(',',trim((string)$value));
+        return strtolower(trim((string)($chain[0]??'')))===self::TRUSTED_PROXY_HTTPS_VALUE;
+    }
 
     public static function provider(string $providerKey):?string{
         $providerKey=strtolower(trim($providerKey));

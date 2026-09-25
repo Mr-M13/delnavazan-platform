@@ -2,7 +2,7 @@
 
 **Status:** implementation contract (preflight). Planning/audit only.
 **Schema:** 028 (`028_payment_execution_seam_provider_adapter`)
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260924.8` (proposed; correction round 8)
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.9` (proposed; correction round 9)
 **Correction round 2:** independent review of commit `adbd78795f6e11ee7731c985975a7276f8351659`
 (tree `f96569c8e70254d436b8571db64be0d057583fef`) returned FAIL on six blocking findings. §0 records
 each finding and its correction, and every corrected clause carries a `[C2]` marker so a reviewer can
@@ -55,6 +55,16 @@ unique event index was translated instead of converging, and a `drain()` compare
 reference so a changed but validly signed payload could be translated as the recorded event. §0F records
 each finding and its correction, and every corrected clause carries a `[C8-1]`…`[C8-4]` marker so a
 reviewer can locate all four changes without re-reading the document.
+**Correction round 9:** independent review of commit `5b477b72d97a329e7bc02ce041be8958af85fe81`
+(tree `a45d56fb8e1cdbe9785175ff272cf8ef5947b434`) returned FAIL on four blocking findings — a verified
+event that was recorded but left with no decision was never completed by a redelivery, a pending-decision
+retry was not concurrency-safe (two deliveries could both run the translation and the R2 consequence and
+then collide on the decision sequence), the §9.2 HTTPS requirement ignored the declared proxy-header
+allowlist and had no configured-proxy trust path, and the route's declared `OPTIONS` method was answered
+by WordPress's own `OPTIONS` handler — which runs outside normal route dispatch — so that registered
+method was never receipted. §0G records each finding and its correction, and every corrected clause
+carries a `[C9-1]`…`[C9-4]` marker so a reviewer can locate all four changes without re-reading the
+document.
 **Base:** `main` with Phase 2A.2-R2 merged (Schema 26). R1 is already authoritative on `main`;
 R2 / Schema 26 is the active candidate and is a hard dependency of the R2-collection half of this
 contract (§6.2, §19).
@@ -175,6 +185,25 @@ capability or policy is added beyond what the findings require.
 | C8-3 | §9.5: two concurrent deliveries of one event identity could both observe no existing event; the loser of the insert then received the winner's event id after the unique-key collision and **unconditionally** called `decide()`, appending a second decision and running a second R1/R2 consequence. Identical deliveries therefore did not converge, and a materially different duplicate bypassed the recorded fact-digest conflict path. | Insert-or-resolve now reports whether *this* worker created the event. A worker that meets `UNIQUE provider_event (provider_key, event_reference_digest)` adopts the winner's recorded event with `created = false` and is routed through the **same** convergence path a read duplicate takes: identical recorded facts converge idempotently (the single exception is an event whose R2 consequence is still `pending`, which may append the next consequence decision), and materially different recorded facts preserve the original event and append the controlled `conflicting_provider_event` decision. No collision path can translate, decide or append an R1/R2 decision of its own (§9.5). |
 | C8-4 | §9.7/§9.5: `drain()` reconstructed the event identity from the re-delivered body but compared only `event_reference_digest`. A body with the same event id but changed immutable facts — validly signed, because the provider controls its own payload — was therefore accepted as the recorded event and translated, bypassing the immutable-event-fact and conflicting-duplicate invariants of §9.5. | `drain()` now recomputes the **full** event fact digest of the re-delivered envelope and requires it to equal the recorded `event_fact_digest` before any decision is appended. A mismatch preserves the recorded event unchanged, appends the controlled `conflicting_provider_event` decision (with the R1 commercial exception) and submits **no** evidence: a drain may never translate facts the event never recorded (§9.5, §9.7). |
 
+## 0G. Correction round 9 (independent review of `5b477b7` / tree `a45d56fb`)
+
+The reviewed candidate returned FAIL on four blocking findings: a durably recorded event that owed its
+first decision was never completed by a redelivery, a pending-decision retry could be executed twice by
+two deliveries, the §9.2 transport requirement ignored the declared `HTTPS_PROXY_HEADERS` allowlist and
+had no configured-proxy trust path, and the `OPTIONS` method the route declares was answered by
+WordPress's own `OPTIONS` handler — which runs outside normal route dispatch — so no receipt was ever
+written for it. Each is resolved below. No clause outside these four findings is changed by this round,
+and no authority, capability, policy or provider call is added beyond what the findings require. The two
+intake findings share one mechanism and therefore one new aggregate: the **durable per-event decision
+claim**, which is exactly the dispatch claim of §8.3 applied to an event's owed decision.
+
+| # | Blocking finding (review of `5b477b7`) | Correction made in this round |
+| --- | --- | --- |
+| C9-1 | §9.5: `convergeExisting()` returned `recorded` when the recorded event had no decision row at all, so an event that was inserted and then left owing its decision — a process crash after the event insert committed, before the first decision — was never completed by a redelivery. This violated the recovery invariant that a redelivery completes an event still owing a decision. | [C9-2]'s single serialised decision path now treats "no decision at all" as an owed decision: an identical redelivery of a recorded event with no decision row takes the event's decision claim, runs the first decision, and appends it exactly once. Converged delivery is therefore never equivalent to "recorded forever": an event owes a decision while its decision timeline (never a conflict record, see below) is empty or still `pending`. §17 proves the recovery, its serialisation and the takeover of an abandoned claim. |
+| C9-2 | §9.5/§14: pending-decision retries were not concurrency-safe. Two deliveries could both read the same `pending` decision, both run `decide()` and the R1/R2 consequence, and both allocate the same next `decision_sequence`, so one of them failed on the unique index after already performing the work — violating the exactly-once bounded-consequence requirement. | A durable **per-event decision claim** (`payment_provider_event_decision_claims`, §12.1) with its own `UNIQUE event_claim (provider_event_id, active_claim_slot)` index is now taken **before any decision work runs**. The unique index — never a read — arbitrates two deliveries: the winner must own the claim to run the translation and the R2 consequence, the claim's `claim_generation`/`claim_token_digest` fence the `claimed → settled` transition inside the same transaction that inserts the decision (so the next `decision_sequence` is allocated under the claim row's lock), and the loser performs **no** work at all: it re-reads the decision the owner published, waits a bounded, structural window for it, and converges. An expired claim is taken over by exactly one conditional statement that issues a new generation and token. §9.5, §12.1, §12.3, §12.4, §13, §14 and §17 are updated, and the concurrency matrix adds `pending_decision_retry` and `undecided_event_recovery`. |
+| C9-3 | §9.2: the HTTPS requirement consulted only `is_ssl()` (plus the local environment), ignoring the declared `PaymentExecutionRule::HTTPS_PROXY_HEADERS` and offering no configured-proxy trust path, so a TLS-terminated deployment relying on a trusted `X-Forwarded-Proto: https` had every webhook rejected as `https_required`. | §9.2 now states the complete transport rule: direct TLS, the local development environment, or a proxy header that **the operator has configured this site to trust** (`PaymentExecutionRule::TRUSTED_PROXY_OPTION`, §5.2) **and** that is a member of the locked `HTTPS_PROXY_HEADERS` allowlist. The option names headers, never authority: an unset, empty, malformed or non-allowlisted configuration trusts nothing, so a client can never satisfy the HTTPS requirement by sending its own header, and only a leftmost `https` in the header's scheme chain marks the delivery secure. The verdict is a pure function of its inputs and is proved by the webhook runtime suite. |
+| C9-4 | §9.1/§9.3: registering `OPTIONS` in the route's declared method set does not deliver an `OPTIONS` request to the controller. WordPress answers `OPTIONS` in `rest_handle_options_request()`, itself a `rest_pre_dispatch` filter, so the delivery is answered *before* `dispatch()` resolves a route and reaches a callback, and **no receipt is written** — breaking the invariant that every registered method, `OPTIONS` included, is durably receipted. | `StripeWebhookController::register()` now also adds its own `rest_pre_dispatch` interception at priority `1`, ahead of the core handler's `10`. It answers **only** an `OPTIONS` delivery to **only** this endpoint's two registered route shapes (case-insensitively, with an optional trailing separator) and returns every other filter input untouched, so no other route's `OPTIONS` handling changes. A matched delivery is handed to the same controlled `process()` path a routed `GET`/`PUT`/`PATCH`/`DELETE` takes: the §9.2 method requirement decides it inside the controller, the durable receipt is written `refused`/`method_not_allowed` with the **exact raw body** digest and byte count (§9.3), the response is the controlled `405` and no event is ever created. §9.1, §9.2, §9.8 and §17 record the interception, and `tests/phase-2a2t-webhook-runtime.php` proves it end to end. |
+
 ## 1. Verified authoritative state
 
 | Fact | Verified value (this checkout) |
@@ -257,6 +286,10 @@ Out of scope (unchanged by this phase):
   `commercial_*` or R2 table and adds no provider-specific column to commercial storage.
 - R1 evidence convergence is preserved exactly: identical immutable facts converge idempotently, a
   material difference is preserved and routed, and Phase T never manufactures settlement truth.
+- [C9-1]/[C9-2] `payment_provider_events` stays write-once: an event's decision claim is its own
+  mutable intake aggregate (§12.1), so the recorded event identity is never updated, and a decision is
+  appended exactly once by exactly one claimed worker — including the first decision of an event that a
+  crash left owing one.
 
 ## 4. Locked Phase T decisions (T-D1 … T-D14)
 
@@ -308,7 +341,8 @@ src/Integrations/Payment/Stripe/
   StripePaymentAdapter.php                      implements PaymentExecutionPort
   StripeEventTranslator.php                     implements ProviderEventTranslator
   StripeSignatureVerifier.php                   exact-raw-body signature verification
-  StripeWebhookController.php                   the only public entry point (registered on rest_api_init)
+  StripeWebhookController.php                   the only public entry point (registered on rest_api_init;
+                                                [C9-4] also intercepts its own OPTIONS delivery on rest_pre_dispatch)
 src/Admin/Controller/                           admin read/diagnostic surfaces (no secret values)
 ```
 
@@ -404,11 +438,21 @@ final class PaymentExecutionRule {
         'renewal_cycle_not_collectable','collection_intent_not_submitted','obligation_not_settled',
         'accepted_payment_evidence_required',
     );
+    /** [C9-1]/[C9-2] Durable per-event decision-claim lifecycle: the phase's own mutable intake row, the
+     * one owner of one event's owed decision. `claimed` is live under a lease; `settled` ends a claim
+     * whose owner appended the decision; `released` ends a claim whose owner appended nothing. */
+    public const DECISION_CLAIM_STATES=array('claimed','settled','released');
 
     /** Structural constants: never configurable. */
     public const SIGNATURE_TOLERANCE_SECONDS=300;
     public const MAX_WEBHOOK_BYTES=262144;
     public const TIMESTAMP_TOLERANCE_CLAMP_SECONDS=600;
+    /** [C9-1]/[C9-2] Decision-claim lease: how long one worker may hold an event's owed decision before
+     * a later delivery may take the claim over and complete it. Structural, never a setting. */
+    public const DECISION_CLAIM_LEASE_SECONDS=120;
+    /** [C9-1]/[C9-2] How long a delivery that cannot own the claim waits for the owner's decision before
+     * it reports the event as durably still owing one. Structural, never a setting. */
+    public const DECISION_CLAIM_WAIT_MILLISECONDS=1000;
     /** [C3-1] Dispatch-claim lease: how long one owner may hold an `in_flight` claim before a re-drive
      * may take it over and reconcile instead of re-issuing. Structural, never a setting. */
     public const DISPATCH_LEASE_SECONDS=120;
@@ -452,11 +496,33 @@ final class PaymentExecutionRule {
     public const DESCRIPTOR_PREFLIGHT_STATES=array('ok','dispatch_descriptor_unavailable');
     /** Reserved for an explicitly authorised later slice; empty in this phase. */
     public const LIVE_EXECUTION_PROVIDERS=array();
+
+    /** [C9-3] The proxy-header set that may be trusted only when the site is configured behind a proxy.
+     * This is the whole of the allowlist: a header name outside it can never mark a delivery secure,
+     * whatever an operator or a request says. */
+    public const HTTPS_PROXY_HEADERS=array('HTTP_X_FORWARDED_PROTO');
+    /** [C9-3] The operator-provisioned option declaring which proxy header this site trusts. It holds
+     * header names, never authority: only a member of `HTTPS_PROXY_HEADERS` is ever honoured, and an
+     * unset, empty, malformed or non-member configuration trusts no header at all. */
+    public const TRUSTED_PROXY_OPTION='dzn_platform_payment_trusted_proxy';
+    /** [C9-3] The only proxy-header value that marks a delivery as client-facing TLS. */
+    public const TRUSTED_PROXY_HTTPS_VALUE='https';
+    /** [C9-3] The proxy headers this site is configured to trust — always a subset of the locked
+     * allowlist and never a header named by a request. The operator option is the configuration signal of
+     * §9.2, and every name it may contribute is intersected with the allowlist. */
+    public static function trustedProxyHeaders(): array;
+    /** [C9-3] One *trusted* proxy header's verdict on the client-facing scheme: the header name must be
+     * trusted by configuration and a member of the locked allowlist, the value is read as the
+     * provider-facing convention does (a comma-separated chain whose leftmost element is the original
+     * client scheme), and only a leftmost `https` marks the delivery secure. */
+    public static function proxyHeaderIndicatesHttps( string $headerName, ?string $value ): bool;
 }
 ```
 
 Any vocabulary member added later is a code change with its own review, never a configuration value
-and never a `dzn_commercial_policies` row.
+and never a `dzn_commercial_policies` row. [C9-3] The same holds for the trusted-proxy allowlist: the
+operator option may only *name* a member of the locked `HTTPS_PROXY_HEADERS` set, so widening it is a
+reviewed code change and the option itself can never mark an arbitrary header trusted.
 
 ### 5.3 Port interfaces
 
@@ -1273,6 +1339,18 @@ provider account, mode and signing secret and the body must not be read to find 
   method requirement is therefore decided *inside* the controlled handler (§9.2) and produces the same
   durable receipt as every other refusal; the endpoint remains one handler for every method, and a
   non-`POST` request never reaches account resolution, verification or translation.
+- [C9-4] `OPTIONS` is the one registered method that no route registration can deliver to a callback:
+  WordPress answers it in `rest_handle_options_request()`, which is itself a `rest_pre_dispatch` filter
+  and therefore runs **before** `dispatch()` resolves a route and calls the endpoint's handler.
+  `StripeWebhookController::register()` therefore also registers the endpoint's own `rest_pre_dispatch`
+  interception (`StripeWebhookController::interceptOptions()`) at priority `1`, ahead of the core
+  handler's `10`. The interception is scoped in both directions: it ignores every request that is not an
+  `OPTIONS` delivery and returns every path outside this endpoint's two registered route shapes to the
+  filter chain untouched (matched case-insensitively, with the trailing separator WordPress may have
+  removed), so no other route's `OPTIONS` handling changes. A matched delivery is handed to the same
+  controlled `process()` path a routed `GET`/`PUT`/`PATCH`/`DELETE` takes, so it is receipted and refused
+  exactly like them: `405` `method_not_allowed` with the exact raw body (§9.2, §9.3). There is no second
+  refusal implementation and no delivery for which the method can be judged twice.
 - A resolved account never authorises anything by itself: acceptance still requires a valid signature
   over the raw body under **that** account's secret (§9.4), and a verified payload whose own provider
   account reference disagrees with the selected account is refused at translation with
@@ -1284,7 +1362,7 @@ provider account, mode and signing secret and the body must not be read to find 
 | Requirement | Failure |
 | --- | --- |
 | method is exactly `POST` | `405` `method_not_allowed` |
-| HTTPS request (`is_ssl()` / `X-Forwarded-Proto` only when the site is configured behind a proxy) | `400` `https_required` |
+| [C9-3] HTTPS request — direct TLS (`is_ssl()`), the local development environment, or a proxy header that the site is **configured** to trust and that is a member of the locked `HTTPS_PROXY_HEADERS` allowlist | `400` `https_required` |
 | `Content-Type` is `application/json` | `400` `unsupported_content_type` |
 | body is non-empty and `≤ MAX_WEBHOOK_BYTES` | `413` `payload_too_large` / `400` `empty_payload` |
 | [C2-4] provider segment is a `PROVIDERS` member and the account segment resolves before parsing | `404` `unsupported_payment_provider` / `webhook_account_unresolved` / `provider_account_inactive` |
@@ -1294,13 +1372,33 @@ Every rejected request is receipted (§9.3) with `verification_state = refused` 
 reason code. Nothing in the response distinguishes "unknown provider" from "unknown account" from
 "unmapped object".
 
+[C9-3] **The transport requirement is satisfied by exactly three things and nothing else.** A delivery
+passes when the transport itself is TLS (`is_ssl()`), when the site runs in the local development
+environment, or when a proxy header that the operator has declared this site trusts — through
+`PaymentExecutionRule::TRUSTED_PROXY_OPTION`, the only configuration signal for "this site is behind a
+TLS-terminating proxy" — names the client-facing scheme `https`. The declaration may only name a member
+of the locked `HTTPS_PROXY_HEADERS` allowlist: an unset, empty, malformed or non-member configuration
+trusts no header at all, and a header that is not trusted is ignored whatever it says, so a client can
+never satisfy the requirement by sending `X-Forwarded-Proto` to a site that is not behind such a proxy.
+The value is read as the proxy convention does — a comma-separated scheme chain whose leftmost element is
+the original client scheme — and only a leftmost `https` counts; `http`, an empty value and any other
+value are `https_required`. Header names are compared without their separators, because WordPress
+normalises the same inbound header to `x-forwarded-proto` on the server path and to `x_forwarded_proto`
+when a request is built in process; neither spelling is ever trusted on its own. The verdict is a pure
+function of the direct-TLS flag, the environment type, the request's headers and the two locked constants,
+so it is proved directly by the runtime suite (§17).
+
 [C8-1] The requirements above are evaluated **before any parsing**, but never before the receipt: the
 controller hands the exact raw bytes it received to `receive()` for *every* outcome, including a refusal
 decided before parsing. A precheck refusal therefore records a real `request_digest` (`body_bytes` of the
 bytes that actually arrived) and never a zero-byte or rewritten substitute for an oversized,
 unsupported-content-type or otherwise refused request. These prechecks are also the only place the
 method is judged: because the routes accept every method, a non-`POST` delivery is receipted with
-`method_not_allowed` rather than dropped by routing.
+`method_not_allowed` rather than dropped by routing. [C9-4] That single judgement covers `OPTIONS` too,
+even though WordPress answers `OPTIONS` itself: the endpoint intercepts its own `OPTIONS` delivery ahead
+of the core handler (§9.1) and routes it through the same precheck, receipt and response the routed
+`GET`/`PUT`/`PATCH`/`DELETE` deliveries take, so a refused `OPTIONS` delivery records the same controlled
+reason, the same `405` and the same exact raw body digest and byte count as any other method.
 
 ### 9.3 Durable receipt before acknowledgement
 
@@ -1374,6 +1472,28 @@ unauthenticated and is never impersonated as a human principal.
   returned. If the decision cannot be attempted (for example the worker principal is unset, §9.7), the
   event stays durably `received` and a later drain completes it; the response is still `200` because
   the work is durably recorded, and the pending state is visible in the read model.
+- [C9-1]/[C9-2] **A decision is appended by exactly one claimed worker, and an event that owes one is
+  always completed.** Every path that may append a decision — the first decision of a newly recorded
+  event, the first decision of an event that was recorded and then left owing one, the terminal
+  consequence of a decision that is still `pending` or was refused for want of the §9.7 principal, a
+  `drain()` and the controlled conflict decision — goes through the event's **durable decision claim**
+  (`payment_provider_event_decision_claims`, §12.1). The worker must own the claim *before* it runs any
+  translation or R1/R2 consequence; the claim's `claim_generation` and `claim_token_digest` fence the
+  `claimed → settled` transition **inside the transaction that inserts the decision**, so the next
+  `decision_sequence` is allocated under the claim row's lock and two deliveries can never derive the
+  same one; and a delivery that cannot own the claim performs **no** decision or consequence work at all
+  — it re-reads the decision the owner published, waits a bounded, structural window for it, and
+  converges. The unique `event_claim` index, never a read, arbitrates two workers that both saw a
+  decision owed, exactly as `UNIQUE provider_event` arbitrates two event inserts. An abandoned claim
+  (its lease has expired) is taken over by exactly one conditional statement that issues a new fencing
+  generation and token, so a worker that died holding a claim never strands the event. `convergeExisting()`
+  therefore never reports an event as merely `recorded` while it owes a decision: no decision at all is
+  an owed decision, and a redelivery completes it.
+- [C9-1] **A conflict record is not the event's decision.** A `conflicting_provider_event` row records
+  that a *different* delivery carried materially different facts; it never discharges or replaces the
+  event's own decision. Whether an event still owes a decision is therefore asked of its non-conflict
+  decision timeline, so a conflicting duplicate can neither suppress the owed first decision nor turn a
+  deferred one into "decided".
 
 ### 9.6 Processing state, ordering and regression safety
 
@@ -1417,6 +1537,10 @@ named actor and refuse an anonymous one.
   exactly-four-capability service principal.
 - A re-delivery of a `received` event converges on the same event identity and completes the pending
   decision exactly once; the drain entry point is idempotent and is safe to run repeatedly.
+  [C9-1]/[C9-2] "The pending decision" includes an event that has **no** decision row at all (a worker
+  that committed the event and then died): the redelivery or drain completes it through the event's
+  decision claim, and a drain that races a webhook redelivery appends one decision, the loser converging
+  on it (§9.5).
   [C8-4] "Completes the pending decision" is bounded by the recorded facts: the drain re-supplies a body
   and must prove the **full** recorded `event_fact_digest` from it (§9.5) before it may append the owed
   decision. A body that matches only the event reference is refused as a conflicting duplicate, so a
@@ -1466,12 +1590,15 @@ unchanged: Phase T adds no bypass, no filter, no "system actor" parameter and no
 ### 9.8 Context and noise control
 
 The controller raises the REST request size limit only if the platform's own limit is below
-`MAX_WEBHOOK_BYTES`, sets `rest_pre_dispatch`-independent behaviour (no other plugin filter may
-change the verified body), and answers provider retries with the provider-appropriate success code for
-an already-processed duplicate. Rate limiting is **not** applied to the webhook path: signature
-verification is the control, and a rate limit would discard legitimately retried provider traffic. A
-burst of unverified requests is observable through the receipt refusal counters, not through
-suppression.
+`MAX_WEBHOOK_BYTES` and answers provider retries with the provider-appropriate success code for an
+already-processed duplicate. [C9-4] Its only `rest_pre_dispatch` participation is the `OPTIONS`
+interception of §9.1: an `OPTIONS` delivery to this endpoint's own routes, refused `method_not_allowed`
+and receipted exactly like any other non-`POST` delivery. That participation never reads, rewrites or
+re-decides a `POST` delivery, so a `POST` is still verified against — and only against — the bytes it
+carried: no filter, this endpoint's own included, may change the verified body. Rate limiting is **not**
+applied to the webhook path: signature verification is the control, and a rate limit would discard
+legitimately retried provider traffic. A burst of unverified requests is observable through the receipt
+refusal counters, not through suppression.
 
 ## 10. Event → authority mapping
 
@@ -1921,6 +2048,37 @@ mutable surface of the row is therefore exactly `dispatch_state`, `claim_generat
 `claim_token_digest`, `lease_expires_at`, `settled_at`, `active_claim_slot`, `updated_at` and
 `updated_by`; everything else on the row is write-once.
 
+`payment_provider_event_decision_claims` — **[C9-1]/[C9-2] new in this correction round**; the mutable
+per-event decision claim of §9.5, the intake counterpart of the §8.3 dispatch claim (mutable by design:
+the owner's `claimed → settled`/`released` transitions and the lease *are* the coordination state):
+
+```text
+id bigint unsigned, uid char(26) NOT NULL, provider_event_id bigint unsigned NOT NULL,
+claim_state varchar(16) NOT NULL, claim_generation int unsigned NOT NULL,
+claim_token_digest char(64) NOT NULL, lease_expires_at datetime NULL,
+claimed_at datetime NOT NULL, settled_at datetime NULL, active_claim_slot tinyint unsigned NULL,
+created_at, updated_at, created_by NULL, updated_by NULL
+PRIMARY KEY(id), UNIQUE uid(uid), UNIQUE event_claim(provider_event_id, active_claim_slot),
+KEY provider_event(provider_event_id), KEY claim_state(claim_state)
+```
+
+Exactly one event holds one claim row per decision, and the claim is written only by
+`PaymentEventIntakeService`. `claim_state` is a `DECISION_CLAIM_STATES` member and the transition graph
+is exactly `claimed → {settled, released}`: `settled` ends a claim whose owner appended the decision, and
+`released` ends a claim whose owner appended nothing (a stale generation, or a worker whose decision work
+raised). `active_claim_slot` is `1` while the claim is live and `NULL` once it is terminal, so
+`UNIQUE event_claim` guarantees **at most one live claim per event** — that index, never a read, is what
+arbitrates two deliveries that both saw a decision owed (§9.5). `claim_generation` is `1` at insert and
+incremented only by the single conditional expired-lease take-over, always together with a fresh
+`claim_token_digest` and a future `lease_expires_at`; the generation and token fence the settlement, so
+exactly one owner can ever append the decision and a replaced owner writes nothing. `claimed_at` is the
+instant the current generation took the claim and `settled_at` is its terminal instant — `NULL` while the
+claim is live — and the row's mutable surface is exactly `claim_state`, `claim_generation`,
+`claim_token_digest`, `lease_expires_at`, `claimed_at`, `settled_at`, `active_claim_slot`, `updated_at`
+and `updated_by`. It stores no decision outcome (that stays in the append-only
+`payment_provider_event_decisions`, §12.2) and no provider reference: the token is a keyed digest and the
+event reference is the identifier the owning boundary already recorded.
+
 ### 12.2 Append-only evidence
 
 [C2-2] Every table in this section declares an explicit integer identity — `id bigint unsigned NOT NULL
@@ -1993,7 +2151,9 @@ exists only for a request whose signature verified against a resolved account, �
 `KEY receipt(receipt_id)`, `KEY received_at(received_at)`,
 `KEY provider_account(payment_provider_account_id)`.
 Intake state is frozen in the row; processing outcomes are separate rows, so this table is never
-updated.
+updated. [C9-1]/[C9-2] The event's decision claim is therefore **not** a column here: it is its own
+mutable aggregate (§12.1), so this row stays write-once and the claim's lifecycle is never mixed into the
+immutable event identity.
 
 `payment_provider_event_decisions` — `id bigint unsigned`, `uid char(26)`,
 `provider_event_id bigint unsigned NOT NULL`, `decision_sequence int unsigned NOT NULL`,
@@ -2014,7 +2174,10 @@ updated.
 [C2-3] `r2_consequence_state` is a `R2_CONSEQUENCE_STATES` member and `r2_reason_code` a
 `R2_CONSEQUENCE_REASONS` member (the ordered consequence of §10.1); `decision_state` is a
 `DECISION_STATES` member and `reason_code` a `DECISION_REASONS` member. `recorded_by` is the worker
-principal, or NULL when the refusal precedes any actor.
+principal, or NULL when the refusal precedes any actor. [C9-1] A `conflicting_provider_event` row records
+that a different delivery carried materially different facts; it is never the event's own decision, so
+whether an event still owes a decision is asked of its non-conflict rows (§9.5), and a conflict row can
+neither suppress a first decision nor turn a deferred one into "decided".
 
 `payment_provider_secret_events` — `id bigint unsigned`, `uid char(26)`,
 `provider_key varchar(32) NOT NULL`, `payment_provider_account_id bigint unsigned NULL` (NULL only for a
@@ -2077,6 +2240,7 @@ declare `id bigint unsigned NOT NULL AUTO_INCREMENT` with `PRIMARY KEY(id)` — 
 | `payment_provider_events.receipt_id` | NOT NULL | `payment_provider_event_receipts.id` | `KEY receipt` | written by the intake service in the same transaction that recorded the verified receipt (receipt → event → decision) |
 | `payment_provider_events.payment_provider_account_id` | NOT NULL | `payment_provider_accounts.id` | `KEY provider_account` | the account the signature actually verified against (§9.4); a payload that names another account is refused with `unmapped_provider_account` |
 | `payment_provider_event_decisions.provider_event_id` | NOT NULL | `payment_provider_events.id` | `UNIQUE decision_sequence` + `KEY event` | written only by `PaymentEventIntakeService` for the event it just verified or drained; the §8.4 hook passes this same `id` |
+| `payment_provider_event_decision_claims.provider_event_id` ([C9-1]/[C9-2]) | NOT NULL | `payment_provider_events.id` | `UNIQUE event_claim` (leading column) + `KEY provider_event` | written only by `PaymentEventIntakeService`, for the event it owns the decision of, before any translation or R1/R2 consequence runs; a foreign or missing event id is corruption and is refused |
 | `payment_provider_event_decisions.obligation_id` / `.purchase_id` / `.offer_id` / `.commercial_evidence_id` / `.collection_intent_id` / `.renewal_cycle_id` / `.execution_command_id` | NULL (kind-specific) | `commercial_offer_obligations.id`, `commercial_purchases.id`, `commercial_offers.id`, `commercial_payment_evidence.id`, `collection_intents.id`, `renewal_cycles.id`, `payment_execution_commands.id` | `KEY offer`, `KEY obligation`, `KEY purchase`, `KEY commercial_evidence`, `KEY intent`, `KEY cycle`, `KEY execution_command` | each is written only from an id the same decision actually resolved through the mapping registry and the R1/R2 acceptance boundary; an unresolved attribution stores NULL and records the controlled refusal instead |
 | `payment_provider_secret_events.payment_provider_account_id` | NULL only for an unresolvable `write_refused` row | `payment_provider_accounts.id` | `KEY provider_account` | the vault records the resolved account on every write, rotation, retire or decrypt failure |
 
@@ -2117,13 +2281,14 @@ validated by §12.4 and behaviourally by §17.
 
 ### 12.4 Migration rules
 
-- `028_payment_execution_seam_provider_adapter` installs only the fifteen tables above, and exactly
+- `028_payment_execution_seam_provider_adapter` installs only the sixteen tables above, and exactly
   these: `payment_provider_accounts`, `payment_provider_account_events`,
   `payment_provider_account_commands`, `payment_provider_objects`,
   `payment_provider_object_events`, `payment_provider_object_commands`, `payment_provider_secrets`,
   `payment_execution_commands`, `payment_execution_attempts`, `payment_execution_results`,
   `payment_execution_dispatches`, `payment_provider_event_receipts`, `payment_provider_events`,
-  `payment_provider_event_decisions`, `payment_provider_secret_events`.
+  `payment_provider_event_decisions`, [C9-1]/[C9-2]
+  `payment_provider_event_decision_claims`, `payment_provider_secret_events`.
 - `verify_payment_execution_schema()` runs after migration 028, on current-schema verification, and
   unconditionally before the schema option advances to 28 (including the retained-028/stale-version
   path) — the same three call sites the R1/R2 verifiers use.
@@ -2158,7 +2323,7 @@ validated by §12.4 and behaviourally by §17.
   subject. The runtime suite then proves the arbitration behaviourally: two opposing operations for one
   intent cannot both hold a live claim, and a claim left `in_flight` by a crash is taken over and
   reconciled exactly once.
-  [C5-1] It also enforces the single permitted claim/result pairing: the only claim that may coexist
+    [C5-1] It also enforces the single permitted claim/result pairing: the only claim that may coexist
   with a result row is a **terminal `released` claim** whose command's result is that command's own
   `refused` row with `reason_code = dispatch_descriptor_unavailable` (§8.2 rule 5, §8.3). Every other
   coexistence — a live (`claimed`/`in_flight`) claim beside a result, a `settled` claim beside a result,
@@ -2183,6 +2348,17 @@ validated by §12.4 and behaviourally by §17.
   the invariant behaviourally: a second active row for one `(provider_key, secret_class, account, mode)`
   is rejected, a rotation leaves exactly one active row and one history row, and a NULL account scope is
   rejected by the column definition.
+- [C9-1]/[C9-2] The verifier rejects a decision-claim defect: a
+  `payment_provider_event_decision_claims` table missing
+  `UNIQUE event_claim(provider_event_id, active_claim_slot)` or its `KEY provider_event`, a
+  `claim_state` that is not a `DECISION_CLAIM_STATES` member, a non-positive `claim_generation`, a
+  malformed `claim_token_digest`, a live `claimed` row without its live slot, its lease or without a
+  `NULL` terminal instant, a terminal row that kept the live slot, kept a lease or recorded no terminal
+  instant, two live decision claims sharing one provider event, and a `settled` claim whose event
+  carries no decision row at all. The runtime suites then prove the behaviour: a decision that is
+  appended by exactly one claimed worker, a loser that performs no work and converges, an abandoned
+  claim that exactly one later generation takes over, and a claim-agent whose aggregate proof fails
+  closed on every mutated shape above.
 - Digest nullability is checked too: a `char(64)` column is accepted as `NOT NULL`, or as `NULL` only
   when it is one of the six optional digest columns enumerated in §12.3; anything else is rejected, and
   a declared-NOT-NULL digest that is NULL-able is rejected.
@@ -2200,6 +2376,7 @@ validated by §12.4 and behaviourally by §17.
 | `PaymentProviderObjectService::link`, `supersede`, `detach`, `resolve` | `dzn_manage_payment_providers` | mapping only; refuses a closed account, a foreign canonical row and a duplicate active link |
 | `PaymentExecutionService::submitCollection`, `cancelCollection`, `reconcileCollection`, `redrive` | `dzn_manage_payment_execution` | §6/§8; proves the caller's raw `ProviderReferenceClaims` against the registry and seals the adapter's dispatch descriptor inside transaction 1, writes the durable dispatch claim (`payment_execution_dispatches`, §12.1) before releasing the account-root lock, rebuilds the port request from the command row plus that descriptor ([C4-1]) and [C6-1] proves its binding with the adapter's **non-mutating** `preflightDispatchDescriptor()` — [C7-1] handing it the live claim's stored `idempotency_key_digest` and then re-comparing the verdict's two sealed digests against the durable command and claim rows under the claim lock, immediately before the acquisition — while the claim is still `claimed` and **before** the lease is acquired (a non-`ok` verdict or any digest inequality takes the fenced `claimed → released` refusal path of §8.3 and makes no call), [C7-2] delegates the single provider invocation to the port with the one-use capability that preflight minted (so no call ever opens the envelope), and records the command's single attempt and its terminal `payment_execution_results` row only through a settlement fenced by the claim's generation and token ([C4-2]); it never updates the command row ([C2-1], [C3-1]). `redrive($commandId)` is the idempotent, repeat-safe recovery entry point of §8.3: it accepts no request, reference or user id, reconstructs every port input from durable rows, [C5-1] ends a `claimed` claim it cannot open — [C6-1] including a first-dispatch claim whose preflight failed — with the single fenced transaction that writes the command's `refused`/`dispatch_descriptor_unavailable` result and releases the live slot, [C7-2] ends a generation-1 `in_flight` claim whose port refused a capability pre-call (no outbound request, no attempt) with the fenced no-call abort that clears the lease and writes that same refusal, takes an expired lease over atomically before it reconciles, [C5-2] proves the takeover fence with one conditional pre-call ownership check before it re-issues, re-issues only under the new fence and only when reconciliation proves the provider never received the request, and never issues a second mutating call |
 | `PaymentEventIntakeService::receive`, `drain` | `dzn_ingest_payment_provider_events` (operator surface only) plus the §9.7 worker principal | §9; `receive` resolves the account selector before parsing and is also invoked anonymously by the REST controller, so it performs **no caller capability check** for receipt, verification and durable recording — the verified signature is the authority there — while `drain` invoked from an operator surface requires `dzn_ingest_payment_provider_events`. [C4-3] The translation and the §10.1 consequence always run inside `PaymentExecutionWorkerContext` under the §9.7 principal's four bounded capabilities, never under the caller's identity |
+| `PaymentEventIntakeService::outstandingDecisionClaims` | `dzn_view_payment_execution_authority` | [C9-1]/[C9-2] §9.5/§13; the live per-event decision claims by state, age and fencing generation — never a token, a payload or a provider reference — so an operator can see which events one worker is completing, how long it has held them and which generation owns them |
 | `PaymentExecutionWorkerContext::run` | none (internal; no administrative surface, and it never satisfies an execution capability) | [C4-3] §9.7; the only place in Phase T that sets a WordPress current user. Validates the principal, sets it, proves all four capabilities are effective under it, runs the bounded translation/consequence work, and restores the previous identity in a `finally`. Refuses `payment_worker_principal_required` before any identity change when the option is unset, the user is missing or inactive, a required capability is absent or an administrative capability is present, and refuses re-entry as an integrity fault. It is never entered by `PaymentExecutionService`, whose surface keeps its own `dzn_manage_payment_execution` actor |
 | `PaymentExecutionDispatchSeal::seal`, `open` | adapter scope only (no administrative surface) | [C4-1] §11.6; the sealed dispatch descriptor's locked field set, domain-separated key derivation and fail-closed open. `seal` is called only by the resolved adapter inside the command's transaction 1, and [C5-3] `open` only by that same adapter — [C6-1] during the non-mutating pre-call preflight of §8.3 step 2 (the `preflightDispatchDescriptor()` verdict that must be `ok` before a claim may leave `claimed`) and during the re-drive's reconstruction proof (§8.3), where it reports the sealed binding pair (digests only, never a raw reference) for `PaymentExecutionIntegrity` to compare. [C7-2] `open` is never called by `submit`/`cancel`/`reconcile`: those consume the one-use `ProviderDispatchCapability` the `ok` verdict minted, so the envelope is opened exactly once per provider invocation and never inside a call; neither method is a credential path and neither can store a secret |
 | `PaymentSecretVault::store`, `rotate`, `retire`, `revoke`, `reveal` | `dzn_manage_payment_providers` (store/rotate/retire/revoke); adapter scope (reveal) | §11; **[C2-5]** every write path first refuses any `provider_key` outside `PROVISIONABLE_PROVIDERS` with `provider_secret_write_not_authorised`, so no production caller can store a provider secret in this build |
@@ -2209,7 +2386,8 @@ Repositories follow the established pattern: an explicit `begin()`/`commit()`/`r
 named-index duplicate arbitration, digest-only command evidence, append-only event/history discipline,
 and `READ COMMITTED` semantics. [C2-1] The execution repository exposes **insert-only** methods for
 `payment_execution_commands`, `payment_execution_attempts` and `payment_execution_results` and no
-update method for any of them. [C3-1] The dispatch repository is the one deliberate exception: it
+update method for any of them. [C3-1] The dispatch repository is the one deliberate exception in that
+repository: it
 exposes the conditional `claimed → in_flight` acquisition, the conditional expired-lease take-over,
 [C5-2] the conditional pre-call ownership/fence-renewal check a takeover winner must pass before it
 re-issues, [C5-1] the fenced `claimed → released` release that ends a claim whose descriptor cannot be
@@ -2222,6 +2400,12 @@ method that can rewrite the sealed descriptor envelope, its key/cipher version, 
 after the insert. [C6-1] The pre-call descriptor preflight of §8.3 step 2 adds **no** repository method
 and no write — it is an adapter-scoped, read-only open of the claim's sealed envelope — [C7-2] and the
 capability it mints is never stored, so the dispatch repository's mutation surface above is unchanged.
+[C9-1]/[C9-2] The provider-event repository exposes the decision claim's conditional statements — the
+live-slot insert, the fenced `claimed → settled` transition, the fenced `claimed → released` release and
+the conditional expired-lease take-over that bumps the generation and re-issues the token — each a single
+statement whose affected-row count is the outcome, plus the read of an event's live claim and the
+append-only decision/event/receipt reads. It exposes no delete method, no method that rewrites a recorded
+decision and no method that writes an event row.
 
 New capabilities (administrator only; a repair loop must add them per capability and must remove them
 from `dzn_teacher` and any student role, exactly as R1/R2 do):
@@ -2236,8 +2420,9 @@ arbitration subject kind, age and fencing generation (never a token, key digest,
 reference), [C4-1] dispatch claims whose sealed descriptor could not be opened (§6.4), [C7-2]
 descriptor-refusal releases and generation-1 no-call aborts by reason code (never a capability,
 envelope, token or digest), [C4-3] worker-context entries and refusals by reason code, [C2-5] refused
-provider-secret writes, and decrypt failures. Never a provider payload, secret, raw reference, raw
-signature, source address or provider status string.
+provider-secret writes, [C9-1]/[C9-2] live per-event decision claims by state, age and fencing
+generation (never a token, payload or provider reference), and decrypt failures. Never a provider
+payload, secret, raw reference, raw signature, source address or provider status string.
 
 ## 14. Concurrency, idempotency and serialisation
 
@@ -2259,6 +2444,14 @@ signature, source address or provider status string.
   `payment_required` to `collected`, never backwards and never from another state, so a concurrent
   `recordFailure` or `cancel` cannot be overwritten and a losing writer records its own reasoned
   outcome.
+- [C9-1]/[C9-2] Event-decision ownership: an event's decision is owned by exactly one worker through its
+  durable decision claim, taken **before** any translation or R1/R2 consequence runs and held across
+  that work under a lease. The claim row lock is taken for the whole of the fenced settlement
+  transaction, which is the same transaction that allocates `decision_sequence`, so two deliveries can
+  never derive the same sequence, and the loser of the claim does no work at all — it re-reads the
+  owner's decision, waits a bounded structural window and converges. An expired claim is taken over by
+  exactly one generation, so a worker that died between the event insert and its first decision leaves an
+  event that the next delivery or drain completes exactly once.
 - [C3-1] Dispatch ordering and ownership: the dispatch claim — carrying the sealed descriptor of
   [C4-1] — is written inside transaction 1, while the account-root lock is still held and before it is
   released, so the claim and the command commit together and a recovered owner can always rebuild the
@@ -2332,10 +2525,10 @@ webhook path publishes ids only through the existing `platform_outbox` seam.
 
 | Suite | Required proof |
 | --- | --- |
-| `tests/phase-2a2t-contract.php` | Schema 28 identity, build shape, migration/verifier call sites, the locked vocabularies (§5.2), capability boundaries and Teacher/Student denial, the exact fifteen-table set of §12, digest-only/append-only/no-FK/no-CHECK discipline, [C2-2] the declared identity/reference contract of §12.3 (a declared `id`+`PRIMARY KEY` and `uid`+`UNIQUE` on every table, and a `bigint unsigned` type plus named index for every `*_id` reference), [C3-2] the two declared parent sets of §12.3 and that every `*_id` parent — Phase-T or external authoritative — declares `id`/`PRIMARY KEY(id)` and the `payment_provider_account_commands`/`_object_commands.result_id` specification, [C3-1] the `payment_execution_dispatches` shape (`UNIQUE command_dispatch`, `UNIQUE subject_claim` + `KEY subject`, `DISPATCH_STATES`, no command terminal state, no delete path), the write of the claim inside transaction 1 before the lock release, the `redrive` entry point and its reconcile-before-re-issue order, [C2-6] the non-null `payment_provider_secrets` account scope, [C2-5] the empty `PROVISIONABLE_PROVIDERS` constant and the vault's unconditional write refusal, [C2-1] the absence of any update path for `payment_execution_commands`/`_attempts`/`_results`, absence of provider SDK/`curl_`/raw-payload storage in Core, absence of `cron`/scheduling, the presence of the §11.5 test-vault constant gate, [C2-3] the §9.7 principal check naming all four capabilities and the §10.1 consequence call order, [C2-4] the pre-parse account selector in the route and the single-secret `verify()` signature, [C4-1] the sealed-descriptor contract (the `sealDispatchDescriptor` port method, the five `descriptor_*` claim columns plus `claim_generation`, the locked `DISPATCH_DESCRIPTOR_FIELDS`, and a source scan proving that only an adapter can seal or open an envelope, that no Core class holds an open API for one, and that the seal helper is separate from `PaymentSecretVault::store`), [C7-1]/[C7-2] the claim-binding and single-open contract (the explicit expected-claim-digest parameter, Core's pre-lease digest-comparison order, `ProviderDispatchCapability`, and a source scan proving no port method other than `preflightDispatchDescriptor()` opens an envelope), [C4-2] the structural timeout inequality (`DISPATCH_CALL_TIMEOUT_SECONDS + DISPATCH_LEASE_MARGIN_SECONDS <= DISPATCH_LEASE_SECONDS`) and that both the expired-lease take-over and the settlement are stated as single conditional statements whose affected-row count is the proof of ownership, [C4-3] the worker-context contract (a source scan proving `wp_set_current_user` appears under `src/` only inside `PaymentExecutionWorkerContext`, that the context validates all four capabilities and restores the previous identity in a `finally`, that no Phase T path sets user `1`, adds a role or grants a capability, and that the §8.4 hooks fire after the context has exited), [C8-1] the all-method route plus the unconditional exact-raw-body receipt (both routes declare the one locked method set, no precheck substitutes an empty body, and the receipt stores the digest and byte count of the body it was given), [C8-2] the exact-attribution contract (the active-only mapping lookup, the `obligation`/`collection_intent` canonical-obligation resolution, and the equality between that obligation and the obligation the event resolved), [C8-3] the insert-or-resolve ownership contract (insert-or-resolve returns `created`, a lost unique-event race adopts the winner and routes through the one shared convergence path), [C8-4] the drain fact-digest contract (the full recorded fact digest is recomputed and a mismatch appends the controlled conflict decision), and that no `commercial_*`/R2 verifier was relaxed |
+| `tests/phase-2a2t-contract.php` | Schema 28 identity, build shape, migration/verifier call sites, the locked vocabularies (§5.2), capability boundaries and Teacher/Student denial, the exact sixteen-table set of §12, digest-only/append-only/no-FK/no-CHECK discipline, [C2-2] the declared identity/reference contract of §12.3 (a declared `id`+`PRIMARY KEY` and `uid`+`UNIQUE` on every table, and a `bigint unsigned` type plus named index for every `*_id` reference), [C3-2] the two declared parent sets of §12.3 and that every `*_id` parent — Phase-T or external authoritative — declares `id`/`PRIMARY KEY(id)` and the `payment_provider_account_commands`/`_object_commands.result_id` specification, [C3-1] the `payment_execution_dispatches` shape (`UNIQUE command_dispatch`, `UNIQUE subject_claim` + `KEY subject`, `DISPATCH_STATES`, no command terminal state, no delete path), the write of the claim inside transaction 1 before the lock release, the `redrive` entry point and its reconcile-before-re-issue order, [C2-6] the non-null `payment_provider_secrets` account scope, [C2-5] the empty `PROVISIONABLE_PROVIDERS` constant and the vault's unconditional write refusal, [C2-1] the absence of any update path for `payment_execution_commands`/`_attempts`/`_results`, absence of provider SDK/`curl_`/raw-payload storage in Core, absence of `cron`/scheduling, the presence of the §11.5 test-vault constant gate, [C2-3] the §9.7 principal check naming all four capabilities and the §10.1 consequence call order, [C2-4] the pre-parse account selector in the route and the single-secret `verify()` signature, [C4-1] the sealed-descriptor contract (the `sealDispatchDescriptor` port method, the five `descriptor_*` claim columns plus `claim_generation`, the locked `DISPATCH_DESCRIPTOR_FIELDS`, and a source scan proving that only an adapter can seal or open an envelope, that no Core class holds an open API for one, and that the seal helper is separate from `PaymentSecretVault::store`), [C7-1]/[C7-2] the claim-binding and single-open contract (the explicit expected-claim-digest parameter, Core's pre-lease digest-comparison order, `ProviderDispatchCapability`, and a source scan proving no port method other than `preflightDispatchDescriptor()` opens an envelope), [C4-2] the structural timeout inequality (`DISPATCH_CALL_TIMEOUT_SECONDS + DISPATCH_LEASE_MARGIN_SECONDS <= DISPATCH_LEASE_SECONDS`) and that both the expired-lease take-over and the settlement are stated as single conditional statements whose affected-row count is the proof of ownership, [C4-3] the worker-context contract (a source scan proving `wp_set_current_user` appears under `src/` only inside `PaymentExecutionWorkerContext`, that the context validates all four capabilities and restores the previous identity in a `finally`, that no Phase T path sets user `1`, adds a role or grants a capability, and that the §8.4 hooks fire after the context has exited), [C8-1] the all-method route plus the unconditional exact-raw-body receipt (both routes declare the one locked method set, no precheck substitutes an empty body, and the receipt stores the digest and byte count of the body it was given), [C8-2] the exact-attribution contract (the active-only mapping lookup, the `obligation`/`collection_intent` canonical-obligation resolution, and the equality between that obligation and the obligation the event resolved), [C8-3] the insert-or-resolve ownership contract (insert-or-resolve returns `created`, a lost unique-event race adopts the winner and routes through the one shared convergence path), [C8-4] the drain fact-digest contract (the full recorded fact digest is recomputed and a mismatch appends the controlled conflict decision), [C9-4] the OPTIONS interception contract (the endpoint's own `rest_pre_dispatch` interception registered ahead of WordPress's own `OPTIONS` handler at a lower priority, answering only an `OPTIONS` delivery to the two shared route shapes and only through the one controlled path), and that no `commercial_*`/R2 verifier was relaxed |
 | `tests/phase-2a2t-migration-runtime.php` | fresh Schema 28 identity and storage; 26 → 28 and 25 → 28 rehearsal; repeat safety; partial capability repair; retained-028/stale-version fail-closed; malformed-storage rejection (unknown table, non-InnoDB, mutable append-only column, raw reference column, plaintext secret column, `text`/`varchar` digest, missing index, [C2-2] a table without `id`/`PRIMARY KEY` or without `uid`/`UNIQUE`, a `*_id` column that is not `bigint unsigned` or has no declared index, [C3-2] a `*_id` column whose declared parent is neither a Schema 028 table nor a frozen external authoritative parent, and a parent — Phase-T or external — that does not declare `id bigint unsigned NOT NULL AUTO_INCREMENT`/`PRIMARY KEY(id)` (accepted for a real external parent such as `commercial_offer_obligations.id`, rejected otherwise), [C3-1] a dispatch table missing `UNIQUE command_dispatch`/`UNIQUE subject_claim` or carrying a non-`DISPATCH_STATES` state, [C2-6] a NULL-able secret account scope or a `secret_slot` index with the wrong column list, [C4-1] a `%descriptor%` column on a table other than `payment_execution_dispatches`, and [C4-1]/[C4-2] a claim row with an incomplete sealed envelope, a `descriptor_digest` that disagrees with its envelope, a non-positive `claim_generation`, a `claimed` claim carrying a lease or an `in_flight` claim carrying none); proof that every R1/R2 row and column is unchanged; [C2-6] the active-slot uniqueness probe (a second active row for one scope is rejected, a rotation leaves exactly one active row) |
 | `tests/phase-2a2t-runtime.php` | network-free fake adapter through the registry: register account → link mapping → submit execution command for an R1 obligation → the durable dispatch claim makes the command `dispatching` between transaction 1 and transaction 2 (`claimed` before the call, `in_flight` after the short lease transition) → attempt recorded → [C2-1] terminal `completed` result row recorded without any command-row update → verified `payment_succeeded` event → R1 settlement via the existing boundary → [C2-3] ordered R2 consequence (intent `confirmed`, then cycle `collected`) and a proof that `bind_next_term` is therefore reachable; [C2-3] a cycle that is not collectable records `refused`/`renewal_cycle_not_collectable` with no invention and no confirmation of the intent, and a re-driven `drain()` completes a `pending` consequence exactly once; failure path → `payment_failed` → R2 `record_failure`; refund path → `refund_recorded` → review case with NULL academic consequence; unattributed success → R1 `unmatched_payment_evidence`; refusal matrix of §6.4 including `live_execution_not_authorised`, `provider_credentials_unconfigured`, [C3-1] `dispatch_in_flight` and [C4-1] `dispatch_descriptor_incomplete`/`dispatch_descriptor_unavailable`, each proven to leave a durable `refused` result row and never a second port call on replay; [C3-1] a crash before the call and a crash after the call are each recovered by `redrive()` through the same deterministic idempotency key — reconcile-before-re-issue after the crash — producing exactly one attempt, one terminal result row and one settled claim, never a second mutating call; [C4-1] the re-drive rebuilds **every** port input from the immutable command row plus the sealed descriptor, the rebuilt request is identical to the request that authorised the dispatch, a full scan of every Phase T table, option and transient finds no plaintext provider reference outside the sealed envelope, and an unopenable descriptor refuses durably with `dispatch_descriptor_unavailable` on a `claimed` claim while leaving the command `dispatching` with an operator-visible exception on an `in_flight` claim; [C7-1] an initial-dispatch claim-digest mismatch with an otherwise valid descriptor (forced on the claim row) ends in exactly one `refused`/`dispatch_descriptor_unavailable` result, a terminal `released` claim and no call, and a defective adapter that reports `ok` with another claim's sealed pair is caught by Core's own pre-lease comparison; [C7-2] a forced post-preflight capability failure makes no provider call, writes no attempt and ends the generation-1 claim `released` with that refusal, while the same failure on a takeover generation writes nothing and leaves the command `dispatching`; [C4-3] the R1 and R2 rows written on the anonymous intake path record the worker principal's user id and not an administrator's, and the caller's previous identity is restored before the response is produced |
-| `tests/phase-2a2t-webhook-runtime.php` | valid signature converges; missing/malformed/wrong-key-version/stale/future signature refused with the exact reason and a durable refused receipt; oversized body, wrong method, wrong content type, unknown provider key, unmapped account and unmapped object all refused without information leak; [C2-4] a missing, unknown, ambiguous, inactive or mode-mismatched account selector is refused before parsing with its exact reason and a receipt that records no account; [C2-4] an unselected second account's secret never verifies a request addressed to another account; duplicate identical event converges with no new decision; duplicate with a materially different payload digest preserves the original, records `conflicting_provider_event` and creates no authority; out-of-order `payment_failed` after settlement is `ignored` as `stale_provider_event` and changes nothing; unset worker principal leaves the event durably `received` and a later `drain()` completes it exactly once; [C4-3] an anonymous intake with a valid signature settles the obligation and confirms the R2 pair **only** through the bounded worker principal — the R1 evidence/settlement actor and the decision's `recorded_by` are the principal's user id — while the request's own identity is `0` both before the translation and after the response is produced, and the §8.4 hook observes the caller's restored identity rather than the worker's; a principal holding an extra administrative capability refuses with `payment_worker_principal_required` and settles nothing, records no R1 evidence and confirms no intent or cycle; the worker context is not re-entrant, and an entry attempt while one is active is refused before any identity change; [C8-1] the registered route declares every HTTP method (so a non-`POST` delivery reaches the handler, is receipted as `method_not_allowed` with `405`, records the exact raw body digest and byte count it carried and never becomes an event), and a request refused before parsing — a wrong content type, or an oversized body refused `413` — is receipted with those same exact bytes rather than a zero-byte substitute; [C8-2] an event whose object is actively mapped to one obligation but whose metadata names another is refused `ambiguous_obligation_attribution` with no evidence, and a superseded/detached mapping is refused `unmapped_provider_object` and never attributes evidence; [C8-4] a `drain()` whose re-delivered body keeps the event id but changes the recorded immutable facts appends the controlled conflict decision, leaves the recorded `event_fact_digest` unchanged, keeps the original deferred decision, submits no R1 evidence and never translates the changed facts |
+| `tests/phase-2a2t-webhook-runtime.php` | valid signature converges; missing/malformed/wrong-key-version/stale/future signature refused with the exact reason and a durable refused receipt; oversized body, wrong method, wrong content type, unknown provider key, unmapped account and unmapped object all refused without information leak; [C2-4] a missing, unknown, ambiguous, inactive or mode-mismatched account selector is refused before parsing with its exact reason and a receipt that records no account; [C2-4] an unselected second account's secret never verifies a request addressed to another account; duplicate identical event converges with no new decision; duplicate with a materially different payload digest preserves the original, records `conflicting_provider_event` and creates no authority; out-of-order `payment_failed` after settlement is `ignored` as `stale_provider_event` and changes nothing; unset worker principal leaves the event durably `received` and a later `drain()` completes it exactly once; [C4-3] an anonymous intake with a valid signature settles the obligation and confirms the R2 pair **only** through the bounded worker principal — the R1 evidence/settlement actor and the decision's `recorded_by` are the principal's user id — while the request's own identity is `0` both before the translation and after the response is produced, and the §8.4 hook observes the caller's restored identity rather than the worker's; a principal holding an extra administrative capability refuses with `payment_worker_principal_required` and settles nothing, records no R1 evidence and confirms no intent or cycle; the worker context is not re-entrant, and an entry attempt while one is active is refused before any identity change; [C8-1] the registered route declares every HTTP method (so a non-`POST` delivery reaches the handler, is receipted as `method_not_allowed` with `405`, records the exact raw body digest and byte count it carried and never becomes an event), and a request refused before parsing — a wrong content type, or an oversized body refused `413` — is receipted with those same exact bytes rather than a zero-byte substitute; [C8-2] an event whose object is actively mapped to one obligation but whose metadata names another is refused `ambiguous_obligation_attribution` with no evidence, and a superseded/detached mapping is refused `unmapped_provider_object` and never attributes evidence; [C8-4] a `drain()` whose re-delivered body keeps the event id but changes the recorded immutable facts appends the controlled conflict decision, leaves the recorded `event_fact_digest` unchanged, keeps the original deferred decision, submits no R1 evidence and never translates the changed facts; [C9-4] an `OPTIONS` delivery is answered by that interception ahead of WordPress's own `OPTIONS` handler and receipted `refused`/`method_not_allowed` with the exact raw body digest and byte count it carried, writing exactly one receipt and never becoming an event, from both registered route shapes, while another route's `OPTIONS` handling and every `POST` delivery are left untouched |
 | `tests/phase-2a2t-secret-runtime.php` | encryption round trip; ciphertext differs from the plaintext; nonce uniqueness across writes; key rotation keeps exactly one active row and preserves history; unknown cipher/key version fails closed; authentication failure records `decrypt_failed` and returns no value; a non-adapter scope cannot reveal; diagnostics/notices/exports/outbox contain `[REDACTED_SECRET]` and never a value; a WordPress salt change fails closed; a full storage scan finds no plaintext secret; [C2-5] **every production write path rejects a provider secret** — a fully capable administrator with a valid nonce is refused `provider_secret_write_not_authorised` for a Stripe `api_key` and for a Stripe `webhook_signing_secret`, an audit `write_refused` row is recorded, no `payment_provider_secrets` row is created, and a source scan proves no path writes that table while `DZN_PLATFORM_PAYMENT_TEST_VAULT` is undefined; [C2-6] a NULL account scope cannot be inserted and two active secrets cannot share one scope |
 | `tests/phase-2a2t-corruption-runtime.php` | mutated execution command (selector shape, amount/currency), [C2-1] a mutated or duplicated `payment_execution_results` row (wrong `result_state`, `result_id` naming a foreign attempt, a second row for one command, a `completed` result with no attempt), [C3-1] a mutated dispatch claim (a claim for a command that already has a result row — [C5-1] other than the single permitted pairing of a terminal `released` claim with its own `refused`/`dispatch_descriptor_unavailable` result, a claim whose `dispatch_state` is not a `DISPATCH_STATES` member, a foreign `execution_command_id`, two live claims sharing one arbitration subject, and a `dispatching` command with no live claim), [C4-1] a mutated sealed descriptor (a tampered ciphertext, a `descriptor_digest` that no longer matches its envelope, an envelope whose sealed binding names another command's key digest, and a descriptor transplanted from another command), [C4-2] a claim whose `claim_generation` was rolled back or forged, and a settlement attempted with a stale generation or token (which must write no attempt and no result for the fenced-out owner), [C3-2] a `payment_provider_account_commands`/`_object_commands` row whose `result_id` is NULL, foreign or names another command's event row, mutated attempt, mutated event fact identity, mutated receipt verification state, corrupted account/mode, forged mapping, [C2-6] a secret row with a foreign or NULL account scope, and [C2-3] a decision row whose recorded R2 states disagree with the R2 tables — each fails closed at the owning boundary, manufactures no settlement/authority, is never silently repaired, and converges after exact restoration |
 | `tests/phase-2a2t-failure-runtime.php` | injected write boundary at every owning mutation (command insert, dispatch-claim insert, [C2-1] result insert, receipt insert, event insert, decision insert, [C2-3] R2 intent-confirm step, R2 cycle-confirm step, secret write, secret audit, mapping write, account state write) — each fully rolled back with retry convergence and no partial external-call ambiguity, and no partially applied R2 consequence left invisible; [C3-1] a crash after the claim commit and before the port call (claim `claimed`) and a crash after the port call and before transaction 2 (claim `in_flight` with an expired lease) are each recovered by `redrive()` to exactly one attempt and one settled claim, with the post-call crash reconciled rather than re-issued; [C4-1] a crash between the seal and the claim insert leaves neither a command row nor a claim row and no reachable descriptor; [C4-2] a crash between the fenced settle update and the attempt/result insert leaves the claim terminal with no attempt and no result (a recorded, visible integrity fault that is never silently repaired), while a crash after the port call but before settling leaves the claim `in_flight` for a fenced re-drive, and an owner fenced out before its settlement writes no attempt and no result; [C4-3] a failure raised inside the worker execution context still restores the caller's previous identity, and a decision refused for a §10.1 reason still records the worker principal as its `recorded_by` rather than an anonymous actor |
@@ -2473,7 +2666,56 @@ Correction round 8 adds these required proofs, each inside the suite whose row a
   routes a mismatch to the controlled conflict recorder; `tests/phase-2a2t-webhook-runtime.php` proves
   the behaviour: a validly signed body with the same event id but changed facts appends
   `conflicting_provider_event`, preserves the recorded event and its first decision, submits no evidence,
-  and is never translated by a later identical drain.
+  and is never translated by a later identical drain. [C9-1] The *changed* facts are never translated:
+  the conflict record is not the event's decision, so a later delivery of the **recorded** facts still
+  completes the decision the event owes, exactly once, while the conflict row stays recorded.
+
+Correction round 9 adds these required proofs, each inside the suite whose row already owns the subject:
+
+- [C9-1] `tests/phase-2a2t-contract.php` proves the owed-decision rule: no decision at all is an owed
+  decision, the decision timeline excludes conflict records, and the converged-`recorded` shortcut of the
+  round-8 candidate is gone. `tests/phase-2a2t-webhook-runtime.php` proves the behaviour: an event that is
+  durably recorded and then has no decision row at all is completed by a redelivery (`translated`,
+  appended exactly once, a repeated delivery appends nothing more), and the diagnostics report no live
+  claim afterwards. `tests/phase-2a2t-concurrency-runner.sh` adds `undecided_event_recovery`, where two
+  workers deliver that body simultaneously: one event, one decision, one settled claim, one R1
+  settlement/evidence and one confirmed intent/collected cycle.
+- [C9-2] `tests/phase-2a2t-contract.php` proves the claim contract: the aggregate exists with its
+  `DECISION_CLAIM_STATES` vocabulary, lease and wait constants, the unique live-slot index, the fenced
+  `claimed → settled` transition **before** the decision-sequence allocation, the expired-lease takeover
+  that advances the generation, the loser's convergence, and that no decision is appended outside the
+  fence. `tests/phase-2a2t-webhook-runtime.php` proves the claim's own shape — settled with no live slot
+  and no lease, no event holding two live claims, an abandoned claim taken over exactly once with
+  generation `2` before the decision is completed — and `tests/phase-2a2t-concurrency-runner.sh` adds
+  `pending_decision_retry`: two workers deliver one body for an event whose decision is still `pending`,
+  and exactly one terminal decision, one settled claim, one R1 settlement/evidence and one confirmed
+  intent/collected cycle result, with no second translation or consequence.
+  `tests/phase-2a2t-failure-runtime.php` proves the fence's atomicity: a rollback between the settle update and the decision insert
+  leaves the claim live and no decision, an expired claim is taken over by exactly one generation, and a
+  stale generation never takes it twice. `tests/phase-2a2t-corruption-runtime.php` adds the mutated claim
+  shapes — unknown state, live claim without its lease, terminal claim that kept its live slot, malformed
+  token — each of which fails closed on the aggregate proof and is never repaired.
+- [C9-3] `tests/phase-2a2t-contract.php` proves the transport contract in source: the locked
+  `HTTPS_PROXY_HEADERS` allowlist, the operator configuration option, the two rule helpers, the
+  controller's input-only verdict, and that the controller names no proxy header outside the allowlist.
+  `tests/phase-2a2t-webhook-runtime.php` proves the matrix: direct TLS passes, the local development
+  environment passes, a configured allowlisted header passes (in both WordPress header spellings and for
+  a proxy chain whose leftmost element is `https`), and `http`, an empty value, an unconfigured site and a
+  non-allowlisted header each fail; plus one end-to-end REST delivery with the configured header, which
+  is receipted with its exact raw body and never as `https_required`.
+- [C9-4] `tests/phase-2a2t-contract.php` proves the interception contract in source: the endpoint's own
+  `rest_pre_dispatch` interception registered at a priority below WordPress's `OPTIONS` handler, the one
+  shared declaration of the two route shapes, and that a matched delivery runs the one controlled path
+  rather than a second refusal implementation, while only an `OPTIONS` delivery is ever intercepted.
+  `tests/phase-2a2t-webhook-runtime.php` proves the behaviour end to end: the interception is registered
+  ahead of `rest_handle_options_request()` on the live hook, the same pre-dispatch chain the core handler
+  shares answers this endpoint's `OPTIONS` delivery with the controlled `405`/`method_not_allowed`
+  refusal, exactly one durable receipt carries the exact raw body digest and byte count, no event is
+  created, the bare provider route is receipted identically, an untrailingslashed path is receipted too,
+  another route's `OPTIONS` delivery and every `POST` delivery are left to the chain, and an `OPTIONS`
+  delivery another filter already answered is never re-answered here. The suite's disposable account
+  selector fits the route's declared account segment (`[A-Za-z0-9_-]{1,32}`), so a routed delivery
+  actually reaches the endpoint it is meant to exercise.
 
 Fresh-install, 26 → 28 upgrade, idempotency, webhook and representative runtime tests are mandatory
 acceptance gates. Every suite must run on the disposable WordPress + MariaDB runtime used by R1/R2,
@@ -2489,7 +2731,7 @@ tests may use.
 | Base | `main` with Phase 2A.2-R2 merged (Schema 26); R1 is already authoritative |
 | Dependency | PLATFORM-LOCAL-TEST-RUNTIME green (fresh + runtime + webhook + concurrency) |
 | Schema | 028 / `028_payment_execution_seam_provider_adapter` |
-| Build | `phase2a2t-payment-execution-seam-stripe-adapter-20260924.8` (correction round 8) |
+| Build | `phase2a2t-payment-execution-seam-stripe-adapter-20260925.9` (correction round 9) |
 | Review posture | single coherent candidate, dual-owner independent review, additive-only descendants |
 
 ## 19. Pre-implementation prerequisites

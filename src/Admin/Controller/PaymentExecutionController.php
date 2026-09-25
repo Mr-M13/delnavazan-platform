@@ -29,7 +29,9 @@ final class PaymentExecutionController {
         $outcomes=(new PaymentExecutionReadService())->attemptOutcomes();
         $accounts=(new PaymentProviderReadService())->accountStates();
         $secrets=(new PaymentProviderReadService())->secretDiagnostics();
-        $consequences=(new PaymentEventIntakeService())->outstandingConsequences();
+        $intake=new PaymentEventIntakeService();
+        $consequences=$intake->outstandingConsequences();
+        $decisionClaims=$intake->outstandingDecisionClaims();
         echo '<div class="wrap"><h1>Payment Execution</h1>';
         echo '<p>Provider-neutral execution only. No live credential, provider traffic or deployment is authorised.</p>';
         foreach(array('Commands'=>$execution,'Attempt outcomes'=>$outcomes,'Accounts'=>$accounts,'R2 consequences'=>$consequences,'Secret vault'=>$secrets) as $heading=>$values){
@@ -39,6 +41,8 @@ final class PaymentExecutionController {
         }
         echo '<h2>Outstanding dispatch claims</h2><table class="widefat"><tbody>';
         foreach($dispatches as $row)echo '<tr><td>'.esc_html((string)$row['execution_command_id']).'</td><td>'.esc_html((string)$row['dispatch_state']).'</td><td>'.esc_html((string)$row['claim_generation']).'</td><td>'.esc_html((string)$row['age_seconds']).'s</td></tr>';
+        echo '</tbody></table><h2>Live event decision claims</h2><table class="widefat"><tbody>';
+        foreach($decisionClaims as $row)echo '<tr><td>'.esc_html((string)$row['provider_event_id']).'</td><td>'.esc_html((string)$row['claim_state']).'</td><td>'.esc_html((string)$row['claim_generation']).'</td><td>'.esc_html((string)$row['age_seconds']).'s</td></tr>';
         echo '</tbody></table></div>';
     }
 }

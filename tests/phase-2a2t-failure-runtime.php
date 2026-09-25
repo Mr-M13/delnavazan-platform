@@ -45,6 +45,30 @@ dzn_tf_assert(count($missing)===1,'the integrity fault must be visible to the di
 $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_execution_dispatches WHERE id=%d",$orphanClaim));
 $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_execution_commands WHERE id=%d",$orphanId));
 // A failure raised inside the worker principal still restores the caller's previous identity.
+// [C9-1] The decision claim and its decision commit together: a failure between the fenced settle update
+// and the decision insert leaves neither, so the claim stays live until its lease expires and exactly one
+// later generation takes it over to complete the decision the event still owes.
+$providerRepository=new \Delnavazan\Platform\Core\Infrastructure\Repository\PaymentProviderRepository();
+$wpdb->query($wpdb->prepare("INSERT INTO {$p}payment_provider_event_receipts (uid,provider_key,request_digest,verification_state,body_bytes,received_at,created_at) VALUES (%s,'stripe',%s,'verified',0,%s,%s)",wp_generate_uuid4(),str_repeat('8',64),gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s')));
+$failureReceipt=(int)$wpdb->insert_id;
+$wpdb->query($wpdb->prepare("INSERT INTO {$p}payment_provider_events (uid,receipt_id,provider_key,payment_provider_account_id,event_reference_digest,event_fact_digest,event_type,raw_type_digest,payload_digest,received_at,created_at) VALUES (%s,%d,'stripe',1,%s,%s,'payment_succeeded',%s,%s,%s,%s)",wp_generate_uuid4(),$failureReceipt,str_repeat('9',64),str_repeat('a',64),str_repeat('b',64),str_repeat('c',64),gmdate('Y-m-d H:i:s'),gmdate('Y-m-d H:i:s')));
+$failureEvent=(int)$wpdb->insert_id;
+$failureClaim=$providerRepository->insertDecisionClaim(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'claim_state'=>'claimed','claim_generation'=>1,'claim_token_digest'=>str_repeat('d',64),'lease_expires_at'=>gmdate('Y-m-d H:i:s',time()+60),'claimed_at'=>gmdate('Y-m-d H:i:s'),'settled_at'=>null,'active_claim_slot'=>1,'created_at'=>gmdate('Y-m-d H:i:s'),'updated_at'=>gmdate('Y-m-d H:i:s')));
+$providerRepository->begin();
+dzn_tf_assert($providerRepository->settleDecisionClaim($failureClaim,1,str_repeat('d',64),gmdate('Y-m-d H:i:s'))===1,'the owner must settle its own live decision claim');
+$providerRepository->insertDecision(array('uid'=>wp_generate_uuid4(),'provider_event_id'=>$failureEvent,'decision_sequence'=>$providerRepository->maxDecisionSequence($failureEvent),'decision_state'=>'refused','reason_code'=>'provider_event_not_authoritative','r2_consequence_state'=>'not_applicable','decided_at'=>gmdate('Y-m-d H:i:s'),'recorded_at'=>gmdate('Y-m-d H:i:s'),'created_at'=>gmdate('Y-m-d H:i:s')));
+$providerRepository->rollback();
+$unsettled=$providerRepository->decisionClaim($failureClaim);
+dzn_tf_assert($unsettled!==null&&(string)$unsettled->claim_state==='claimed'&&(int)$unsettled->active_claim_slot===1,'a rolled-back settle must leave the claim live, not terminal');
+dzn_tf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$failureEvent))===0,'a rolled-back decision insert must leave no decision row');
+$wpdb->query($wpdb->prepare("UPDATE {$p}payment_provider_event_decision_claims SET lease_expires_at=%s WHERE id=%d",gmdate('Y-m-d H:i:s',time()-5),$failureClaim));
+dzn_tf_assert($providerRepository->takeoverDecisionClaim($failureClaim,1,str_repeat('e',64),gmdate('Y-m-d H:i:s',time()+60),gmdate('Y-m-d H:i:s'))===1,'an expired decision claim must be taken over by exactly one generation');
+$takenOver=$providerRepository->decisionClaim($failureClaim);
+dzn_tf_assert($takenOver!==null&&(int)$takenOver->claim_generation===2&&hash_equals(str_repeat('e',64),(string)$takenOver->claim_token_digest),'the takeover must advance the generation and issue a fresh token');
+dzn_tf_assert($providerRepository->takeoverDecisionClaim($failureClaim,1,str_repeat('f',64),gmdate('Y-m-d H:i:s',time()+60),gmdate('Y-m-d H:i:s'))===0,'a stale generation must never take the claim over twice');
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decision_claims WHERE id=%d",$failureClaim));
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_events WHERE id=%d",$failureEvent));
+$wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_receipts WHERE id=%d",$failureReceipt));
 $previous=get_current_user_id();
 $principal=wp_insert_user(array('user_login'=>'dzn-t-fail-'.wp_generate_uuid4(),'user_pass'=>wp_generate_password(24),'role'=>'subscriber'));
 $user=get_user_by('id',(int)$principal);
