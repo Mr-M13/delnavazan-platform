@@ -183,6 +183,34 @@ Theme change is involved.
   closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
   which its §5 assertion referenced without the import (a latent fatal in the suite itself).
 
+### Implementation correction round 6 (independent review of failed candidate `9fef9b9`, tree `301e359d`)
+
+The independent re-review of the previous correction candidate refused it with one blocking finding: a
+notification/outbox pair whose reciprocal pointers were **both** cleared was still accepted. The schema
+identity, table count, migration name and build identity are unchanged, no schema object is added, and no
+merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The mirror requirement is unconditional, so a pair cleared on both sides is refused.** The shared
+  `NotificationIntegrity::aggregateIntegrity()` refused an absent mirror row only when
+  `notifications.outbox_id` was non-null, so corruption that cleared *both* `notifications.outbox_id` and
+  the former `platform_outbox.notification_id` left nothing for either lookup to find and the notification
+  was read as an aggregate with no mirror to compare — violating §6.5's exact 1:1 relationship and the
+  fail-closed authority invariant. The rule now refuses **any** notification handed over without its
+  persisted mirror row (`schedule_derivation_divergence`), before the mirror proof, so the aggregate read,
+  the attempt read seam, the dispatch claim and schema verification all refuse that pair.
+- **The schema verifier states the same rule as a row-level anti-join.**
+  `Migrator::verify_notification_authority_data()` now runs
+  `notifications LEFT JOIN platform_outbox ON o.notification_id = n.id WHERE o.id IS NULL` and refuses any
+  S-owned notification with no mirror row (`notification without an outbox mirror:
+  schedule_derivation_divergence`) — the row its outbox loop can no longer see — in addition to the
+  reciprocal `n.outbox_id`/`o.id` comparison and the shared-call hand-over it already performed.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts the unconditional requirement (and that a NULL
+  aggregate pointer can no longer be read as an acceptable missing mirror) and the anti-join;
+  `tests/phase-2a2s-corruption-runtime.php` §7(d) clears both pointers on a mirrored, leased pair, proves
+  the aggregate read, the attempt read seam (both projections) and the schema verifier each fail closed
+  while every mirrored schedule value stays untouched, and proves convergence once both pointers are
+  restored.
+
 - `platform_outbox` gains the additive dispatch representation — `notification_id` (unique), `workflow_key`,
   `workflow_version`, `intent_key`, `audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`,
   `lease_token_digest`, `failure_reason_code` — plus the `dispatch` and `intent_version` lookup indexes.

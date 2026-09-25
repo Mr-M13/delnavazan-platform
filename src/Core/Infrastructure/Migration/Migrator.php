@@ -928,6 +928,13 @@ final class Migrator {
 			if ( $row->last_rearm !== null ) $allowed[] = (string) $row->last_rearm;
 			if ( ! in_array( (string) $row->available_at, $allowed, true ) ) throw new \RuntimeException('Migration verification failed: outbox available_at contract');
 		}
+		// §6.5/§7.1 — the same 1:1 relation stated from the aggregate side as a row-level anti-join: every
+		// S-owned notification must own the one outbox row its lease/dispatch state lives on. The loop above
+		// only visits rows that still name a notification, so a pair whose **both** pointers were cleared
+		// would otherwise pass this verifier with no mirror row at all — the pair is refused here, with the
+		// same diagnostic the shared aggregate verification reports below, instead of being read as valid.
+		$unmirrored = $wpdb->get_col( "SELECT n.id FROM {$p}notifications n LEFT JOIN {$p}platform_outbox o ON o.notification_id = n.id WHERE o.id IS NULL" ) ?: array();
+		if ( $unmirrored !== array() ) throw new \RuntimeException('Migration verification failed: notification without an outbox mirror: schedule_derivation_divergence');
 		// §7.3 — the aggregate half of the S verifier: every S-owned notification re-derives its persisted
 		// schedule from its frozen rules, resolves its tier-F instant from the persisted subject column, and
 		// proves each closed attempt's closure partition and persisted retry schedule. The outbox mirror is

@@ -306,11 +306,13 @@ final class NotificationIntegrity {
      * agrees with the aggregate, and every closed attempt's closure partition and persisted retry schedule
      * are proved against the frozen rules. Nothing here writes.
      *
-     * §6.5/§7.1: a notification and its outbox row are 1:1 in storage, so the mirror proof is unconditional
-     * for a mirror-backed notification — a caller that hands over no mirror for one is refused whole instead
-     * of skipping the check, so no read path can return authority from an unproved mirror. The proof is
-     * reciprocal: the row must name the notification and the notification must name the row, so a corrupted
-     * pointer can never be satisfied by some other row that merely reproduces the schedule.
+     * §6.5/§7.1: a notification and its outbox row are 1:1 in storage, so the mirror proof is required of
+     * the pair itself: a caller that hands over no row at all is refused whole, never read as an
+     * "unmirrored" notification, so no read path can return authority from an aggregate whose mirror is
+     * missing — including the case where corruption cleared both `platform_outbox.notification_id` and
+     * `notifications.outbox_id`, which leaves nothing to look up from either side. The proof is reciprocal:
+     * the row must name the notification and the notification must name the row, so a corrupted pointer can
+     * never be satisfied by some other row that merely reproduces the schedule.
      *
      * @throws \RuntimeException `schedule_derivation_divergence`, `eligibility_expired`,
      *         `tier_f_instant_unavailable`, `terminal_reason_invalid`, `retry_exhaustion_invalid`,
@@ -322,14 +324,13 @@ final class NotificationIntegrity {
         // state vocabulary, event chain, sequence or open/closed shape does not reproduce, or a terminal
         // notification that still holds an open attempt, refuses the read whole.
         self::attemptHistoryIntegrity($notification,$attempts);
-        // §6.5/§7.1/§8.4: the mirror is part of the same proof, never an optional extra — a mirror-backed
-        // notification whose row was not supplied is as unproved as one whose row disagrees.
-        if($row===null&&isset($notification->outbox_id)&&$notification->outbox_id!==null)throw new \RuntimeException('schedule_derivation_divergence');
-        if($row!==null){
-            $lastRearm=null;
-            foreach($attempts as $attempt)if($attempt->next_available_at!==null)$lastRearm=(string)$attempt->next_available_at;
-            self::outboxMirror($notification,$row,$lastRearm);
-        }
+        // §6.5/§7.1/§8.4: the mirror is part of the same proof, never an optional extra — every notification
+        // is 1:1 with its outbox row, so a pair whose row was not supplied at all is as unproved as one whose
+        // row disagrees, and an absent row can never be read as "no mirror to check".
+        if($row===null)throw new \RuntimeException('schedule_derivation_divergence');
+        $lastRearm=null;
+        foreach($attempts as $attempt)if($attempt->next_available_at!==null)$lastRearm=(string)$attempt->next_available_at;
+        self::outboxMirror($notification,$row,$lastRearm);
         foreach($attempts as $attempt){
             if($attempt->finished_at===null)continue;
             self::closureIntegrity($notification,$attempt,$policy);

@@ -6,8 +6,10 @@
  * a forged rule-set digest, a rewritten schedule, a re-anchored expiry, a deferral count above its maximum,
  * a persisted timezone that is not the frozen resolution, an outbox mirror that disagrees with the
  * aggregate, a notification/outbox pair whose reciprocal pointer was split while the mirror still mirrors
- * its schedule, and a tier-F instant nulled after publication. Every corruption fails closed through the
- * protected read with its own code and converges once the row is restored.
+ * its schedule, the same pair cleared on **both** sides at once (so neither lookup finds a row, and only
+ * the mirror requirement itself can refuse it), and a tier-F instant nulled after publication. Every
+ * corruption fails closed through the protected read with its own code and converges once the row is
+ * restored.
  */
 if(getenv('DZN_PHASE_2A2S_RUNTIME_TEST')!=='corruption'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-S corruption runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2s-fixture.php';
@@ -151,6 +153,7 @@ dzn_s_fix_assert(count($attemptRead->attempts($mirrorNotificationId))===1,'resto
 //    valid S-owned row to point at, and the pair under test is observed through §6's still-active version.
 $peerNotificationId=$mirrorNotificationId;
 $peerOutboxId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}platform_outbox WHERE notification_id=%d",$peerNotificationId));
+$peerMirror=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}platform_outbox WHERE id=%d",$peerOutboxId));
 $identityCycle=dzn_s_fix_cycle(null,null,'corrupt-identity');
 dzn_s_fix_cycle_transition($identityCycle,'lapsed','lapsed','corrupt-identity');
 $identityIntent=dzn_s_fix_intent('renewal_cycle',$identityCycle,'TERM_LAPSED','corrupt-identity');
@@ -197,4 +200,23 @@ dzn_s_fix_assert($identityVerifier,'an outbox pointer that no longer names its n
 $wpdb->update($p.'platform_outbox',array('notification_id'=>$identityNotificationId),array('id'=>$identityOutboxId));
 dzn_s_fix_assert((int)$read->one($identityNotificationId)['outbox_id']===$identityOutboxId,'restoring the outbox pointer must restore the read');
 dzn_s_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT scheduled_for FROM {$p}platform_outbox WHERE id=%d",$identityOutboxId))===(string)$identityMirror->scheduled_for,'the mirrored schedule values must never have been touched');
+// (d) Both reciprocal pointers cleared at once, so a lookup from either side finds nothing: the notification
+//     names no row and its former row names no notification. §6.5 still forbids the pair — the mirror
+//     requirement is proved of the pair itself, never of whichever row happens to be found — so the
+//     aggregate read, the attempt read seam on both of its projections and the schema verifier (whose row
+//     loop can no longer see the row at all) must each refuse it, and restoring both pointers converges.
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$peerNotificationId));
+$wpdb->update($p.'platform_outbox',array('notification_id'=>null),array('id'=>$peerOutboxId));
+dzn_s_fix_assert($wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}platform_outbox WHERE notification_id=%d",$peerNotificationId))===null,'clearing both pointers must leave no row to look up from the outbox side');
+dzn_s_fix_rejected(fn()=>$read->one($peerNotificationId),'schedule_derivation_divergence','a cleared reciprocal pair on the aggregate read');
+dzn_s_fix_rejected(fn()=>$attemptRead->attempts($peerNotificationId),'schedule_derivation_divergence','a cleared reciprocal pair on the attempt read seam');
+dzn_s_fix_rejected(fn()=>$attemptRead->one((int)$mirrorClaim['attempt_id']),'schedule_derivation_divergence','a cleared reciprocal pair on one attempt projection');
+$identityVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$identityVerifier=str_contains($error->getMessage(),'schedule_derivation_divergence');}
+dzn_s_fix_assert($identityVerifier,'a cleared reciprocal pair must fail the S verifier');
+$wpdb->update($p.'notifications',array('outbox_id'=>$peerOutboxId),array('id'=>$peerNotificationId));
+$wpdb->update($p.'platform_outbox',array('notification_id'=>$peerNotificationId),array('id'=>$peerOutboxId));
+dzn_s_fix_assert((int)$read->one($peerNotificationId)['outbox_id']===$peerOutboxId,'restoring both reciprocal pointers must restore the aggregate read');
+dzn_s_fix_assert(count($attemptRead->attempts($peerNotificationId))===1,'restoring both reciprocal pointers must restore the attempt read seam');
+dzn_s_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT scheduled_for FROM {$p}platform_outbox WHERE id=%d",$peerOutboxId))===(string)$peerMirror->scheduled_for,'restoring the cleared pair must not touch the mirrored schedule');
 echo "Phase 2A.2-S corruption runtime passed\n";
