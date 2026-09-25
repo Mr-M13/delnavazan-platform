@@ -200,11 +200,21 @@ final class NotificationIntegrity {
         if((string)$notification->state!=='expired'||$reason!==NotificationRule::WINDOW_EXHAUSTION_CODE)throw new \RuntimeException('retry_window_exhaustion_invalid');
     }
     /**
-     * §7.1/§7.3 — the outbox row is a mirror and dispatch index, never an independent derivation root.
-     * The mirrored triple must equal the aggregate's, and `available_at` must be exactly one of the two
-     * values the mirror contract allows.
+     * §6.5/§7.1/§7.3 — the outbox row is a mirror and dispatch index, never an independent derivation root.
+     * The relationship is 1:1 and enforced from both sides, so the row handed over must be the row the
+     * notification points at *and* must point back at that notification: the mirrored triple must equal the
+     * aggregate's, and `available_at` must be exactly one of the two values the mirror contract allows.
+     *
+     * §6.5: a notification whose reciprocal pointer is NULL, or names a different valid/legacy row, is
+     * refused here even when the supplied row mirrors the aggregate's schedule exactly — an unrelated row
+     * that reproduces the schedule is not proof of the pair, so it can never be read as dispatch authority.
      */
     public static function outboxMirror(object $notification,object $row,?string $lastRetryAvailableAt):void{
+        // §6.5/§7.1: both reciprocal identifiers must match before anything about the row is proved. The row
+        // must name this notification, and the notification must name this row — a NULL or divergent
+        // `notifications.outbox_id` is a split of the durable dispatch authority, not a milder defect.
+        if((int)$row->notification_id!==(int)$notification->id)throw new \RuntimeException('schedule_derivation_divergence');
+        if(!isset($notification->outbox_id)||(int)$notification->outbox_id!==(int)$row->id)throw new \RuntimeException('schedule_derivation_divergence');
         if($notification->scheduled_for===null){
             if($row->scheduled_for!==null||$row->expires_at!==null||$row->deferral_count!==null)throw new \RuntimeException('schedule_derivation_divergence');
             return;
@@ -298,7 +308,9 @@ final class NotificationIntegrity {
      *
      * §6.5/§7.1: a notification and its outbox row are 1:1 in storage, so the mirror proof is unconditional
      * for a mirror-backed notification — a caller that hands over no mirror for one is refused whole instead
-     * of skipping the check, so no read path can return authority from an unproved mirror.
+     * of skipping the check, so no read path can return authority from an unproved mirror. The proof is
+     * reciprocal: the row must name the notification and the notification must name the row, so a corrupted
+     * pointer can never be satisfied by some other row that merely reproduces the schedule.
      *
      * @throws \RuntimeException `schedule_derivation_divergence`, `eligibility_expired`,
      *         `tier_f_instant_unavailable`, `terminal_reason_invalid`, `retry_exhaustion_invalid`,

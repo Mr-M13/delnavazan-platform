@@ -5,13 +5,15 @@
  * Covers: a rule appended after activation, a mandatory rule removed or rebound, the expiry rule removed,
  * a forged rule-set digest, a rewritten schedule, a re-anchored expiry, a deferral count above its maximum,
  * a persisted timezone that is not the frozen resolution, an outbox mirror that disagrees with the
- * aggregate, and a tier-F instant nulled after publication. Every corruption fails closed through the
+ * aggregate, a notification/outbox pair whose reciprocal pointer was split while the mirror still mirrors
+ * its schedule, and a tier-F instant nulled after publication. Every corruption fails closed through the
  * protected read with its own code and converges once the row is restored.
  */
 if(getenv('DZN_PHASE_2A2S_RUNTIME_TEST')!=='corruption'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-S corruption runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2s-fixture.php';
 use Delnavazan\Platform\Core\Application\NotificationReadService;
 use Delnavazan\Platform\Core\Application\NotificationAttemptReadService;
+use Delnavazan\Platform\Core\Application\NotificationRule;
 use Delnavazan\Platform\Core\Application\NotificationSupport;
 use Delnavazan\Platform\Core\Application\NotificationWorkflowReadService;
 use Delnavazan\Platform\Core\Application\NotificationIntegrity;
@@ -139,4 +141,60 @@ dzn_s_fix_rejected(fn()=>$attemptRead->attempts($mirrorNotificationId),'schedule
 dzn_s_fix_rejected(fn()=>$attemptRead->one((int)$mirrorClaim['attempt_id']),'schedule_derivation_divergence','an outbox mirror that disagrees with the aggregate on one attempt projection');
 $wpdb->update($p.'platform_outbox',array('scheduled_for'=>$mirrorRow->scheduled_for),array('notification_id'=>$mirrorNotificationId));
 dzn_s_fix_assert(count($attemptRead->attempts($mirrorNotificationId))===1,'restoring the mirror must restore the attempt read');
+
+// 7. The notification/outbox relationship is 1:1 and proved from **both** sides, never from the mirrored
+//    schedule alone: a notification pointer that names a different valid S-owned row, a NULL notification
+//    pointer beside an intact mirror, and an outbox pointer that no longer names its notification each
+//    refuse the aggregate read, the attempt read seam and the schema verifier while every mirrored schedule
+//    value stays exactly what the aggregate derived — and each converges once the pointer is restored. The
+//    peer row is the mirror-backed pair §6 left behind, so the mis-pointed notification has a genuinely
+//    valid S-owned row to point at, and the pair under test is observed through §6's still-active version.
+$peerNotificationId=$mirrorNotificationId;
+$peerOutboxId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}platform_outbox WHERE notification_id=%d",$peerNotificationId));
+$identityCycle=dzn_s_fix_cycle(null,null,'corrupt-identity');
+dzn_s_fix_cycle_transition($identityCycle,'lapsed','lapsed','corrupt-identity');
+$identityIntent=dzn_s_fix_intent('renewal_cycle',$identityCycle,'TERM_LAPSED','corrupt-identity');
+$identityObserved=$mirrorReady['service']->observeIntent($identityIntent,array_merge(dzn_s_fix_evidence('corrupt-identity'),array('observed_at'=>gmdate('Y-m-d H:i:s'))),dzn_s_fix_key('obs-corrupt-identity'));
+$identityNotificationId=(int)$identityObserved['notification_id'];
+$identityOutboxId=(int)$identityObserved['outbox_id'];
+dzn_s_fix_assert($identityOutboxId>0&&$identityOutboxId!==$peerOutboxId,'the identity fixture needs a second distinct valid outbox row');
+dzn_s_fix_assert((int)$read->one($identityNotificationId)['outbox_id']===$identityOutboxId,'the intact aggregate must resolve the mirror it points at');
+dzn_s_fix_assert($attemptRead->attempts($identityNotificationId)===array(),'the intact attempt read seam must return the empty history');
+$identityMirror=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}platform_outbox WHERE id=%d",$identityOutboxId));
+// (a) The notification points at the peer's *valid* S-owned row while its own row still names it and still
+//     mirrors its schedule exactly, so only the reciprocal pointer can refuse the pair.
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$identityNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$peerNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>$peerOutboxId),array('id'=>$identityNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>$identityOutboxId),array('id'=>$peerNotificationId));
+dzn_s_fix_rejected(fn()=>$read->one($identityNotificationId),'schedule_derivation_divergence','a notification pointer that names a different valid outbox row');
+dzn_s_fix_rejected(fn()=>$attemptRead->attempts($identityNotificationId),'schedule_derivation_divergence','a mis-pointed aggregate on the attempt read seam');
+$identityVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$identityVerifier=str_contains($error->getMessage(),'outbox pointer divergence');}
+dzn_s_fix_assert($identityVerifier,'a notification pointer naming another valid row must fail the S verifier');
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$identityNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$peerNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>$identityOutboxId),array('id'=>$identityNotificationId));
+$wpdb->update($p.'notifications',array('outbox_id'=>$peerOutboxId),array('id'=>$peerNotificationId));
+dzn_s_fix_assert((int)$read->one($identityNotificationId)['outbox_id']===$identityOutboxId,'restoring the reciprocal pointers must restore the read');
+dzn_s_fix_assert(count($attemptRead->attempts($peerNotificationId))===1,'restoring the reciprocal pointers must restore the peer attempt read');
+// (b) A NULL aggregate pointer beside the intact mirror row.
+$wpdb->update($p.'notifications',array('outbox_id'=>null),array('id'=>$identityNotificationId));
+dzn_s_fix_rejected(fn()=>$read->one($identityNotificationId),'schedule_derivation_divergence','a NULL notification pointer beside an intact mirror');
+dzn_s_fix_rejected(fn()=>$attemptRead->attempts($identityNotificationId),'schedule_derivation_divergence','a NULL notification pointer on the attempt read seam');
+$identityVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$identityVerifier=str_contains($error->getMessage(),'outbox pointer divergence');}
+dzn_s_fix_assert($identityVerifier,'a NULL notification pointer beside an intact mirror must fail the S verifier');
+$wpdb->update($p.'notifications',array('outbox_id'=>$identityOutboxId),array('id'=>$identityNotificationId));
+dzn_s_fix_assert((int)$read->one($identityNotificationId)['outbox_id']===$identityOutboxId,'restoring the NULL pointer must restore the read');
+// (c) The outbox-side pointer no longer names its notification, while the mirrored schedule stays intact.
+$wpdb->update($p.'platform_outbox',array('notification_id'=>null),array('id'=>$identityOutboxId));
+dzn_s_fix_rejected(fn()=>$read->one($identityNotificationId),'schedule_derivation_divergence','an outbox pointer that no longer names its notification');
+dzn_s_fix_rejected(fn()=>$attemptRead->attempts($identityNotificationId),'schedule_derivation_divergence','a missing outbox pointer on the attempt read seam');
+$identityVerifier=false;
+try{Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();}catch(Throwable $error){$identityVerifier=str_contains($error->getMessage(),'schedule_derivation_divergence');}
+dzn_s_fix_assert($identityVerifier,'an outbox pointer that no longer names its notification must fail the S verifier');
+$wpdb->update($p.'platform_outbox',array('notification_id'=>$identityNotificationId),array('id'=>$identityOutboxId));
+dzn_s_fix_assert((int)$read->one($identityNotificationId)['outbox_id']===$identityOutboxId,'restoring the outbox pointer must restore the read');
+dzn_s_fix_assert((string)$wpdb->get_var($wpdb->prepare("SELECT scheduled_for FROM {$p}platform_outbox WHERE id=%d",$identityOutboxId))===(string)$identityMirror->scheduled_for,'the mirrored schedule values must never have been touched');
 echo "Phase 2A.2-S corruption runtime passed\n";

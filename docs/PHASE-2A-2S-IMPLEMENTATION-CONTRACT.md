@@ -2488,6 +2488,18 @@ execution evidence and deferred product decisions but do not block this contract
 
 ## 19. Correction record
 
+Implementation correction round 5 (failed candidate `aefe39a`, tree `0a519a7d`) — the independent review
+refused the candidate with one blocking finding: the new mirror proof fetched the outbox row by
+`notification_id` but compared only the schedule fields, so a corrupted notification could point at a
+different valid/legacy outbox row while another row referenced the notification and mirrored its schedule,
+which the §6.5 1:1 invariant forbids outright. This entry records the **product-code** correction only: no
+migration identity, table count, migration name, build identity or contract rule changes, no schema object
+is added, and no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| The review's required correction demands that the shared outbox verification reject unless both reciprocal identifiers match, "including rejecting a null/mismatched aggregate pointer when a mirror is supplied", and that the migration row-level check compare `n.outbox_id` with `o.id`. `NotificationIntegrity::outboxMirror()` proved the mirrored triple and the `available_at` contract but never the identity of the pair, and `Migrator::verify_notification_authority_data()`'s row loop joined the notification only through `o.notification_id`, so a notification whose `outbox_id` was NULL — or named another valid/legacy row — passed both the protected reads and schema verification. | The pair's identity is now part of the shared outbox rule, checked before any schedule field: `outboxMirror()` refuses (`schedule_derivation_divergence`) a row that does not name the notification, and a notification whose `outbox_id` is NULL or names a different row, so the one rule every protected read, dispatch claim, attempt read seam and schema verifier runs can never accept a split pointer. `Migrator::verify_notification_authority_data()` additionally selects `n.outbox_id AS n_outbox` and refuses any mirrored row whose notification does not point back at it (`notification outbox pointer divergence`). `tests/phase-2a2s-contract.php` §14 asserts both reciprocal checks and the row-by-row comparison; `tests/phase-2a2s-corruption-runtime.php` §7 mutates either pointer while the mirrored schedule values stay intact and proves the aggregate read, the attempt read seam and the schema verifier each fail closed and converge once the pointer is restored. The corruption suite also gains the `NotificationRule` import its §5 assertion referenced without one. | §6.5, §7.1, §7.3, §8.4, §9, §15 |
+
 Targeted correction round 4 (preserved candidate `3f67d3d`, tree `5d53556`) — a targeted correction on top
 of the preserved candidate that closes the one residual shortfall in the review's required corrections. This
 entry records the **product-code** correction only: no migration identity, table count, migration name,

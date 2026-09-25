@@ -155,6 +155,34 @@ are unchanged, and no merge, deploy, provider activation, external send, Amelia 
   seam refuses it with `schedule_derivation_divergence` through both of its projections, and proves the read
   converges once the mirror is restored.
 
+### Implementation correction round 5 (independent review of failed candidate `aefe39a`, tree `0a519a7d`)
+
+The independent re-review of the previous correction candidate refused it with one blocking finding — the
+outbox identity was not verified. The schema identity, table count, migration name and build identity are
+unchanged, no schema object is added, and no merge, deploy, provider activation, external send, Amelia or
+Theme change is involved.
+
+- **The notification/outbox 1:1 relationship is now proved on both sides, not from the schedule alone.**
+  `NotificationIntegrity::outboxMirror()` compared only the mirrored triple and `available_at`, so a
+  notification whose `outbox_id` was NULL — or named a *different* valid/legacy row — was accepted whenever
+  the supplied row mirrored its schedule, even with another row pointing back at the aggregate. The shared
+  verification now refuses both halves of that split with `schedule_derivation_divergence` *before* it
+  proves anything about the row: the row must name the notification (`platform_outbox.notification_id`) and
+  the notification must name the row (`notifications.outbox_id`). Because that rule is the one every
+  protected read, the dispatch claim, the attempt read seam and the schema verifier run, no path can accept
+  a divergent reciprocal pointer.
+- **The schema verifier compares both pointers row by row.** `Migrator::verify_notification_authority_data()`
+  now selects `n.outbox_id` beside `o.id` and refuses any mirrored row whose notification does not point
+  back at it (`notification outbox pointer divergence`), a NULL aggregate pointer included, in addition to
+  handing each notification's persisted mirror to the same shared verification.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts both reciprocal checks on the shared rule and the
+  row-by-row schema comparison; `tests/phase-2a2s-corruption-runtime.php` §7 mutates either pointer — a
+  notification pointing at a different valid S-owned row, a NULL notification pointer, and an outbox pointer
+  that no longer names its notification — while every mirrored schedule value stays exactly what the
+  aggregate derived, and proves the aggregate read, the attempt read seam and the schema verifier each fail
+  closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
+  which its §5 assertion referenced without the import (a latent fatal in the suite itself).
+
 - `platform_outbox` gains the additive dispatch representation — `notification_id` (unique), `workflow_key`,
   `workflow_version`, `intent_key`, `audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`,
   `lease_token_digest`, `failure_reason_code` — plus the `dispatch` and `intent_version` lookup indexes.

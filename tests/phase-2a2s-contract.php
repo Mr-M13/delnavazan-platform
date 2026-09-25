@@ -259,7 +259,7 @@ if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-fixture.php'),'imple
 //     precede a successful re-evaluation, the claim set excludes an expired window and expires overdue work
 //     before any claim, observation resolves the approved template version and freezes its
 //     rendered-parameter snapshot, and the shared aggregate verification proves the persisted outbox mirror
-//     on every protected read and in the schema verifier.
+//     — including the 1:1 pointer on **both** sides — on every protected read and in the schema verifier.
 $outboxRepository=file_get_contents($root.'/src/Core/Infrastructure/Repository/NotificationOutboxRepository.php');
 $claim=substr($dispatch,strpos($dispatch,'public function claimLease'),4200);
 $claimEvidence=strpos($claim,'$evidence=NotificationSupport::evidence($input);');
@@ -287,4 +287,13 @@ if(str_contains($attemptRead,'$subjectInstant,null,'))throw new RuntimeException
 if(!str_contains($migration,'$mirror = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$p}platform_outbox WHERE notification_id=%d", (int) $notification->id ) );'))throw new RuntimeException('The schema verifier must read each notification\'s persisted mirror row');
 if(!str_contains($migration,'aggregateIntegrity( $notification, $composition, $policy, $subjectInstant, $mirror, $attempts, (int) $version->version_number );'))throw new RuntimeException('The schema verifier must hand the persisted mirror to the shared aggregate verification');
 if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','an outbox mirror that disagrees with the aggregate on the attempt read seam'"))throw new RuntimeException('The corruption suite must prove the mirror divergence on the attempt read seam');
+if(!str_contains($integrity,"if((int)\$row->notification_id!==(int)\$notification->id)throw new \RuntimeException('schedule_derivation_divergence');"))throw new RuntimeException('The shared outbox verification must reject a row that does not name its notification');
+if(!str_contains($integrity,"if(!isset(\$notification->outbox_id)||(int)\$notification->outbox_id!==(int)\$row->id)throw new \RuntimeException('schedule_derivation_divergence');"))throw new RuntimeException('The shared outbox verification must reject a NULL or divergent aggregate pointer beside a mirror');
+if(!str_contains($migration,'n.outbox_id AS n_outbox'))throw new RuntimeException('The schema verifier must read the notification-side outbox pointer');
+if(!str_contains($migration,'if ( $row->n_outbox === null || (int) $row->n_outbox !== (int) $row->outbox_id )'))throw new RuntimeException('The schema verifier must compare both reciprocal outbox pointers row by row');
+if(!str_contains($migration,'notification outbox pointer divergence'))throw new RuntimeException('A split notification/outbox pointer must fail the schema verifier closed');
+if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','a notification pointer that names a different valid outbox row'"))throw new RuntimeException('The corruption suite must prove a mis-pointed aggregate fails the protected read');
+if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','a NULL notification pointer beside an intact mirror'"))throw new RuntimeException('The corruption suite must prove a NULL aggregate pointer fails the protected read');
+if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','an outbox pointer that no longer names its notification'"))throw new RuntimeException('The corruption suite must prove a missing outbox-side pointer fails the protected read');
+if(!str_contains($runtimeSuites,"'outbox pointer divergence'"))throw new RuntimeException('The corruption suite must prove the schema verifier fails closed on a split pointer');
 echo "Phase 2A.2-S contract static test passed\n";

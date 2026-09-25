@@ -910,11 +910,15 @@ final class Migrator {
 				throw new \RuntimeException('Migration verification failed: active version integrity: '.$error->getMessage());
 			}
 		}
-		// Every S-owned outbox row mirrors its notification's locked derivation, and no S-owned row exists
-		// without one.
-		$rows = $wpdb->get_results( "SELECT o.id AS outbox_id,o.notification_id,o.scheduled_for,o.expires_at,o.deferral_count,o.available_at,n.id AS notification_id_check,n.state,n.scheduled_for AS n_scheduled,n.expires_at AS n_expires,n.deferral_count AS n_count,(SELECT MAX(next_available_at) FROM {$p}notification_attempts a WHERE a.notification_id=n.id) AS last_rearm FROM {$p}platform_outbox o LEFT JOIN {$p}notifications n ON n.id=o.notification_id WHERE o.notification_id IS NOT NULL" ) ?: array();
+		// Every S-owned outbox row mirrors its notification's locked derivation, no S-owned row exists without
+		// one, and the 1:1 relationship holds on **both** sides: the row must name its notification and the
+		// notification's own `outbox_id` must name that same row (§6.5/§7.1).
+		$rows = $wpdb->get_results( "SELECT o.id AS outbox_id,o.notification_id,o.scheduled_for,o.expires_at,o.deferral_count,o.available_at,n.id AS notification_id_check,n.outbox_id AS n_outbox,n.state,n.scheduled_for AS n_scheduled,n.expires_at AS n_expires,n.deferral_count AS n_count,(SELECT MAX(next_available_at) FROM {$p}notification_attempts a WHERE a.notification_id=n.id) AS last_rearm FROM {$p}platform_outbox o LEFT JOIN {$p}notifications n ON n.id=o.notification_id WHERE o.notification_id IS NOT NULL" ) ?: array();
 		foreach ( $rows as $row ) {
 			if ( $row->notification_id_check === null ) throw new \RuntimeException('Migration verification failed: orphan outbox row');
+			// The reciprocal pointer is part of the row proof: a NULL aggregate pointer, or one naming a
+			// different valid/legacy row, is refused even though this row mirrors its schedule exactly.
+			if ( $row->n_outbox === null || (int) $row->n_outbox !== (int) $row->outbox_id ) throw new \RuntimeException('Migration verification failed: notification outbox pointer divergence');
 			if ( $row->n_scheduled === null ) {
 				if ( $row->scheduled_for !== null || $row->expires_at !== null || $row->deferral_count !== null ) throw new \RuntimeException('Migration verification failed: pre-scheduling mirror');
 				continue;
@@ -929,7 +933,7 @@ final class Migrator {
 		// proves each closed attempt's closure partition and persisted retry schedule. The outbox mirror is
 		// checked row-to-row just above *and* handed to the same shared aggregate verification the protected
 		// reads and the dispatch claim run, so a mirrored row can never disagree with its aggregate — or go
-		// missing behind one — and still pass verification.
+		// missing behind one, or be a row the aggregate does not point at — and still pass verification.
 		$notifications = $wpdb->get_results( "SELECT * FROM {$p}notifications" ) ?: array();
 		foreach ( $notifications as $notification ) {
 			try {
