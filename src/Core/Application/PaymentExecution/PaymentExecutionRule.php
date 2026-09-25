@@ -96,9 +96,21 @@ final class PaymentExecutionRule {
      * event's decision. [C10-2] It bounds the work, not merely the row: the owner re-proves and renews the
      * window immediately before every R1/R2 work unit, a renewal can never resurrect an expired window, and
      * a generation whose window has closed performs no further decision or consequence work and appends
-     * nothing. One work unit is a single local R1/R2 transaction and never a provider call, so the
-     * remaining window always exceeds the unit it covers. Structural, never a setting. */
+     * nothing. [C11-1] The window is proved and renewed *inside* the unit's own transaction as well, at the
+     * connection's statement boundary, so the claim row is held for the whole transaction the unit runs in:
+     * a unit can neither be displaced mid-transaction nor commit a statement outside the window it was
+     * granted. Structural, never a setting. */
     public const DECISION_CLAIM_LEASE_SECONDS=120;
+    /** [C11-1] The connection statement boundary the intake fences every R1/R2 work unit at. WordPress
+     * filters every statement — `$wpdb->query()`, and therefore every insert, update, delete and read that
+     * goes through it — here before it runs, so one listener registered for the unit's duration sees the
+     * exact statements of the unit's own transaction. Structural, never a setting. */
+    public const DECISION_UNIT_FENCE_FILTER='query';
+    /** [C11-1] The statements the fence never inspects and never blocks: the transaction opener, an unwind
+     * and session/transaction configuration. They are not unit work, and a rollback must never be blocked
+     * by a fence; every other statement — the unit transaction's own `COMMIT` included — is preceded by the
+     * fenced proof of the window it runs inside. Structural, never a setting. */
+    public const DECISION_UNIT_UNFENCED_STATEMENTS='^(START\s+TRANSACTION|ROLLBACK|SET\s)';
     /** [C9-1]/[C9-2] How long a delivery that cannot own the claim waits for the owner's decision before
      * it reports the event as durably still owing one. Structural, never a setting. */
     public const DECISION_CLAIM_WAIT_MILLISECONDS=1000;

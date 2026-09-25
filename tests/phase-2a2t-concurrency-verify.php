@@ -101,4 +101,53 @@ if($mode==='stale_owner_after_lease_expiry'){
     dzn_tcv_assert(isset($records['w1']['outcome']['events'][0])&&$records['w1']['outcome']['events'][0]['created']===false,'the stale generation must append nothing and converge on the successor decision');
     dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the takeover generation must be the one that appends the decision');
 }
+
+// [C11-1] The in-unit fence: a work unit that outlives the window it was granted is aborted from inside
+// its own transaction, so the stale generation commits no part of that unit — the R1 evidence and
+// settlement in the R1 case, the intent confirmation and cycle collection in the R2 case — releases the
+// claim nobody is working inside any more, and the next generation completes the event's decision once.
+if(in_array($mode,array('stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)){
+    dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['intent_id'],$fixture['webhook']['cycle_id'],$fixture['prepared_event_id']),'the in-unit fence fixture must exist');
+    $webhook=$fixture['webhook'];
+    $prepared=(int)$fixture['prepared_event_id'];
+    dzn_tcv_assert(is_file($gate.'/w1.work'),'the stale generation must reach the R1/R2 mutation it stalls inside');
+    dzn_tcv_assert(is_file($gate.'/w1.aged'),'the stale generation must let the window of that unit lapse inside it');
+    $probe=is_file($gate.'/w2.probe.json')?json_decode((string)file_get_contents($gate.'/w2.probe.json'),true):null;
+    dzn_tcv_assert(is_array($probe)&&($probe['error']??null)===null,'the delivery that raced the stale unit must complete as a delivery');
+    dzn_tcv_assert(isset($probe['outcome']['events'][0])&&$probe['outcome']['events'][0]['created']===false,'a delivery that cannot own the claim must append nothing');
+    $observed=is_file($gate.'/w2.pre.json')?json_decode((string)file_get_contents($gate.'/w2.pre.json'),true):null;
+    dzn_tcv_assert(is_array($observed)&&is_array($observed['observation']??null),'the successor must record what the stale generation committed');
+    $observation=$observed['observation'];
+    $claimRows=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d ORDER BY id ASC",$prepared))?:array();
+    $released=0;$settledClaims=0;
+    foreach($claimRows as $claimRow){if((string)$claimRow->claim_state==='released')$released++;if((string)$claimRow->claim_state==='settled')$settledClaims++;}
+    dzn_tcv_assert(count($claimRows)===2&&$released===1&&$settledClaims===1,'the stale generation must release its lapsed claim and the successor must settle exactly one');
+    dzn_tcv_assert((int)($observation['claims']??0)===1&&(int)($observation['live_claims']??0)===0,'the stale generation must have released its claim before the successor completed the event');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared))===1,'the event must end with exactly one decision');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",$prepared))===0,'no live claim may survive the completed decision');
+    dzn_tcv_assert(isset($records['w1']['outcome']['events'][0])&&$records['w1']['outcome']['events'][0]['created']===false,'the stale generation must append nothing');
+    dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the successor must be the generation that appends the decision');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 evidence must exist exactly once');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 settlement must exist exactly once');
+    $decisionRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared));
+    dzn_tcv_assert($decisionRow!==null,'the successor generation must have appended the event decision');
+    $intentState=(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id']));
+    $cycleState=(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id']));
+    if($mode==='stale_owner_inside_r1_unit'){
+        dzn_tcv_assert((int)($observation['evidence']??-1)===0&&(int)($observation['settlements']??-1)===0,'the stale generation must have committed no R1 evidence: the fence must roll its own R1 transaction back');
+        dzn_tcv_assert((int)($observation['intent_events']??0)===0&&(int)($observation['intent_commands']??0)===0,'a rolled-back R1 unit must leave no R2 work either');
+        dzn_tcv_assert((string)$decisionRow->decision_state==='translated'&&(string)$decisionRow->r2_consequence_state==='applied','the successor must complete the decision and its ordered R2 consequence');
+        dzn_tcv_assert($intentState==='confirmed','the successor must confirm the collection intent exactly once');
+        dzn_tcv_assert($cycleState==='collected','the successor must collect the renewal cycle exactly once');
+    }else{
+        dzn_tcv_assert((int)($observation['evidence']??0)===1,'the R1 unit the stale generation finished inside its window must stay committed');
+        dzn_tcv_assert((string)($observation['intent']??'')==='submitted'&&(string)($observation['cycle']??'')==='payment_required','the stale generation must have committed no part of its R2 confirmation');
+        dzn_tcv_assert((int)($observation['intent_events']??-1)===0&&(int)($observation['intent_commands']??-1)===0,'the rolled-back R2 confirmation must leave no confirmation event and no confirmation command row');
+        // The event's occurrence instant is deliberately older than the settlement its own stalled R1 unit
+        // committed, so the successor's re-decision is the controlled stale-provider-event refusal — and the
+        // R2 consequence it must not duplicate is therefore provably absent, not merely unconfirmed.
+        dzn_tcv_assert((string)$decisionRow->decision_state==='ignored'&&(string)$decisionRow->reason_code==='stale_provider_event','the successor must record the controlled stale refusal for an obligation its own R1 unit already settled');
+        dzn_tcv_assert($intentState==='submitted'&&$cycleState==='payment_required','no generation may collect a cycle whose confirmation the fence rolled back');
+    }
+}
 echo "phase-2a2t-concurrency-verify: ".$mode." OK (settled=".$settled.", live=".$live.", dispatch_in_flight refusals=".$refusals.")\n";

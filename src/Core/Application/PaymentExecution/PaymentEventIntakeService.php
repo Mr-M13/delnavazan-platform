@@ -21,11 +21,24 @@ final class PaymentEventIntakeService {
     private const CLAIM_WAIT_INTERVAL_MICROSECONDS=25000;
     /**
      * [C10-2] The claim this worker currently owns, while it is inside one decision operation. Every R1/R2
-     * work unit asserts and renews this claim's bounded window before it runs, so an expired or replaced
-     * generation stops *before* its next unit instead of discovering the loss only when it appends the
-     * decision. Cleared when the operation ends, on every path including a thrown exception.
+     * work unit proves and renews this claim's bounded window before it runs — and, from inside the unit's
+     * own transaction, before every statement the unit executes — so an expired or replaced generation
+     * stops *before* the next statement instead of discovering the loss only when it appends the decision.
+     * Cleared when the operation ends, on every path including a thrown exception.
      */
     private ?array $ownedDecisionClaim=null;
+    /** [C11-1] The statement-boundary listener that fences the R1/R2 work unit in progress. */
+    private ?\Closure $decisionUnitFence=null;
+    /** [C11-1] The work unit in progress, for the controlled closed-window reason. */
+    private string $decisionUnitName='';
+    /** [C11-1] Re-entrancy depth: the fence's own proof statement is never fenced by itself. */
+    private int $decisionUnitFenceDepth=0;
+    /** [C11-1] Whether the unit's own transaction is open on this connection right now. */
+    private bool $decisionUnitInTransaction=false;
+    /** [C11-1] The fence sees each statement exactly as it is about to run. */
+    private const DECISION_UNIT_FENCE_PRIORITY=PHP_INT_MAX;
+    /** [C11-1] The bounded window one work unit may run inside, in the `gmdate` shape the claim uses. */
+    private const DECISION_WINDOW_CLOSED_REASON='decision_claim_window_closed';
     /** The controlled HTTP status of each refusal reason: nothing distinguishes provider from account. */
     private const HTTP_STATUS=array(
         'signature_verified'=>200,'signature_invalid'=>400,'signature_outside_tolerance'=>400,
@@ -352,9 +365,11 @@ final class PaymentEventIntakeService {
                 return $this->convergedDecision($eventId,$current);
             }
             // [C10-2] Ownership covers the entire decision operation: the claim's bounded window is
-            // opened here — before any decision work runs — renewed before every R1/R2 work unit, and
-            // closed when the decision is published. A generation that cannot renew its window performs
-            // no further work at all.
+            // opened here — before any decision work runs — proved and renewed before every R1/R2 work
+            // unit, fenced from inside each unit's own transaction before every statement that unit runs
+            // ([C11-1]), and closed when the decision is published. A generation that cannot renew its
+            // window performs no further work at all, and a unit whose window closes mid-transaction is
+            // rolled back by its own service instead of committing part of itself.
             $this->openDecisionWindow($eventId,$claim);
             try{
                 $decision=$decide();
@@ -362,11 +377,14 @@ final class PaymentEventIntakeService {
                 $this->closeDecisionWindow();
             }
         }catch(DecisionClaimWindowClosed $e){
-            // [C10-2] The window this generation worked inside has closed: its lease expired before it
-            // reached the next work unit, or exactly one successor generation took the claim over. The
-            // stale generation therefore performs no further decision or consequence work and appends
-            // nothing — it converges on the decision the current owner publishes exactly like any other
-            // delivery that cannot own the claim.
+            // [C10-2]/[C11-1] The window this generation worked inside has closed: its lease expired
+            // before the next statement or work unit ran, or exactly one successor generation took the
+            // claim over. The fence aborts the unit's own transaction *before* that statement executes, so
+            // this generation committed no part of the unit, performs no further decision or consequence
+            // work and appends nothing. It releases the live claim if it still owns it — an event must
+            // never wait out a lease nobody is working inside — and converges on the decision the current
+            // owner publishes, exactly like any other delivery that cannot own the claim.
+            $this->abandonDecisionClaim($claim);
             return $this->convergeOnOwner($eventId);
         }catch(\Throwable $e){
             $this->abandonDecisionClaim($claim);
@@ -379,10 +397,11 @@ final class PaymentEventIntakeService {
      * [C10-2] Open the bounded window this worker works inside, and announce it.
      *
      * The window is the claim's own lease, issued at acquisition with the fencing generation and token
-     * that this worker will have to re-prove before every work unit. The hook fires *before* any decision
-     * work runs and outside the §9.7 worker context, so an observer can see which generation owns the
-     * event's decision without gaining the worker principal, and carries ids only — never a token, a
-     * payload or a provider reference.
+     * that this worker will have to re-prove before every work unit — and, inside each unit's own
+     * transaction, before every statement that unit runs. The hook fires *before* any decision work runs
+     * and outside the §9.7 worker context, so an observer can see which generation owns the event's
+     * decision without gaining the worker principal, and carries ids only — never a token, a payload or a
+     * provider reference.
      */
     private function openDecisionWindow(int $eventId,array $claim):void{
         $this->ownedDecisionClaim=$claim;
@@ -394,20 +413,123 @@ final class PaymentEventIntakeService {
     }
 
     /**
-     * [C10-2] Assert and renew the bounded window immediately before one R1/R2 work unit runs.
+     * [C11-1] Run one R1/R2 work unit inside its own fenced, bounded window.
      *
-     * One fenced conditional statement proves this generation still owns the event's decision (`claimed`
-     * at its own generation and token, with its live slot) **and** that its lease has not expired — and
-     * only then extends the lease over the unit about to run. Exactly one affected row is required: the
-     * statement cannot resurrect an expired lease, so a worker that stalled past its window, or whose
-     * claim exactly one successor generation took over, stops here — before the unit — with
-     * `DecisionClaimWindowClosed` and performs no further decision or consequence work.
+     * The window is opened before the unit runs — the entry gate proves this generation's own live,
+     * unexpired claim and renews it over the unit about to run — and the unit's own transaction is then
+     * fenced statement by statement (`fenceDecisionUnitStatement()`), so
+     *
+     * - the claim row stays locked for the whole transaction the unit runs in, which is what makes a
+     *   decision-claim takeover impossible while the unit is executing: a takeover needs that same row and
+     *   an *expired* lease, and the unit holds the row and a live window for its whole transaction; and
+     * - a unit whose window has closed stops **before** the statement that would have run outside the
+     *   window, so its own R1/R2 service rolls the transaction back and the stale generation commits no
+     *   work at all — never "its work, plus a fence failure noticed at the append".
      */
-    private function assertDecisionWorkWindow(string $unit):void{
+    private function decisionWorkUnit(string $unit,callable $work):mixed{
+        $this->assertDecisionWorkWindow($unit);
+        $this->armDecisionUnitFence($unit);
+        try{
+            return $work();
+        }finally{
+            $this->disarmDecisionUnitFence();
+        }
+    }
+
+    /** The claim this worker owns, or a controlled programming failure when there is none. */
+    private function ownedClaimFor(string $unit):array{
         $claim=$this->ownedDecisionClaim;
         if($claim===null)throw new \LogicException('payment_event_decision_work_without_claim:'.$unit);
+        return $claim;
+    }
+
+    /**
+     * [C10-2] The entry gate of one R1/R2 work unit: prove, and only then renew, the bounded window the
+     * unit is about to run inside.
+     *
+     * The locking proof and the renewal are one transaction. A claim that is no longer this generation's
+     * live, unexpired window is never renewed and the generation stops *before* the unit begins, instead of
+     * starting work it cannot commit.
+     */
+    private function assertDecisionWorkWindow(string $unit):void{
+        $claim=$this->ownedClaimFor($unit);
         $now=PaymentExecutionSupport::now();
-        if($this->repository->renewDecisionClaim((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$this->claimLease($now),$now)!==1)throw new DecisionClaimWindowClosed('decision_claim_window_closed:'.$unit);
+        $this->repository->begin();
+        try{
+            $live=$this->repository->fenceDecisionClaimWindow((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$this->claimLease($now),$now);
+            $this->repository->commit();
+        }catch(\Throwable $e){
+            $this->repository->rollback();
+            throw $e;
+        }
+        if(!$live)throw new DecisionClaimWindowClosed(self::DECISION_WINDOW_CLOSED_REASON.':'.$unit);
+    }
+
+    /**
+     * [C11-1] Fence every statement of one R1/R2 work unit for exactly that unit's duration.
+     *
+     * The listener is registered on the connection's statement boundary before the unit runs and removed
+     * again in a `finally`, so no statement of any later work — and no statement of any other code path —
+     * is fenced by it.
+     */
+    private function armDecisionUnitFence(string $unit):void{
+        $this->decisionUnitName=$unit;
+        $this->decisionUnitInTransaction=false;
+        $fence=function($query):string{return $this->fenceDecisionUnitStatement((string)$query);};
+        $this->decisionUnitFence=$fence;
+        if(!function_exists('add_filter'))throw new \LogicException('payment_event_decision_fence_unavailable');
+        add_filter(PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER,$fence,self::DECISION_UNIT_FENCE_PRIORITY,1);
+    }
+    private function disarmDecisionUnitFence():void{
+        $fence=$this->decisionUnitFence;
+        $this->decisionUnitFence=null;
+        $this->decisionUnitName='';
+        $this->decisionUnitInTransaction=false;
+        if($fence!==null&&function_exists('remove_filter'))remove_filter(PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER,$fence,self::DECISION_UNIT_FENCE_PRIORITY);
+    }
+
+    /**
+     * [C11-1] Fence one statement of the R1/R2 work unit in progress, from inside that unit's transaction.
+     *
+     * The listener never rewrites the statement: it returns the query unchanged. Transaction control and
+     * session configuration are passed through untouched — an unwind must never be blocked, and
+     * `START TRANSACTION` is what opens the transaction the fence then holds — while every other statement,
+     * the unit transaction's own `COMMIT` included, is preceded by the fenced proof of the window it runs
+     * inside. Because that proof is a locking read taken on the unit's own connection and inside the unit's
+     * own transaction, the claim row is held for the rest of that transaction: a decision-claim takeover —
+     * which needs the same row and an expired lease — can never interleave with a unit. A proof that finds
+     * no live window raises the controlled closed-window stop **before** the statement executes, so the
+     * enclosing R1/R2 transaction rolls back and the stale generation commits no work at all. A statement
+     * that runs inside the unit's transaction is bounded by the window granted at the unit's entry and only
+     * proves it; the routing write R1 records outside any transaction is additionally given a renewed
+     * window, so no takeover can slip in front of it either.
+     */
+    private function fenceDecisionUnitStatement(string $query):string{
+        if($this->decisionUnitFenceDepth>0)return $query;
+        $claim=$this->ownedDecisionClaim;
+        if($claim===null)return $query;
+        $sql=ltrim((string)$query);
+        if($sql==='')return $query;
+        if(preg_match('/'.PaymentExecutionRule::DECISION_UNIT_UNFENCED_STATEMENTS.'/i',$sql)===1){
+            // Transaction control and session configuration are never fenced: an unwind must never be
+            // blocked, and `START TRANSACTION` is what opens the transaction the fence then holds. Only the
+            // fact that the unit's own transaction is open is tracked, and only to decide whether a
+            // statement inside it needs its window re-proved alone or renewed as well.
+            if(stripos($sql,'START')===0)$this->decisionUnitInTransaction=true;
+            elseif(stripos($sql,'ROLLBACK')===0)$this->decisionUnitInTransaction=false;
+            return $query;
+        }
+        $inTransaction=$this->decisionUnitInTransaction;
+        if(stripos($sql,'COMMIT')===0)$this->decisionUnitInTransaction=false;
+        $now=PaymentExecutionSupport::now();
+        $this->decisionUnitFenceDepth++;
+        try{
+            $live=$this->repository->fenceDecisionClaimWindow((int)$claim['claim_id'],(int)$claim['generation'],(string)$claim['token'],$inTransaction?null:$this->claimLease($now),$now);
+        }finally{
+            $this->decisionUnitFenceDepth--;
+        }
+        if(!$live)throw new DecisionClaimWindowClosed(self::DECISION_WINDOW_CLOSED_REASON.':statement:'.$this->decisionUnitName);
+        return $query;
     }
 
     /** The recorded decision a delivery converges on, or the recorded state when the event owes one. */
@@ -617,11 +739,12 @@ final class PaymentEventIntakeService {
             'evidence_reference'=>'dzn_phase_2a2t_event:'.(string)$event->uid,
         );
         $key='dzn_phase_2a2t_evidence:'.(string)$event->uid.':'.$evidenceKind;
-        // [C10-2] The R1 submission is one work unit of the decision operation: the owner must still hold
-        // its bounded, unexpired window before it may submit anything to R1.
-        $this->assertDecisionWorkWindow('r1_evidence_submission');
+        // [C10-2]/[C11-1] The R1 submission is one work unit of the decision operation: the owner must
+        // still hold its bounded, unexpired window before it may submit anything to R1, and every statement
+        // R1 runs inside its own transaction is fenced by that window, so a generation whose window closes
+        // mid-submission commits nothing of it.
         try{
-            $result=$this->payments->ingest($input,$key);
+            $result=$this->decisionWorkUnit('r1_evidence_submission',fn():array=>$this->payments->ingest($input,$key));
         }catch(\InvalidArgumentException $e){
             return $this->refusedSubmission($evidenceKind,$obligationId,null,null);
         }
@@ -691,26 +814,27 @@ final class PaymentEventIntakeService {
 
     /** Delegate exactly one R2 command with a deterministic, decision-derived key (§10.1 rule 2). */
     private function r2(array $state,string $step,string $occurredAt,?int $purchaseId=null,?int $evidenceId=null,?int $obligationId=null):void{
-        // [C10-2] Each R2 command is its own work unit: the window is re-asserted and renewed immediately
-        // before it, so a generation whose lease has expired (or whose claim a successor took over)
-        // stops before the consequence instead of running it after its fence was lost.
-        $this->assertDecisionWorkWindow('r2_'.$step);
         $reference='dzn_phase_2a2t_r2_consequence:'.(int)$state['collection_intent_id'].':'.$step;
         $input=array('evidence_channel'=>'provider_evidence','evidence_reference'=>$reference,'evidence_at'=>$occurredAt,'confirmed'=>true);
-        if($step==='confirm_intent'){
-            (new CollectionIntentService())->confirm((int)$state['collection_intent_id'],$input,$reference);
-        }elseif($step==='confirm_cycle'){
-            (new RenewalCycleService())->confirmCollection((int)$state['renewal_cycle_id'],$input,$reference);
-        }elseif($step==='failure'){
-            $input['failure_reason_code']='provider_payment_failed';
-            (new CollectionIntentService())->recordFailure((int)$state['collection_intent_id'],$input,$reference);
-        }elseif($step==='refund'){
-            $input['purchase_id']=$purchaseId;
-            $input['evidence_id']=$evidenceId;
-            $input['obligation_id']=$obligationId;
-            $input['kind']='refund';
-            (new RefundReviewService())->recordRefundEvidence($input,$reference);
-        }
+        // [C10-2]/[C11-1] Each R2 command is its own work unit: the window is proved and renewed immediately
+        // before it and then fences every statement the command runs inside its own transaction, so a
+        // generation whose window closes mid-command commits no part of that consequence.
+        $this->decisionWorkUnit('r2_'.$step,function()use($step,$state,$input,$reference,$purchaseId,$evidenceId,$obligationId):void{
+            if($step==='confirm_intent'){
+                (new CollectionIntentService())->confirm((int)$state['collection_intent_id'],$input,$reference);
+            }elseif($step==='confirm_cycle'){
+                (new RenewalCycleService())->confirmCollection((int)$state['renewal_cycle_id'],$input,$reference);
+            }elseif($step==='failure'){
+                $input['failure_reason_code']='provider_payment_failed';
+                (new CollectionIntentService())->recordFailure((int)$state['collection_intent_id'],$input,$reference);
+            }elseif($step==='refund'){
+                $input['purchase_id']=$purchaseId;
+                $input['evidence_id']=$evidenceId;
+                $input['obligation_id']=$obligationId;
+                $input['kind']='refund';
+                (new RefundReviewService())->recordRefundEvidence($input,$reference);
+            }
+        });
     }
 
     private function refusal(string $reason,string $state='refused'):array{

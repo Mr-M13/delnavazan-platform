@@ -13,7 +13,10 @@
 > adapter-sealed descriptor), `dzn_payment_provider_event_receipts`, `dzn_payment_provider_events`,
 > `dzn_payment_provider_event_decisions` and `dzn_payment_provider_event_decision_claims` (the mutable
 > per-event decision claim, whose lease is the bounded window its owner re-proves and renews immediately
-> before every R1/R2 work unit it runs). Every table declares `id bigint unsigned NOT NULL AUTO_INCREMENT`
+> before every R1/R2 work unit it runs — and, since correction round 11, from inside each unit's own
+> transaction before every statement that unit runs, so the row is held for the whole transaction a unit
+> runs in and a unit whose window closed mid-transaction is rolled back rather than committed in part).
+> Every table declares `id bigint unsigned NOT NULL AUTO_INCREMENT`
 > with `PRIMARY KEY(id)` and `uid char(26) NOT NULL` with `UNIQUE uid(uid)`; every `*_id` reference is
 > `bigint unsigned` with a declared named index and a declared parent — a Phase-T table or a frozen
 > external authoritative parent (`students`, `commercial_offers`, `commercial_purchases`,

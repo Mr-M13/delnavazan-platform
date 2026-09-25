@@ -35,7 +35,7 @@ $fixture=get_option('dzn_phase_2a2t_concurrency_fixture');
 dzn_tcw_assert(is_array($fixture)&&count($fixture['rows']??array())>=2,'the concurrency fixture must exist');
 wp_set_current_user(1);
 $mode=(string)$fixture['mode'];
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)){
     if(!defined('DZN_PLATFORM_PAYMENT_TEST_VAULT'))define('DZN_PLATFORM_PAYMENT_TEST_VAULT',true);
     PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
     dzn_tcw_assert(isset($fixture['webhook']['selector'],$fixture['webhook']['body'],$fixture['webhook']['body_changed']),'the duplicate-webhook race fixture must exist');
@@ -61,6 +61,29 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
         };
         add_action('dzn_phase_2a2t_after_provider_event_decision_claim',$stall,10,2);
     }
+    // [C11-1] The in-unit fence race: the first worker stalls *inside* the R1 (or R2) mutation it is
+    // running, with the bounded window that unit is running inside aged past expiry. The fence of the
+    // unit's own transaction must therefore roll that unit back before its next statement — the stale
+    // generation commits no part of it and releases the claim nobody is working inside any more — and the
+    // second worker, which delivers while the first is stalled and can own nothing, records what the stale
+    // generation actually committed before completing the event's decision as the next generation.
+    if(in_array($mode,array('stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)&&$gate!==''&&is_dir($gate)){
+        $stall=function(...$arguments)use($gate,$worker,$wpdb,$p):void{
+            if($worker!=='w1')return;
+            file_put_contents($gate.'/w1.work','1',FILE_APPEND);
+            // The unit this worker is running inside is now older than the window it was granted: exactly
+            // what a unit that outlives DECISION_CLAIM_LEASE_SECONDS produces, expressed here without
+            // waiting two minutes. It is written inside the unit's own transaction, so the fence of that
+            // transaction is the only thing that can stop the unit.
+            $eventId=(int)$wpdb->get_var($wpdb->prepare("SELECT provider_event_id FROM {$p}payment_provider_event_decision_claims WHERE active_claim_slot=1 ORDER BY id DESC LIMIT 1"));
+            $wpdb->query($wpdb->prepare("UPDATE {$p}payment_provider_event_decision_claims SET lease_expires_at=%s WHERE provider_event_id=%d AND active_claim_slot=1",gmdate('Y-m-d H:i:s',time()-5),$eventId));
+            file_put_contents($gate.'/w1.aged','1');
+            $waited=0;
+            while(!file_exists($gate.'/w2.probe.json')&&$waited<900){usleep(100000);$waited++;}
+        };
+        if($mode==='stale_owner_inside_r1_unit')add_action('dzn_phase_2a2r1_after_evidence_insert',$stall,10,1);
+        else add_action('dzn_phase_2a2r2_after_collection_intent_event_insert',$stall,10,2);
+    }
     // The two deliveries must be in flight together: announce this worker, then wait for its sibling.
     if($gate!==''&&is_dir($gate)){
         file_put_contents($gate.'/'.$worker.'.started','1');
@@ -72,6 +95,52 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
             $waited=0;
             while(!file_exists($gate.'/w1.claimed')&&$waited<900){usleep(100000);$waited++;}
         }
+    }
+    if(in_array($mode,array('stale_owner_inside_r1_unit','stale_owner_inside_r2_unit'),true)){
+        $deliver=function(string $body)use($webhook):array{
+            $signature='t='.time().',v1='.hash_hmac('sha256',time().'.'.$body,(string)$webhook['secret']);
+            try{
+                return array('outcome'=>(new PaymentEventIntakeService())->receive('stripe',(string)$webhook['selector'],$body,array('stripe-signature'=>$signature)),'error'=>null);
+            }catch(Throwable$e){
+                return array('outcome'=>null,'error'=>$e->getMessage());
+            }
+        };
+        $raceBody=(string)$webhook['body'];
+        if($worker==='w1'){
+            $result=$deliver($raceBody);
+            if($gate!=='')file_put_contents($gate.'/w1.json',(string)wp_json_encode(array('worker'=>'w1','operation'=>'webhook_delivery','outcome'=>$result['outcome'],'error'=>$result['error'],'at'=>gmdate('Y-m-d H:i:s'))));
+            if($result['error']!==null)throw new RuntimeException('the stale generation must stop as a controlled closed window, never as a failure: '.$result['error']);
+            echo "phase-2a2t-concurrency-worker w1 done\n";
+            return;
+        }
+        // The contender may only deliver once the owner is inside the mutation with its window aged, so the
+        // probe really races a unit that is running outside its window.
+        $waited=0;
+        while(!file_exists($gate.'/w1.aged')&&$waited<600){usleep(100000);$waited++;}
+        dzn_tcw_assert(file_exists($gate.'/w1.aged'),'the stale generation never aged its window inside the work unit');
+        $probe=$deliver($raceBody);
+        if($gate!=='')file_put_contents($gate.'/w2.probe.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'probe_delivery','outcome'=>$probe['outcome'],'error'=>$probe['error'],'at'=>gmdate('Y-m-d H:i:s'))));
+        $waited=0;
+        while(!file_exists($gate.'/w1.json')&&$waited<900){usleep(100000);$waited++;}
+        dzn_tcw_assert(file_exists($gate.'/w1.json'),'the stale generation never returned');
+        // What the stale generation actually committed, observed after its unit was rolled back and before
+        // this delivery completes the decision: the fence's proof that the stale unit committed nothing.
+        $observation=array(
+            'evidence'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id'])),
+            'settlements'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id'])),
+            'intent'=>(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id'])),
+            'cycle'=>(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id'])),
+            'intent_events'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}collection_intent_events WHERE collection_intent_id=%d AND event_type='confirmed'",(int)$webhook['intent_id'])),
+            'intent_commands'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}collection_intent_commands WHERE collection_intent_id=%d AND operation='confirm_collection_intent'",(int)$webhook['intent_id'])),
+            'claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d",(int)$fixture['prepared_event_id'])),
+            'live_claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",(int)$fixture['prepared_event_id'])),
+        );
+        if($gate!=='')file_put_contents($gate.'/w2.pre.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'stale_state_observation','probe_outcome'=>$probe['outcome'],'observation'=>$observation,'at'=>gmdate('Y-m-d H:i:s'))));
+        $second=$deliver($raceBody);
+        if($gate!=='')file_put_contents($gate.'/w2.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'webhook_delivery','outcome'=>$second['outcome'],'error'=>$second['error'],'at'=>gmdate('Y-m-d H:i:s'))));
+        if($second['error']!==null)throw new RuntimeException($second['error']);
+        echo "phase-2a2t-concurrency-worker w2 done\n";
+        return;
     }
     $body=(string)($mode==='conflicting_duplicate_webhook'&&$worker==='w2'?$webhook['body_changed']:$webhook['body']);
     $signature='t='.time().',v1='.hash_hmac('sha256',time().'.'.$body,(string)$webhook['secret']);

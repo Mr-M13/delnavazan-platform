@@ -270,20 +270,41 @@ if(!str_contains($seam,'function decisionClaim('))throw new RuntimeException('[C
 if(!str_contains($intake,'outstandingDecisionClaims'))throw new RuntimeException('[C9-1] the live decision claims must be visible in the diagnostics');
 
 // [C10-2] Ownership covers the whole decision operation, not just the row the decision is appended
-// through: the claim's bounded lease is re-proved and renewed *before* every R1/R2 work unit, it can never
+// through: the claim's bounded window is re-proved and renewed *before* every R1/R2 work unit, it can never
 // be renewed once it has expired, and a generation whose window has closed stops before the work instead
-// of discovering the loss when it appends.
-if(!str_contains($providerRepository,'function renewDecisionClaim('))throw new RuntimeException('[C10-2] the decision work-unit gate statement is missing');
-foreach(array("claim_state='claimed'","claim_generation=%d","claim_token_digest=%s","active_claim_slot=1","lease_expires_at IS NOT NULL AND lease_expires_at>=%s") as $needle)
-    if(!str_contains($providerRepository,$needle))throw new RuntimeException('[C10-2] the gate must re-prove the live generation and an unexpired lease: '.$needle);
+// of discovering the loss when it appends. [C11-1] It covers the unit's whole transaction as well, at the
+// connection's statement boundary: every statement the unit's own transaction runs is fenced from inside
+// that transaction, so the unit holds the claim row for its whole transaction and a unit whose window has
+// closed is rolled back before the next statement instead of committing the mutation it had started.
+if(!str_contains($providerRepository,'function fenceDecisionClaimWindow('))throw new RuntimeException('[C10-2] the decision work-unit window fence is missing');
+if(!str_contains($providerRepository,'function fenceDecisionClaimWindow(int $claimId,int $expectedGeneration,string $tokenDigest,?string $leaseUntil,string $now):bool'))throw new RuntimeException('[C11-1] the fence must prove the window at every statement and renew it only outside a transaction');
+$fenceStart=strpos($providerRepository,'function fenceDecisionClaimWindow(');
+$fenceBody=substr($providerRepository,$fenceStart,strpos($providerRepository,'public function duplicate(',$fenceStart)-$fenceStart);
+foreach(array("claim_state='claimed'","claim_generation=%d","claim_token_digest=%s","active_claim_slot=1","lease_expires_at IS NOT NULL AND lease_expires_at>=%s","FOR UPDATE","lease_expires_at=%s") as $needle)
+    if(!str_contains($fenceBody,$needle))throw new RuntimeException('[C10-2] the gate must re-prove the live generation and an unexpired lease: '.$needle);
+if(strpos($fenceBody,'FOR UPDATE')>strpos($fenceBody,'SET lease_expires_at=%s'))throw new RuntimeException('[C11-1] the locking proof must precede the renewal it licenses');
+if(!str_contains($fenceBody,"if(\$live===null||\$live==='')return false;"))throw new RuntimeException('[C11-1] the fence verdict must be the locking read, never an affected-row count');
+if(!str_contains($fenceBody,'if($leaseUntil===null)return true;'))throw new RuntimeException('[C11-1] a statement inside the unit transaction must be bounded by the window it was granted, not by a fresh renewal');
 if(!str_contains($seam,'class DecisionClaimWindowClosed'))throw new RuntimeException('[C10-2] the controlled closed-window stop is missing');
-if(!str_contains($intake,'private function assertDecisionWorkWindow('))throw new RuntimeException('[C10-2] the per-work-unit window gate is missing');
+if(!str_contains($intake,'private function assertDecisionWorkWindow('))throw new RuntimeException('[C10-2] the per-work-unit entry gate is missing');
 if(!str_contains($intake,'private function openDecisionWindow(')||!str_contains($intake,'private function closeDecisionWindow('))throw new RuntimeException('[C10-2] the decision window must be opened and closed around the operation');
-if(!str_contains($intake,"!==1)throw new DecisionClaimWindowClosed("))throw new RuntimeException('[C10-2] a gate that affects no row must stop the worker');
+if(!str_contains($intake,"DecisionClaimWindowClosed(self::DECISION_WINDOW_CLOSED_REASON"))throw new RuntimeException('[C11-1] a fence that finds no live window must stop the worker');
 if(!str_contains($intake,'catch(DecisionClaimWindowClosed $e)'))throw new RuntimeException('[C10-2] a closed window must be a controlled stop, never a failure');
 if(strpos($intake,'openDecisionWindow(')>strpos($intake,'$decision=$decide();'))throw new RuntimeException('[C10-2] the window must be opened before any decision work runs');
-if(strpos($intake,"assertDecisionWorkWindow('r1_evidence_submission')")>strpos($intake,'$this->payments->ingest('))throw new RuntimeException('[C10-2] the R1 submission must be gated by the window');
-if(strpos($intake,"assertDecisionWorkWindow('r2_'.")>strpos($intake,"'dzn_phase_2a2t_r2_consequence:'"))throw new RuntimeException('[C10-2] every R2 command must be gated by the window');
+if(!str_contains($rule,"DECISION_UNIT_FENCE_FILTER='query'"))throw new RuntimeException('[C11-1] the statement boundary the unit is fenced at must be declared once');
+if(!str_contains($rule,"DECISION_UNIT_UNFENCED_STATEMENTS='^(START\\s+TRANSACTION|ROLLBACK|SET\\s)'"))throw new RuntimeException('[C11-1] the statements a fence must never block must be declared once');
+if(!str_contains($intake,'private function decisionWorkUnit(string $unit,callable $work):mixed'))throw new RuntimeException('[C11-1] the fenced work unit is missing');
+if(!str_contains($intake,'private function armDecisionUnitFence(string $unit):void')||!str_contains($intake,'private function disarmDecisionUnitFence():void'))throw new RuntimeException('[C11-1] the statement fence must be registered for exactly one unit');
+if(!str_contains($intake,'private function fenceDecisionUnitStatement(string $query):string'))throw new RuntimeException('[C11-1] the statement fence itself is missing');
+if(!str_contains($intake,'add_filter(PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER,$fence,self::DECISION_UNIT_FENCE_PRIORITY,1)'))throw new RuntimeException('[C11-1] the fence must be registered on the declared statement boundary');
+if(!str_contains($intake,'remove_filter(PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER,$fence,self::DECISION_UNIT_FENCE_PRIORITY)'))throw new RuntimeException('[C11-1] the fence must be removed again in a finally');
+if(!str_contains($intake,'if($this->decisionUnitFenceDepth>0)return $query;'))throw new RuntimeException('[C11-1] the fence must never fence its own proof statement');
+if(!str_contains($intake,'preg_match(\'/\'.PaymentExecutionRule::DECISION_UNIT_UNFENCED_STATEMENTS.\'/i\',$sql)'))throw new RuntimeException('[C11-1] the fence must pass transaction control and unwinding through');
+if(strpos($intake,"decisionWorkUnit('r1_evidence_submission'")>strpos($intake,'$this->payments->ingest('))throw new RuntimeException('[C10-2] the R1 submission must be fenced by the window');
+if(!str_contains($intake,"\$result=\$this->decisionWorkUnit('r1_evidence_submission',fn():array=>\$this->payments->ingest(\$input,\$key));"))throw new RuntimeException('[C11-1] the R1 submission must run as one fenced unit');
+if(!str_contains($intake,"\$this->decisionWorkUnit('r2_'.\$step,"))throw new RuntimeException('[C11-1] every R2 command must run as one fenced unit');
+if(strpos($intake,"\$this->decisionWorkUnit('r2_'.\$step,")>strpos($intake,'(new CollectionIntentService())->confirm('))throw new RuntimeException('[C10-2] every R2 command must be gated by the window');
+if(!str_contains($intake,'$this->abandonDecisionClaim($claim);')||substr_count($intake,'$this->abandonDecisionClaim($claim);')<3)throw new RuntimeException('[C11-1] a stale generation must release the claim it appended nothing to');
 if(!str_contains($intake,"PaymentExecutionSupport::hook('dzn_phase_2a2t_after_provider_event_decision_claim'"))throw new RuntimeException('[C10-2] the owned claim must be observable before any decision work runs');
 if(!str_contains($rule,'It bounds the work, not merely the row'))throw new RuntimeException('[C10-2] the lease must be documented as the bounded window the owner works inside');
 
@@ -374,7 +395,7 @@ foreach(array(
     'submit_vs_cancel_in_flight','redrive_after_crash','concurrent_expired_lease','takeover_reissue_fenced',
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
     'conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery',
-    'stale_owner_after_lease_expiry',
+    'stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
 if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
 if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');

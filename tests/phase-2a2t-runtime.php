@@ -166,4 +166,10 @@ $read=new PaymentExecutionReadService();
 dzn_t_assert((string)$read->command($commandId)['derived_state']==='completed','the read model must derive the completed state');
 dzn_t_assert(array_key_exists('refused',$read->commandStates())&&array_key_exists('released_claims',$read->descriptorRefusals()),'the diagnostics must report command states and descriptor refusals');
 dzn_t_assert((new PaymentExecutionService())->derivedState($commandId)==='completed','the derived state must be reproducible');
+
+// 8. The closed outbound boundary reports only locked vocabulary: a credential that is not configured, a
+// live execution that is not authorised and the cross-operation claim arbitration are each an attempt
+// reason the phase declares, never a provider's own status string and never a newly invented code.
+foreach(array('provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $reason)
+    dzn_t_assert(PaymentExecutionRule::member($reason,PaymentExecutionRule::ATTEMPT_REASONS),'the closed-boundary refusal must be locked vocabulary: '.$reason);
 echo "phase-2a2t-runtime: OK\n";

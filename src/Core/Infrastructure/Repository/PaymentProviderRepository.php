@@ -184,25 +184,43 @@ final class PaymentProviderRepository {
         ));
     }
     /**
-     * [C10-2] Fenced, lease-bounded ownership re-assertion immediately before one decision work unit.
+     * [C10-2]/[C11-1] Fenced, lease-bounded ownership proof of one decision work unit — taken at the
+     * unit's entry *and* inside the transaction the unit itself runs in, immediately before every statement
+     * that transaction executes (see `PaymentExecutionRule::DECISION_UNIT_FENCE_FILTER`).
      *
-     * One conditional statement proves, and only then extends, the bounded window the owner is about to
-     * work inside: the claim must still be `claimed` at this worker's own `claim_generation` and
+     * The locking read proves, and the extension that follows only ever continues, the bounded window the
+     * owner is working inside: the claim must still be `claimed` at this worker's own `claim_generation` and
      * `claim_token_digest`, still carry its live slot, **and** still hold an unexpired
-     * `lease_expires_at`. The affected-row count is the proof — `1` means this generation owns the
-     * event's decision and its window covers the unit about to run, `0` means the window has closed (the
-     * lease expired before the unit began, or a successor generation took the claim over) and the caller
-     * must perform no further decision or R1/R2 consequence work at all.
+     * `lease_expires_at`. A read that returns no row is the proof that the window has closed — the lease
+     * lapsed before this point, or exactly one successor generation took the claim over — and the caller
+     * must perform no further decision or R1/R2 consequence work at all. The returned verdict is a read,
+     * never an affected-row count, so a renewal that happens to write the same second is never mistaken for
+     * a closed window.
      *
-     * The statement can never resurrect an expired lease (`lease_expires_at >= $now` is a condition, not
-     * an assignment target), so an expired generation stops instead of continuing past its window.
+     * `FOR UPDATE` is deliberate and load-bearing: taken inside a work unit's own transaction, the read
+     * locks the claim row for the rest of that transaction, so a decision-claim takeover — which needs this
+     * same row and an *expired* lease — can never interleave with a unit, and a unit can never commit a
+     * statement outside the window it was granted. `$leaseUntil` is `null` for a statement that runs inside
+     * the unit's own transaction, whose window was already granted at the unit's entry and must simply
+     * cover every statement the transaction runs: the unit then stays bounded by the window it was given.
+     * It names the renewed lease for a statement that runs outside any transaction — R1 records its routing
+     * write there — so the statement itself runs inside a freshly renewed window and nothing can slip in
+     * front of it. The extension is a continuation, never a resurrection: when the read proved no live
+     * window, no lease is written at all.
      */
-    public function renewDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest,string $leaseUntil,string $now):int{
+    public function fenceDecisionClaimWindow(int $claimId,int $expectedGeneration,string $tokenDigest,?string $leaseUntil,string $now):bool{
         global $wpdb;
-        return (int)$wpdb->query($wpdb->prepare(
-            "UPDATE {$this->p}payment_provider_event_decision_claims SET lease_expires_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s",
-            $leaseUntil,$now,$claimId,$expectedGeneration,$tokenDigest,$now
+        $live=$wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$this->p}payment_provider_event_decision_claims WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=%s FOR UPDATE",
+            $claimId,$expectedGeneration,$tokenDigest,$now
         ));
+        if($live===null||$live==='')return false;
+        if($leaseUntil===null)return true;
+        if($wpdb->query($wpdb->prepare(
+            "UPDATE {$this->p}payment_provider_event_decision_claims SET lease_expires_at=%s,updated_at=%s WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1",
+            $leaseUntil,$now,$claimId,$expectedGeneration,$tokenDigest
+        ))===false)throw new \RuntimeException('Decision claim window persistence failed');
+        return true;
     }
 
     public function duplicate(\Throwable $e):?string{

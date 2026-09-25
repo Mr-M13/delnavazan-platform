@@ -12,7 +12,7 @@ case $mode in
   submit_vs_cancel_in_flight|redrive_after_crash|concurrent_expired_lease|takeover_reissue_fenced|\
   fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure|\
   conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|\
-  stale_owner_after_lease_expiry) ;;
+  stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit) ;;
   *) echo "Unknown Phase T concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives
@@ -40,7 +40,7 @@ waitfor "$gate/w1.started" || { echo "holder worker never gated"; cat "$gate/w1.
 wprun "$gate" w2 "$repo/tests/phase-2a2t-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 w2=$!
 case $mode in
-  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry)
+  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit)
     # [C8-3] Both deliveries must be in flight together, so neither worker holds a lock: each announces
     # itself in the gate directory and waits for its sibling before submitting the same provider event
     # identity, and the unique `provider_event` index arbitrates the race. [C9-1] The decision-claim
@@ -50,6 +50,10 @@ case $mode in
     # worker announces itself from inside the decision it owns, ages its own lease past expiry and then
     # waits for the second worker's record, so the successor takes the claim over *before* the first
     # workers resumes its decision work.
+    # [C11-1] `stale_owner_inside_r1_unit` / `stale_owner_inside_r2_unit` reuse the gate inside a work
+    # unit: the first worker stalls *inside* an R1/R2 mutation with its own window aged, the second worker
+    # delivers while it is stalled (it can own nothing and works nowhere), and once the fence has rolled the
+    # stalled unit back and released the claim, the second worker completes the event's decision.
     waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
     ;;
   unrelated_students)

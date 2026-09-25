@@ -7,10 +7,52 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 Schema 29 / migrations `028_payment_execution_seam_provider_adapter` and
 `029_payment_event_decision_claim_authority` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260925.10`, additive on top of the Phase-V candidate
+`phase2a2t-payment-execution-seam-stripe-adapter-20260925.11`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 10, SHA-256
-`5c60d7baec801045217919016aa097712e2e215e9d755bb87cd3faaf4e71b343`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 11, SHA-256
+`11aa1ce1162b949d86b0309cf40dc8df8fe1449d2ccc2e6049b487b7310cac0c`).
+
+**Correction round 11** (build `…20260925.11`) applies the independent review of the candidate
+`d60544a7c30231ec82b887b8238561b4c46dfce0` / tree `0f000a8d9df3312488534729efd44ce961579f27`
+additively, without rewriting that history. One blocking finding is closed:
+
+- **A work unit is fenced for the duration of its work, not merely at its entry.** The round-10 renewal
+  proved and renewed the claim's bounded window *before* an R1/R2 unit ran, in its own transaction — but
+  the R1 submission and every R2 command open separate transactions and fire WordPress hooks, so a unit
+  could outlive the 120-second lease, allow another worker to take the expired claim over atomically, and
+  still commit the mutation it had already started. The window is now fenced at the **connection's
+  statement boundary, from inside the unit's own transaction**: the intake registers one listener on the
+  declared `DECISION_UNIT_FENCE_FILTER` (`query`) for exactly the unit's duration and removes it in a
+  `finally`, and that listener — which never rewrites a statement, passes `START TRANSACTION`/`ROLLBACK`/
+  `SET …` through untouched and never fences its own proof — precedes every other statement (the unit
+  transaction's `COMMIT` included) with one `SELECT … FOR UPDATE` of the claim row that must return
+  exactly one row: this worker's own generation and token, `claimed`, its live slot and an unexpired
+  lease; the lease is renewed first only for a statement that runs outside any transaction. The locking
+  read therefore holds the claim row for the rest of the unit's transaction — a take-over needs that same
+  row *and* an expired lease, so it can never interleave with a unit — and a window that closed before the
+  next statement raises the controlled `DecisionClaimWindowClosed` *before* that statement executes, so
+  the R1/R2 service owning the transaction rolls the whole unit back: the stale generation commits no
+  statement of the unit it had started, releases the claim it appended nothing to (fenced by its own
+  generation and token) and converges, and the next generation completes the event's decision exactly
+  once.
+
+`tests/phase-2a2t-contract.php` asserts the corrected source contract, and
+`tests/phase-2a2t-concurrency-runner.sh` adds `stale_owner_inside_r1_unit` and
+`stale_owner_inside_r2_unit` (twenty-two modes): the owner stalls inside the R1 mutation (respectively
+the R2 mutation) with the window of that unit aged past expiry while a contender delivers the same event,
+the contender performs no work and appends nothing, and the verifier proves from the successor's recorded
+observation that the stale unit was rolled back inside its own transaction — no R1 evidence and no
+settlement in the R1 case, after which the successor's own R1 and R2 units apply the ordered consequence
+exactly once (one confirmed intent, one collected cycle), and in the R2 case the R1 unit that finished
+inside its window stays committed while the intent is still `submitted`, the cycle still
+`payment_required` and neither a confirmation event nor a confirmation command exists; that mode's event
+occurrence instant is deliberately older than the settlement its own R1 unit committed, so the
+successor's re-decision is the controlled `stale_provider_event` refusal and no generation confirms or
+collects anything. Both leave exactly one R1 evidence/settlement, one decision appended by the successor,
+one released generation-1 claim and one settled successor claim. The same round adds the runtime suite's missing locked-vocabulary
+assertion for `provider_credentials_unconfigured`, `live_execution_not_authorised` and
+`dispatch_in_flight` (a pre-existing self-inconsistency in the static contract suite, which required
+those three strings in a file that never contained them).
 
 **Correction round 10** (build `…20260925.10`) applies the independent review of the candidate
 `5d8c379f92cef13baf0a818850661fcb7658509a` / tree `47f9062eea42aabf75fdc21bb80190c07f7fc4be`
@@ -151,7 +193,7 @@ commit was rewritten.
   over by exactly one fenced generation and reconciled before any re-issue.
 - **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
   §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
-  twenty-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  twenty-two-mode concurrency matrix) are written and wired but **could not be executed in this environment
   because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
   mandatory acceptance gate and remains outstanding.
 - **Candidates and merge:** single coherent candidate, no merge, no deployment.
