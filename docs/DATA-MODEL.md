@@ -1,5 +1,27 @@
 # Delnavazan Platform Conceptual Data Model
 
+> **Phase 2A.2-U storage (Schema 030, candidate) — not authoritative until independently reviewed and
+> merged:** finance, payability, effective-dated teacher rates, per-Lesson rate/currency snapshots,
+> teacher compensation statements, reconciliation and audited corrections. Twenty-one additive tables in
+> migration `030_finance_payability_rate_statement_authority`: the immutable singleton root
+> `dzn_finance_policy_roots` (the global policy serialisation root) and the lazily created per-Teacher
+> `dzn_finance_teacher_roots`; the versioned `dzn_finance_policies` (immutable in value, one auditable
+> `status` column, unset as the absence of a covering version) with its `dzn_finance_policy_commands`
+> result store; `dzn_finance_teacher_rates` (immutable identity/amount/currency/`effective_from`, exactly
+> three mutable columns — `effective_until`, `status`, `active_slot`) with its append-only
+> `dzn_finance_teacher_rate_events` and `dzn_finance_teacher_rate_commands`; the immutable
+> `dzn_finance_lesson_snapshots` (one per canonical Lesson, with its recorded rate/currency amount and
+> derivation digest) with the append-only `dzn_finance_snapshot_corrections` chain and
+> `dzn_finance_snapshot_commands`; the append-only `dzn_finance_payability_evaluations` chain with
+> `dzn_finance_payability_overrides` and `dzn_finance_payability_commands`; `dzn_finance_statements`
+> (mutable only in `state`, the supersession edge and the one-time `issued_at`/`issued_by` evidence) with
+> immutable `dzn_finance_statement_lines`, append-only `dzn_finance_statement_events` and
+> `dzn_finance_statement_commands`; the append-only `dzn_finance_reconciliation_runs`,
+> `dzn_finance_reconciliation_findings` and `dzn_finance_reconciliation_commands`; and the sole freely
+> mutable `dzn_finance_exceptions`. Every amount is an exact integer number of minor units with an
+> explicit ISO-4217 currency; there is no float, no rounding, no conversion and no per-item FX anywhere in
+> the phase, and the phase stores no student price, obligation, settlement, payout, bank or tax fact.
+
 > **Phase 2A.2-T storage (Schema 029, candidate) — not authoritative until independently reviewed and
 > merged:** provider-neutral payment execution only. Fifteen additive seam tables in migration `028` plus
 > the one-table decision-claim aggregate of migration `029_payment_event_decision_claim_authority`

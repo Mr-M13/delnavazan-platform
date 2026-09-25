@@ -14,7 +14,14 @@
 > collection modes and collection intents, recovery/lapse representation, a provider-neutral
 > refund/reversal review trajectory and continuous cross-Term protection. R2 reimplements no R1
 > pricing, acceptance, funding derivation, protected claim or Term binding, makes no provider call,
-> delivers no notification and decides none of the four deferred product questions. Neither state is
+> delivers no notification and decides none of the four deferred product questions. Phase 2A.2-U
+> (Schema 30, candidate) adds the Finance authority above the canonical facts: a versioned four-key finance policy
+> registry, effective-dated scoped teacher rates, one immutable per-Lesson rate/currency snapshot per
+> canonical Lesson, a versioned payability derivation with an audited additive override, single-currency
+> per-Teacher compensation statements, read-only exact-integer reconciliation and append-only audited
+> corrections. It creates no ledger, journal, invoice, tax rule, payout, bank detail, provider call,
+> credential, route or front-end surface, and it mutates no canonical, commercial or provider row.
+> Neither state is
 > deployed; Stripe, notification delivery, portals, Theme, refund academic consequences, automatic
 > charging, recovery automation, payouts and deployment remain outside Platform authority.
 

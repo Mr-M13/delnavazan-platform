@@ -3,6 +3,51 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-U — Finance, Payability, Effective-Dated Teacher Rates, Statements & Audited Corrections — candidate, unmerged — 2026-09-25
+
+Schema 30 / migration `030_finance_payability_rate_statement_authority` / build
+`phase2a2u-finance-payability-rate-statement-20260925.1`, additive on the Phase-T candidate tree at
+Schema 29 and explicitly scoped to that recorded base (contract §20 prerequisite 2). It implements the
+contract `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md` (SHA-256
+`bacd87afc1f0435716163d64d1b3ed9401ef529201bdde78cc974df7fbbe4900`).
+
+- **A versioned finance policy registry** with four declared keys and a single reason-code allowlist; a
+  version is immutable in value with exactly one auditable `status` column that moves at most twice in one
+  declared direction, unset is the absence of a covering version rather than a null-valued row, resolution
+  is by the covered instant and never by the live row, and `FINANCE_STATEMENT_TIMEZONE` is deliberately
+  never seeded (see `docs/FINANCE-POLICY-REGISTRY.md`).
+- **Temporal admissibility for both effective-dated registries.** A policy version whose `effective_from`
+  is not strictly later than its key's recorded consumption maximum is refused
+  `policy_effective_from_precedes_recorded_consumption` with a refused command row and a matching
+  teacher-less exception and no version written; a rate whose `effective_from` is not strictly later than
+  the Teacher's greatest snapshot instant is refused `rate_effective_from_precedes_snapshot`. The seeded
+  singleton `finance_policy_roots` orders every policy change against every policy consumer (exclusively
+  by the mutation, shared and first by the consumers), so a recorded fact can never be out-covered after
+  the fact, and §13.4 rule 14 proves the same invariant over the recorded pairs and triples.
+- **Effective-dated teacher rates** with explicit scope, currency and half-open intervals, exactly three
+  mutable columns through at most two conditional statements, withdrawn coverage detected at the winning
+  specificity before any scope fallback, and no retroactive rewrite.
+- **One immutable per-Lesson snapshot** per canonical Lesson, derived from the rate in force at the
+  Lesson's locked occurrence-start instant under the policy version that covers that instant, with an
+  exact integer amount, an explicit currency and a re-verified derivation digest.
+- **A versioned payability derivation** from canonical facts with `pending` blocking issuance and an
+  audited, additive administrator override that names the exact derivation it replaced.
+- **Teacher compensation statements** per Teacher and half-open period with immutable lines, recomputed
+  totals, a fail-closed issuance gate and one-time `issued_at`/`issued_by` evidence stamped by the same
+  conditional `draft → issued` transition, plus append-only withdrawal and supersession.
+- **Read-only, exact-integer reconciliation** with one bounded finding code and one exact pair of values
+  per difference; a run repairs nothing, resolves no exception and tolerates nothing.
+- **Audited corrections** that name their exact target row and digest and never mutate it, with a snapshot
+  correction that restates the immutable intro policy pair and requires the affected issued statement's
+  supersession.
+- **Five administrator-only capabilities**, repaired per capability and removed from the Teacher role; no
+  Finance route, provider call, credential, schedule or front-end surface; no ledger, invoice, payout or
+  bank/tax field; and no mutation of any upstream or provider row.
+
+**Its §18 contract, migration, runtime, statement, reconciliation, corruption, failure and concurrency
+suites have not been executed: PHP and the disposable WordPress + MariaDB runtime are unavailable in the
+implementation environment**, so executing every suite on that runtime is a mandatory acceptance gate.
+
 ## Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter — candidate, unmerged — 2026-09-25
 
 Schema 29 / migrations `028_payment_execution_seam_provider_adapter` and

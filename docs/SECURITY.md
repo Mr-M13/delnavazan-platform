@@ -185,6 +185,12 @@ Logs must answer what happened without becoming a second sensitive database.
 - Notifications decides workflow eligibility; Meta transport only sends and
   reports provider results.
 - Finance owns payability/rate decisions; Stripe transport cannot insert Lessons.
+- Phase 2A.2-U (Schema 30, candidate) gives Finance five administrator-only capabilities, removes all of
+  them from the Teacher role and any student role, exposes no Finance route or front-end surface, stores
+  no payout, bank/IBAN/card or tax field, and limits every Finance write to the twenty-one declared
+  Finance tables plus digest-only `platform_audit_events` evidence and the three identity-only §17
+  `platform_outbox` intents — an audit row carries identifiers and digests only, and an outbox row
+  carries no amount, period bound, currency, reason code, entity id, template, recipient or message body.
 - Attendance owns evidence/outcome; Google adapter cannot directly publish a
   final state without the Attendance policy service.
 - Existing Amelia-dependent runtime stays isolated in Delnavazan Enhancements.

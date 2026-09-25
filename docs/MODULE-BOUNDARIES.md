@@ -1,5 +1,19 @@
 # Delnavazan Platform Module Boundaries
 
+> **Phase 2A.2-U candidate boundary (Schema 030, not authoritative until independently reviewed and
+> merged).** Finance owns payability, effective-dated teacher rates, per-Lesson rate/currency snapshots,
+> teacher compensation statements, reconciliation read models and audited corrections — and nothing
+> else. It adds no column to any existing table; it reads canonical Lessons, schedule versions, delivery
+> outcomes, academy obligations, Terms, Enrolments, Teacher Assignments and the R1/R2/T
+> commercial/payment facts through their owning validators and fails closed on a corrupt aggregate. It
+> creates no ledger, journal, invoice, tax/VAT rule, payout, bank/IBAN/card detail, remittance, provider
+> call, credential, notification delivery, public/Portal route or Theme change, and it mutates no
+> upstream row: the only tables a Finance code path may write outside the twenty-one declared Finance
+> tables are digest-only `platform_audit_events` evidence and the three identity-only §17
+> `platform_outbox` intents, both insert-only inside the transaction of the Finance row they evidence.
+> Five administrator-only capabilities exist, are repaired per capability, and no Teacher or Student
+> role holds one.
+
 > **Phase 2A.2-T candidate boundary (Schema 029, not authoritative until independently reviewed and
 > merged):** Core gains the provider-neutral payment-execution seam — the port, the request/outcome
 > vocabulary, the provider registry, the execution command/attempt/result authority with its single

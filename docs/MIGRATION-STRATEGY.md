@@ -1,5 +1,43 @@
 # Delnavazan Platform Migration Strategy
 
+## 030_finance_payability_rate_statement_authority (Phase 2A.2-U, candidate, unmerged)
+
+Additive on top of the Phase-T candidate tree at Schema 29. It creates exactly the twenty-one declared
+Finance tables (`finance_policy_roots`, `finance_teacher_roots`, `finance_policies`,
+`finance_policy_commands`, `finance_teacher_rates`, `finance_teacher_rate_events`,
+`finance_teacher_rate_commands`, `finance_lesson_snapshots`, `finance_snapshot_corrections`,
+`finance_snapshot_commands`, `finance_payability_evaluations`, `finance_payability_overrides`,
+`finance_payability_commands`, `finance_statements`, `finance_statement_lines`, `finance_statement_events`,
+`finance_statement_commands`, `finance_reconciliation_runs`, `finance_reconciliation_findings`,
+`finance_reconciliation_commands`, `finance_exceptions`), performs no `ALTER` on any existing table
+(including `platform_audit_events` and `platform_outbox`, which it never creates, alters or touches),
+backfills no domain fact and infers no rate, snapshot, evaluation, statement or correction. It writes
+exactly the three declared default policy versions — version 1 of `INTRO_PAYABILITY_POLICY`
+(`non_payable`), `STUDENT_NO_SHOW_COMPENSATION_POLICY` (`payable`) and
+`INTERRUPTION_COMPENSATION_POLICY` (`payable`), each `active` from the migration instant with reason
+`phase_u_declared_default` — and exactly one `finance_policy_roots` row (`root_key = 'finance_policy'`,
+insert-or-resolve on `UNIQUE root_key`). `FINANCE_STATEMENT_TIMEZONE` is deliberately **not** seeded:
+unset is the absence of a covering version, never a null-valued row.
+`verify_finance_payability_rate_statement_schema()` runs after migration 030, on current-schema
+verification and unconditionally before the schema option may advance to 30 — including the
+retained-030/stale-version path — and it rejects a missing or undeclared table, a non-InnoDB table, a
+missing `id bigint unsigned AUTO_INCREMENT` / `PRIMARY KEY (id)`, a `uid`/`reference_code` column outside
+the five declared handle tables (or a missing one on those five), a mutable column beyond the declared
+limits (the three rate columns, the single policy `status`, the statement
+state/supersession/one-time-issuance-evidence set and the declared exception state columns), a missing
+declared index, a `*_id` that is not the leftmost column of a named index, a parent outside the declared
+set (including **any** reference to the legacy `lesson_schedule_versions` table), a malformed digest
+column, a raw-reference or bank/tax/payout/invoice/ledger-named column, a smuggled table, a statement
+whose state and issuance evidence disagree, a partially recorded statement timezone triple, a correction
+whose intro policy pair is half-set or disagrees with the Lesson kind, two live statements overlapping, a
+rate scope/state/overlap violation, a null-valued or duplicate-instant policy row, a reason code outside
+its declared set, a missing or duplicated policy root, and — §13.4 rule 14 — a policy version that has
+stolen the coverage of an already-recorded dependent Finance fact. The R1, R2, T and canonical verifiers
+are re-run rather than duplicated, so the phase must add no column to any `commercial_*`, `recurring_*`,
+`payment_*`, `canonical_*`, `lessons`, `terms` or `enrolments` table. Schema 27 → 30, 28 → 30 and 29 → 30
+are repeat-safe and leave every existing row unchanged. **The migration has not been executed in this
+environment: PHP and the disposable WordPress + MariaDB runtime are unavailable.**
+
 ## 028_payment_execution_seam_provider_adapter (Phase 2A.2-T, candidate, unmerged)
 
 Additive on top of the Phase-V candidate at Schema 27. It creates exactly fifteen seam tables

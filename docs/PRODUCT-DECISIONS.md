@@ -170,6 +170,12 @@ a provider ID an identity or authorization credential.
 
 ## 12. Finance architecture — Platform Phase 9
 
+- Phase 2A.2-U (Schema 30, candidate) implements the payability, effective-dated teacher-rate,
+  per-Lesson rate/currency snapshot, teacher compensation statement, reconciliation and audited
+  correction boundary. It records what the academy owes a Teacher and stops there: it creates no ledger,
+  journal, chart of accounts, tax/VAT rule, invoice, credit note, remittance, payout, payment instruction
+  or bank/IBAN/card detail, and no external accounting surface is ever treated as the source of a
+  payability, rate, snapshot, statement or correction truth.
 - Teacher rates are effective-dated.
 - Each Lesson receives a teacher-rate and currency snapshot.
 - Changing a current rate does not recalculate historical completed or payable
