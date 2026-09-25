@@ -73,21 +73,43 @@ final class GoogleCalendarMeetAdapter implements ProviderCalendarPort,ProviderMe
             'teacher_subject_reference'=>isset($command['teacher_subject_reference'])?(string)$command['teacher_subject_reference']:null,
             'projection_reference'=>isset($command['projection_reference'])?(string)$command['projection_reference']:null,
         );
-        return array('google_request'=>$this->requestShape($facts),'provider_facts_digest'=>ProviderIntegrationIdempotency::payload($facts),'provider_occurred_at_utc'=>gmdate('Y-m-d H:i:s'));
+        // This seam has no transport, no credential and no HTTP client, so it can never return an
+        // acknowledged provider reference. It returns the exact request a transport would send and
+        // explicitly reports the projection as unacknowledged: the authority records it as `pending`
+        // and only a separate acknowledged provider result may ever mark the mapping verified.
+        $request=$this->requestShape($facts);
+        return array(
+            'provider_code'=>$providerCode,
+            'provider_request'=>$request,
+            'google_request'=>$request,
+            'provider_facts_digest'=>ProviderIntegrationIdempotency::payload($facts),
+            'provider_occurred_at_utc'=>gmdate('Y-m-d H:i:s'),
+            'acknowledged'=>false,
+        );
     }
 
-    /** @param array<string,mixed> $delivery */
-    public function verify(array $delivery):bool{
-        // Signature verification over the exact raw body is implemented by the deployment transport;
-        // this seam refuses a delivery that carries no verifiable envelope at all.
-        $headers=$delivery['headers']??array();
-        $raw=(string)($delivery['raw_body']??'');
-        return is_array($headers)&&$raw!==''&&isset($headers['x-goog-channel-token']);
+    /**
+     * @param array<string,mixed> $envelope an authenticated delivery envelope, never a raw delivery
+     */
+    public function verify(array $envelope):bool{
+        // A Google channel token is a routing header, never proof of authenticity: anyone can send
+        // one. Only an envelope that names the trusted transport which performed the cryptographic
+        // validation, binds the exact raw body by digest and carries that transport's own proof
+        // reference is accepted here, so a fabricated delivery can never reach the normaliser.
+        try{
+            ProviderIntegrationRule::deliveryEnvelope($envelope);
+        }catch(\InvalidArgumentException){
+            return false;
+        }
+        $body=(string)($envelope['raw_body']??'');
+        return $body!==''&&is_array(json_decode($body,true));
     }
 
-    /** @param array<string,mixed> $delivery */
-    public function normalise(array $delivery):array{
-        $decoded=json_decode((string)($delivery['raw_body']??''),true);
+    /**
+     * @param array<string,mixed> $envelope the authenticated envelope the caller already verified
+     */
+    public function normalise(array $envelope):array{
+        $decoded=json_decode((string)($envelope['raw_body']??''),true);
         if(!is_array($decoded))throw new \InvalidArgumentException('Provider event body required');
         $eventKey=trim((string)($decoded['event_key']??''));
         $account=trim((string)($decoded['participant_reference']??''));
@@ -97,6 +119,10 @@ final class GoogleCalendarMeetAdapter implements ProviderCalendarPort,ProviderMe
         $join=isset($decoded['join_at_utc'])?(string)$decoded['join_at_utc']:null;
         $leave=isset($decoded['leave_at_utc'])?(string)$decoded['leave_at_utc']:null;
         foreach(array($join,$leave) as $instant)if($instant!==null&&!ProviderIntegrationRule::utc($instant))throw new \InvalidArgumentException('Provider event fact incomplete');
+        // An occurrence binding only ever comes from the authenticated body the projection wrote into
+        // the provider object, never from a caller-supplied hint.
+        $lessonId=$decoded['lesson_id']??$decoded['dzn_lesson_id']??null;
+        $versionId=$decoded['schedule_version_id']??$decoded['dzn_schedule_version_id']??null;
         return array(
             'provider_code'=>self::EVIDENCE_PROVIDER_CODE,
             'provider_event_key'=>$eventKey,
@@ -106,8 +132,8 @@ final class GoogleCalendarMeetAdapter implements ProviderCalendarPort,ProviderMe
             'observed_at'=>$observed,
             'join_at_utc'=>$join,
             'leave_at_utc'=>$leave,
-            'lesson_id'=>isset($decoded['lesson_id'])?(int)$decoded['lesson_id']:null,
-            'schedule_version_id'=>isset($decoded['schedule_version_id'])?(int)$decoded['schedule_version_id']:null,
+            'lesson_id'=>$lessonId===null?null:(int)$lessonId,
+            'schedule_version_id'=>$versionId===null?null:(int)$versionId,
             'provenance_reference'=>(string)($decoded['provenance_reference']??('google-meet-'.$eventKey)),
             'evidence_reference'=>(string)($decoded['evidence_reference']??('google-meet-event-'.$eventKey)),
         );

@@ -52,9 +52,9 @@ final class ProviderIntegrationRepository {
     public function connection(int $id,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}integration_connections WHERE id=%d".($lock?' FOR UPDATE':''),$id);
     }
-    /** The consent attempt created by the matching begin_authorization command, if any. */
-    public function authorizingConnection(string $providerCode,int $teacherId,bool $lock=false):?object{
-        return $this->row("SELECT * FROM {$this->p}integration_connections WHERE provider_code=%s AND teacher_id=%d AND connection_state='authorizing' ORDER BY lifecycle_sequence DESC, id DESC LIMIT 1".($lock?' FOR UPDATE':''),$providerCode,$teacherId);
+    /** Every consent attempt of one Teacher+provider, so competing lifecycles can be settled. */
+    public function authorizingConnections(string $providerCode,int $teacherId,bool $lock=false):array{
+        return $this->rows("SELECT * FROM {$this->p}integration_connections WHERE provider_code=%s AND teacher_id=%d AND connection_state='authorizing' ORDER BY lifecycle_sequence,id".($lock?' FOR UPDATE':''),$providerCode,$teacherId);
     }
     public function connections(string $providerCode,int $teacherId):array{
         return $this->rows("SELECT * FROM {$this->p}integration_connections WHERE provider_code=%s AND teacher_id=%d ORDER BY lifecycle_sequence,id",$providerCode,$teacherId);
@@ -86,8 +86,18 @@ final class ProviderIntegrationRepository {
     public function authorizationByState(string $stateDigest,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}integration_oauth_authorizations WHERE state_digest=%s".($lock?' FOR UPDATE':''),$stateDigest);
     }
+    public function authorization(int $id,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}integration_oauth_authorizations WHERE id=%d".($lock?' FOR UPDATE':''),$id);
+    }
     public function authorizations(string $providerCode,int $teacherId):array{
         return $this->rows("SELECT * FROM {$this->p}integration_oauth_authorizations WHERE provider_code=%s AND teacher_id=%d ORDER BY id",$providerCode,$teacherId);
+    }
+    /** The consent intent one exact lifecycle generation was created for. */
+    public function authorizationForConnection(int $connectionId,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}integration_oauth_authorizations WHERE connection_id=%d ORDER BY id DESC LIMIT 1".($lock?' FOR UPDATE':''),$connectionId);
+    }
+    public function issuedAuthorizations(string $providerCode,int $teacherId,bool $lock=false):array{
+        return $this->rows("SELECT * FROM {$this->p}integration_oauth_authorizations WHERE provider_code=%s AND teacher_id=%d AND authorization_state='issued' ORDER BY id".($lock?' FOR UPDATE':''),$providerCode,$teacherId);
     }
     public function updateAuthorization(int $id,array $data,array $where):int{return $this->update('integration_oauth_authorizations',$data,array_merge(array('id'=>$id),$where));}
 
@@ -108,6 +118,9 @@ final class ProviderIntegrationRepository {
     public function activeCalendarMapping(int $lessonId,int $scheduleVersionId,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}provider_calendar_event_mappings WHERE lesson_id=%d AND schedule_version_id=%d AND active_slot=1".($lock?' FOR UPDATE':''),$lessonId,$scheduleVersionId);
     }
+    public function pendingCalendarMapping(int $lessonId,int $scheduleVersionId,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}provider_calendar_event_mappings WHERE lesson_id=%d AND schedule_version_id=%d AND projection_state='pending'".($lock?' FOR UPDATE':''),$lessonId,$scheduleVersionId);
+    }
     public function calendarMapping(int $id,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}provider_calendar_event_mappings WHERE id=%d".($lock?' FOR UPDATE':''),$id);
     }
@@ -123,6 +136,9 @@ final class ProviderIntegrationRepository {
     // ---- Meeting mappings --------------------------------------------------------------------
     public function activeMeetingMapping(int $lessonId,int $scheduleVersionId,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}provider_meeting_mappings WHERE lesson_id=%d AND schedule_version_id=%d AND active_slot=1".($lock?' FOR UPDATE':''),$lessonId,$scheduleVersionId);
+    }
+    public function pendingMeetingMapping(int $lessonId,int $scheduleVersionId,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}provider_meeting_mappings WHERE lesson_id=%d AND schedule_version_id=%d AND projection_state='pending'".($lock?' FOR UPDATE':''),$lessonId,$scheduleVersionId);
     }
     public function meetingMapping(int $id,bool $lock=false):?object{
         return $this->row("SELECT * FROM {$this->p}provider_meeting_mappings WHERE id=%d".($lock?' FOR UPDATE':''),$id);
@@ -152,6 +168,22 @@ final class ProviderIntegrationRepository {
     }
     public function conflicts(int $lessonId):array{
         return $this->rows("SELECT * FROM {$this->p}provider_event_conflicts WHERE lesson_id=%d ORDER BY id",$lessonId);
+    }
+
+    // ---- Provider event handoff outcomes -----------------------------------------------------
+    /** Append one handoff outcome; the receipt itself is never mutated by this. */
+    public function insertIngestOutcome(array $data):int{
+        $data['handoff_attempt']=$this->maxHandoffAttempt((int)$data['provider_ingest_event_id'])+1;
+        return $this->insert('provider_ingest_outcomes',$data);
+    }
+    public function maxHandoffAttempt(int $eventId):int{
+        global $wpdb;return(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(handoff_attempt),0) FROM {$this->p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d",$eventId));
+    }
+    public function latestIngestOutcome(int $eventId,bool $lock=false):?object{
+        return $this->row("SELECT * FROM {$this->p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt DESC, id DESC LIMIT 1".($lock?' FOR UPDATE':''),$eventId);
+    }
+    public function ingestOutcomes(int $eventId):array{
+        return $this->rows("SELECT * FROM {$this->p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt,id",$eventId);
     }
 
     // ---- Command evidence --------------------------------------------------------------------

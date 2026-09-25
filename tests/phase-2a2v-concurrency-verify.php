@@ -41,6 +41,9 @@ if($mode==='connect_vs_revoke'){
     dzn_vcv_assert($count('provider_integration_commands',"operation='complete_authorization'")===1,'an authorization state may be consumed exactly once');
     dzn_vcv_assert($count('integration_credentials','state=%s',array('active'))===1,'an authorization replay must not mint a second active credential');
     dzn_vcv_assert($count('integration_oauth_authorizations',"authorization_state='consumed'")===1,'exactly one authorization intent may be consumed');
+    dzn_vcv_assert($count('integration_oauth_authorizations',"authorization_state='issued'")===0,'a consumed authorization may never stay pending');
+    dzn_vcv_assert($w1['ok']===true&&$w2['ok']===true,'both contenders must converge on the recorded completion');
+    dzn_vcv_assert((int)($w2['outcome']['connection_id']??0)===(int)($w1['outcome']['connection_id']??0),'a replayed completion must report the identical connection');
 }elseif($mode==='projection_vs_release'){
     dzn_vcv_assert(\Delnavazan\Platform\Core\Application\CanonicalLessonScheduleValidator::validForLesson((int)$state['lesson_id']),'the canonical schedule aggregate must remain valid after the race');
     dzn_vcv_assert($count('canonical_lesson_schedule_versions','lesson_id=%d',array((int)$state['lesson_id']))>=(int)$state['baseline']['versions'],'the release must never remove a canonical schedule version');

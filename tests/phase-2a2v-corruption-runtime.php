@@ -47,7 +47,13 @@ $meeting=$service->projectMeetingConference(array('lesson_id'=>$lessonId,'schedu
 $receipt=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE lesson_id=%d LIMIT 1",$lessonId));
 $ingestService=new ProviderEventIngestService(null,new ContractProviderAdapters(array()),null);
 $eventKey='v-corruption-'.substr(str_replace('-','',wp_generate_uuid4()),0,8);
-$admitted=$ingestService->ingest(array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,'facts'=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'))),dzn_vc_key('ingest'));
+/** One authenticated delivery envelope over the exact body a named trusted transport validated. */
+$envelope=static function(array $facts) use($lessonId,$versionId):array{
+    $body=(string)wp_json_encode($facts);
+    return array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$facts['provider_event_key'].'-0000','facts'=>$facts);
+};
+$eventFacts=static fn(string $joinAt):array=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>$joinAt,'leave_at_utc'=>gmdate('Y-m-d H:i:s'));
+$admitted=$ingestService->ingest($envelope($eventFacts(gmdate('Y-m-d H:i:s'))),dzn_vc_key('ingest'));
 $ingestId=(int)$admitted['ingest_event_id'];
 
 // 1. Connection state: an uncontrolled lifecycle state and a missing identity digest both fail closed.
@@ -111,8 +117,21 @@ dzn_vc_refused(fn()=>$read->events($lessonId),'provider_event_receipt_corrupt','
 $wpdb->update($p.'provider_ingest_events',array('processing_state'=>(string)$receiptRow->processing_state),array('id'=>$ingestId));
 dzn_vc_assert(count($read->events($lessonId))===1,'a repaired provider-event receipt must read again');
 
+// 5b. A receipt without its transport proof, and an uncontrolled handoff outcome, both fail closed.
+$proofDigest=(string)$receiptRow->proof_reference_digest;
+$wpdb->update($p.'provider_ingest_events',array('proof_reference_digest'=>'not-a-proof-digest'),array('id'=>$ingestId));
+dzn_vc_refused(fn()=>$read->events($lessonId),'provider_event_receipt_corrupt','a receipt whose transport proof digest is malformed');
+$wpdb->update($p.'provider_ingest_events',array('proof_reference_digest'=>$proofDigest),array('id'=>$ingestId));
+dzn_vc_assert(count($read->events($lessonId))===1,'a repaired proof digest must read again');
+$outcomeRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt DESC LIMIT 1",$ingestId));
+dzn_vc_assert($outcomeRow!==null,'the corruption fixture requires one recorded handoff outcome');
+$wpdb->update($p.'provider_ingest_outcomes',array('outcome'=>'maybe'),array('id'=>(int)$outcomeRow->id));
+dzn_vc_refused(fn()=>$read->events($lessonId),'provider_event_outcome_corrupt','a receipt whose handoff outcome is uncontrolled');
+$wpdb->update($p.'provider_ingest_outcomes',array('outcome'=>(string)$outcomeRow->outcome),array('id'=>(int)$outcomeRow->id));
+dzn_vc_assert(count($read->events($lessonId))===1,'a repaired handoff outcome must read again');
+
 // 6. Conflict receipt: an uncontrolled conflict kind must never be reported as a receipt.
-$conflict=$ingestService->ingest(array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,'facts'=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s',strtotime((string)$receiptRow->occurred_at.' UTC')+600),'leave_at_utc'=>gmdate('Y-m-d H:i:s'))),dzn_vc_key('ingest-conflict'));
+$conflict=$ingestService->ingest($envelope($eventFacts(gmdate('Y-m-d H:i:s',strtotime((string)$receiptRow->occurred_at.' UTC')+600))),dzn_vc_key('ingest-conflict'));
 dzn_vc_assert($conflict['conflict']===true,'the corruption fixture requires one conflict receipt');
 $conflictId=(int)$conflict['conflict_id'];
 $conflictKind=(string)$wpdb->get_var($wpdb->prepare("SELECT conflict_kind FROM {$p}provider_event_conflicts WHERE id=%d",$conflictId));

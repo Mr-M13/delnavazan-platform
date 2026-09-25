@@ -32,16 +32,29 @@ $connect=static function(int $teacher) use($service,$scope,$evidence,$mode):int{
     $done=$service->completeAuthorization(array('state'=>(string)$begin['state'],'code'=>'setup-'.$mode,'code_verifier'=>(string)$begin['code_verifier'],'redirect_uri'=>'https://academy.example/cb')+$evidence($mode.'-setup-complete'),dzn_vcs_key($mode.'-setup-complete'));
     return(int)$done['connection_id'];
 };
-// Every mode starts from one connected Teacher A; the unrelated mode also needs an independent Teacher B.
-$connectionA=$connect($teacherId);
-$state=array('mode'=>$mode,'teacher_id'=>$teacherId,'connection_id'=>$connectionA,'lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'student_id'=>(int)$lesson->student_id,'start'=>(string)$target->starts_at_utc,'end'=>(string)$target->ends_at_utc,'schedule_timezone'=>(string)$target->schedule_timezone,'local_wall_date'=>(string)$target->local_wall_date,'local_wall_time'=>(string)$target->local_wall_time);
-if($mode==='unrelated_teacher'){
-    $other=(int)(new TeacherService())->create(array('display_name'=>'Synthetic V Teacher B','email'=>'v-b-'.wp_generate_uuid4().'@phase-2a2v.invalid'));
-    $state['other_teacher_id']=$other;$state['other_connection_id']=$connect($other);
+$state=array('mode'=>$mode,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'student_id'=>(int)$lesson->student_id,'start'=>(string)$target->starts_at_utc,'end'=>(string)$target->ends_at_utc,'schedule_timezone'=>(string)$target->schedule_timezone,'local_wall_date'=>(string)$target->local_wall_date,'local_wall_time'=>(string)$target->local_wall_time);
+if($mode==='authorization_replay'){
+    // Two processes race to consume one identical authorization state. The fixture holds the
+    // disposable one-time material only in a harness option: the integration storage itself never
+    // keeps anything but the state and verifier digests.
+    $pending=$service->beginAuthorization(array('provider_code'=>'google_calendar','teacher_id'=>$teacherId,'client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>$scope)+$evidence($mode.'-setup-begin'),dzn_vcs_key($mode.'-setup-begin'));
+    $state['connection_id']=(int)$pending['connection_id'];
+    $state['pending_authorization']=array('authorization_id'=>(int)$pending['authorization_id'],'state'=>(string)$pending['state'],'code_verifier'=>(string)$pending['code_verifier']);
+}else{
+    // Every other mode starts from one connected Teacher A; the unrelated mode also needs a Teacher B.
+    $connectionA=$connect($teacherId);
+    $state['connection_id']=$connectionA;
+    if($mode==='unrelated_teacher'){
+        $other=(int)(new TeacherService())->create(array('display_name'=>'Synthetic V Teacher B','email'=>'v-b-'.wp_generate_uuid4().'@phase-2a2v.invalid'));
+        $state['other_teacher_id']=$other;$state['other_connection_id']=$connect($other);
+    }
+    if($mode==='mapping_revoke_vs_ingest'){
+        $state['identity_mapping_id']=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}provider_identity_mappings WHERE connection_id=%d AND mapping_state='verified' LIMIT 1",$connectionA));
+    }
 }
-if($mode==='mapping_revoke_vs_ingest'){
-    $state['identity_mapping_id']=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}provider_identity_mappings WHERE connection_id=%d AND mapping_state='verified' LIMIT 1",$connectionA));
-}
+// One deterministic provider-event delivery for the ingest modes, so an exact duplicate is genuinely
+// exact and only the deliberate conflict variant differs.
+$state['delivery']=array('event_key'=>$mode.'-event-'.substr(str_replace('-','',wp_generate_uuid4()),0,8),'observed_at'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'));
 $state['baseline']=array(
     'versions'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_versions WHERE lesson_id=%d",$lessonId)),
     'events'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_lesson_schedule_events WHERE lesson_id=%d",$lessonId)),

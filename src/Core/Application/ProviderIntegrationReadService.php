@@ -67,9 +67,21 @@ final class ProviderIntegrationReadService {
         $rows=array();
         foreach($this->repository->ingestEvents($lessonId) as $event){
             if(!ProviderIntegrationValidator::ingestEventShape($event))throw new \RuntimeException('provider_event_receipt_corrupt');
-            $rows[]=array('ingest_event_id'=>(int)$event->id,'provider_code'=>(string)$event->provider_code,'participant_role'=>(string)$event->participant_role,'processing_state'=>(string)$event->processing_state,'occurred_at'=>$event->occurred_at,'received_at'=>$event->received_at);
+            $rows[]=array('ingest_event_id'=>(int)$event->id,'provider_code'=>(string)$event->provider_code,'participant_role'=>(string)$event->participant_role,'processing_state'=>$this->effectiveState($event),'received_state'=>(string)$event->processing_state,'occurred_at'=>$event->occurred_at,'received_at'=>$event->received_at);
         }
         return $rows;
+    }
+
+    /**
+     * The effective outcome of one receipt: the immutable receipt only ever records that the delivery
+     * was received, and every later handoff outcome is an appended row. A receipt therefore reports
+     * `received` until an outcome exists, and can never be read as admitted in advance of its handoff.
+     */
+    private function effectiveState(object $event):string{
+        $outcome=$this->repository->latestIngestOutcome((int)$event->id);
+        if(!$outcome)return (string)$event->processing_state;
+        if(!ProviderIntegrationValidator::ingestOutcomeShape($outcome))throw new \RuntimeException('provider_event_outcome_corrupt');
+        return (string)$outcome->outcome;
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -86,13 +98,14 @@ final class ProviderIntegrationReadService {
     /**
      * Object-level authorisation against the exact Core Teacher.
      *
-     * The integration-management capability covers every Teacher; otherwise the caller must resolve to
-     * exactly that Teacher through the Phase-J principal link.
+     * The integration-management capability covers every Teacher. Otherwise the caller must both hold
+     * the view capability and resolve to exactly that Teacher through the Phase-J principal link: being
+     * linked to a Teacher never by itself grants a read.
      */
     private function authorizeTeacher(int $teacherId):void{
         if($teacherId<1)throw new \InvalidArgumentException('canonical_teacher_required');
-        if(current_user_can(ProviderIntegrationService::MANAGE_CAPABILITY)||current_user_can(ProviderIntegrationService::VIEW_CAPABILITY)&&$this->isOwnTeacher($teacherId))return;
-        if($this->isOwnTeacher($teacherId))return;
+        if(current_user_can(ProviderIntegrationService::MANAGE_CAPABILITY))return;
+        if(current_user_can(ProviderIntegrationService::VIEW_CAPABILITY)&&$this->isOwnTeacher($teacherId))return;
         throw new \RuntimeException('Unauthorized');
     }
 

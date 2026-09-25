@@ -1,8 +1,9 @@
 # Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (implementation record)
 
-Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — NOT INDEPENDENTLY REVIEWED / NOT MERGED / NOT
-DEPLOYED.** No live credential, no provider traffic, no production data, no Theme change, no
-deployment and no public cutover is authorised by this document or by the code it describes.
+Status: **RECONSTRUCTED IMPLEMENTATION CANDIDATE — CORRECTION ROUND 2 APPLIED — NOT INDEPENDENTLY
+REVIEWED / NOT MERGED / NOT DEPLOYED.** No live credential, no provider traffic, no production data,
+no Theme change, no deployment and no public cutover is authorised by this document or by the code it
+describes.
 
 > **Why this record exists.** The previously recorded Phase-V candidate
 > `3724edb3c36959f3657e6b495ab96f26d347c476` / tree `5402cf890e2db898bccb15ba8ffc97176ced6457` is no
@@ -12,22 +13,30 @@ deployment and no public cutover is authorised by this document or by the code i
 > the preserved prior Phase-V run evidence. No new product behaviour was invented: every rule below
 > is traceable to the preflight contract (`docs/PHASE-2A-2V-PROVIDER-NEUTRAL-GOOGLE-CALENDAR-MEET-INTEGRATION.md`
 > in the contract-preflight workspace) or to the preserved Phase-V run records.
+>
+> **Correction round 2.** Independent review of the reconstructed candidate
+> `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c`
+> returned FAIL / CORRECTION REQUIRED with five blocking findings. Section 9 records each finding and
+> the exact correction. History is additive: nothing was reset, rebased, amended or force-pushed, and
+> the corrections are a strictly additive change on top of that candidate.
 
 ## 1. Identity
 
 | Item | Value |
 | --- | --- |
 | Authoritative base | manager checkout `559b1736621c9ed32e41dd2b785dd0f040dcb647` (tree `4e7fb1736b4a30de323cd25fe5dd4b6ceaad65a1`) |
+| Superseded candidate | `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree `ed10e67cf29bb4bcfc599175df0f20d351a3a78c` (review FAIL; retained in history) |
 | Candidate schema | **27** |
 | Candidate migration | `027_google_calendar_meet_provider_integration` |
-| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.1` |
+| Candidate build | `phase2a2v-provider-neutral-google-calendar-meet-20260925.2` (correction round 2) |
 | Candidate SHA / tree | recorded by the host materialisation; a commit cannot embed its own hash |
 
 The preflight contract named `26` / `026_google_calendar_meet_provider_integration` as *placeholders
 to be fixed by the approving cut*. The authoritative base already carries Schema 26
 (`026_renewal_recurring_enrolment_authority`), so this candidate takes the next free number and stays
 strictly additive: no prior migration is renamed, renumbered or replayed, and no existing table,
-column or capability is modified.
+column or capability is modified. Migration 027 has never been released or deployed, so the corrected
+statement of that one migration is itself the additive change.
 
 ## 2. Authority boundary (unchanged from the contract)
 
@@ -39,12 +48,12 @@ column or capability is modified.
 | Attendance intake, identity, review, settlement | Phase P | V is a trusted evidence **source** that submits normalised facts to the Phase-P intake seam. Participant identity authority stays Phase P. |
 
 The candidate contains no `UPDATE`/`INSERT` of canonical Lesson, schedule, delivery, attendance,
-payment or notification storage. Its only writes are to its own nine integration tables and to the
+payment or notification storage. Its only writes are to its own ten integration tables and to the
 Phase-P intake seam through `CanonicalAttendanceIntakeService::ingestProviderEvidence`.
 
 ## 3. Storage
 
-Nine provider-neutral tables (verifier: `verify_google_calendar_meet_provider_integration_schema`,
+Ten provider-neutral tables (verifier: `verify_google_calendar_meet_provider_integration_schema`,
 run after the migration, on current-schema verification and unconditionally before schema
 activation, including the retained-migration/stale-version path):
 
@@ -52,18 +61,19 @@ activation, including the retained-migration/stale-version path):
 | --- | --- |
 | `dzn_integration_connections` | One active Teacher+provider connection with append-preserving lifecycle generations. |
 | `dzn_integration_credentials` | Sealed renewable credential: `ciphertext` + `nonce` + `key_version` + `cipher_version` only. |
-| `dzn_integration_oauth_authorizations` | One-time consent intent: state digest, verifier digest, client/scope/redirect/principal binding, expiry, consumed outcome. |
+| `dzn_integration_oauth_authorizations` | One-time consent intent bound to its **exact** `connection_id`: state digest, verifier digest, client/scope/redirect/principal binding, expiry, consumed outcome. |
 | `dzn_provider_identity_mappings` | Provider subject → Core Teacher connection identity, versioned with supersession. |
-| `dzn_provider_calendar_event_mappings` | Provider calendar event → exact Lesson + canonical schedule version. |
-| `dzn_provider_meeting_mappings` | Provider conference/join reference → exact Lesson + canonical schedule version. |
-| `dzn_provider_ingest_events` | Append-only normalised provider-event receipts with separate provider/local instants. |
+| `dzn_provider_calendar_event_mappings` | Provider calendar event → exact Lesson + canonical schedule version; may be `pending` until a provider result is acknowledged. |
+| `dzn_provider_meeting_mappings` | Provider conference/join reference → exact Lesson + canonical schedule version; may be `pending` as above. |
+| `dzn_provider_ingest_events` | **Immutable** receipt of one authenticated provider delivery, with separate provider/local instants and the authenticating transport plus its proof digest. |
+| `dzn_provider_ingest_outcomes` | **Append-only** handoff outcome per receipt attempt (`admitted`/`refused`) with its reason, attempt number and the Phase-P result digest it was written for. |
 | `dzn_provider_event_conflicts` | Append-only durable conflict receipts for a changed provider-event context. |
 | `dzn_provider_integration_commands` | Append-only digest-only command evidence. |
 
-The verifier rejects a provider-specific column, a plaintext credential column, a missing
-credential key/cipher version, a mutable column on the three append-only tables, a malformed digest,
-a missing unique index (`active_connection`, `provider_subject`, `lesson_version`,
-`provider_event`/`provider_conference`, `conflict_identity`, `command_key_digest`), a
+The verifier rejects a provider-specific column, a plaintext credential column, a missing credential
+key/cipher version, a mutable column on the four append-only tables, a malformed digest, a missing
+unique index (`active_connection`, `provider_subject`, `lesson_version`, `provider_event`/
+`provider_conference`, `handoff_sequence`, `conflict_identity`, `command_key_digest`), a
 non-transactional engine, an unexpected table claiming a Phase-V prefix, and any attempt to smuggle
 academic, attendance, delivery, notification or payment storage into the phase.
 
@@ -71,60 +81,87 @@ academic, attendance, delivery, notification or payment storage into the phase.
 
 - **V-D2 lifecycle.** `disconnected → authorizing → connected`, with `refresh_failed`, `revoking`,
   `revoke_failed`, `revoked`; a revoked connection is terminal, and a reconnect always starts a new
-  consent lifecycle. A failed provider revoke is recorded and retryable and never leaves the
-  connection usable locally (the credential is quarantined *before* the provider is asked).
+  consent lifecycle. A reconnect may be started while an earlier connection is still connected: the
+  earlier connection keeps the active slot and stays usable until the new consent *completes*, and
+  completion then settles every competing lifecycle explicitly. A failed provider revoke is recorded
+  and retryable and never leaves the connection usable locally (the credential is quarantined
+  *before* the provider is asked).
 - **V-D3 initiation.** State and PKCE verifier are generated server-side, returned once, and stored
-  only as digests. The intent binds the principal, exact Core Teacher, client, ordered scope set and
-  exact HTTPS redirect target, carries an absolute expiry, and is consumed exactly once. Scope
+  only as digests. The intent binds the principal, exact Core Teacher, client, ordered scope set,
+  exact HTTPS redirect target and **the exact connection the command created**, carries an absolute
+  expiry, and is consumed exactly once. The command's replay digest is taken over the deterministic
+  request facts only — one-time material and the expiry are generated strictly after the recorded
+  command is checked — so a repeated idempotency key reconstructs the identical digest and returns
+  the recorded connection result without re-issuing or persisting any one-time material. Scope
   mismatch, identity mismatch, unknown/expired/replayed state and a redirect mismatch all fail
   closed. Teacher self-connect revalidates the Phase-J `teacher_principal_links` row inside the
-  transaction.
+  transaction. Completion locks the intent and settles exactly the bound connection; a competing
+  authorizing sibling is closed and its own issued intent is recorded as `rejected`.
 - **V-D4 credentials.** `sodium_crypto_secretbox` (AES-256-GCM fallback) with a unique nonce per row,
   a key derived from the WordPress salts with `dzn_provider_integration` domain separation, a stored
   key/cipher version, and an envelope bound to exactly one connection + provider code. Decrypt fails
-  closed on an unknown version, a malformed nonce, a truncated ciphertext or a failed authentication;
-  rotation is explicit; nothing is ever logged, exported or placed in a notice.
+  closed on an unknown version, a malformed nonce, a truncated ciphertext or a failed
+  authentication; rotation is explicit; nothing is ever logged, exported or placed in a notice.
 - **V-D5 mappings.** A provider subject/account/calendar/event/conference value is stored only as a
   keyed digest and never re-identifies a Teacher or Lesson. Supersession/revocation is
   append-preserving.
 - **V-D6/V-D7 projections.** A calendar/meet projection copies one exact applicable canonical
   schedule version's UTC interval and wall-clock provenance, and is refused when the version is
-  stale, unusable or the Lesson's canonical aggregate does not validate. A retraction quarantines the
-  local reference only: it never cancels, releases or reschedules the Lesson.
+  stale, unusable or the Lesson's canonical aggregate does not validate. A port that can perform the
+  provider write returns the acknowledged opaque reference and the mapping is recorded `verified`. A
+  translation-only port — the only Google seam in this phase has no transport, credential or HTTP
+  client — returns the exact provider request plus its fact digest and **no** reference: the
+  projection is recorded `pending` with no active slot, and only a separate `acknowledge_*` command
+  carrying the acknowledged provider result may promote it to `verified`. A retraction quarantines
+  the local reference only (a pending translation is retractable too): it never cancels, releases or
+  reschedules the Lesson.
 - **V-D8 evidence.** Provider facts reach Phase P only through
   `CanonicalAttendanceIntakeService::ingestProviderEvidence`; the integration layer never resolves a
   participant, never asserts verification, never writes Phase-O/P storage, and holds no integration
-  row across the Phase-P transaction.
+  row across the Phase-P transaction. A raw provider delivery is refused outright: the only accepted
+  input is a delivery envelope a named trusted transport already authenticated — transport identity,
+  authenticated instant, the exact body it validated bound by digest, and the transport's own proof
+  reference — and only that envelope is handed to the normaliser. A header, a body without an
+  envelope, or a Google channel token is never proof. Phase V performs no provider cryptography and
+  holds no provider secret.
 - **V-D9/V-D10 idempotency.** A provider event key is deduplicated against full immutable context
   equality: an exact duplicate converges, a changed context is durably refused as one of
   `changed_payload`, `cross_lesson`, `cross_schedule_version`, `cross_context`, `cross_participant`,
   `cross_interval`, and the original receipt is never overwritten. Commands persist
   `command_key_digest` + `command_payload_digest`; replay reconstructs the complete facts through the
   same canonical digest path and compares the payload digest unconditionally.
+- **V-D8/V-D9 durable handoff.** The ingest receipt is immutable and is written exactly once, in its
+  receive state, before the Phase-P handoff — so an interruption always leaves evidence of the
+  delivery. Admission is a separate appended outcome row written only *after* the handoff succeeded,
+  and carries the Phase-P result digest it was written for. A duplicate request with no admitted
+  outcome re-attempts the handoff (Phase P is idempotent on the provider event key) instead of
+  reporting an admission that never reached Phase P. The receipt table is never updated by the phase.
 - **V-D11 no raw payload.** Only normalised facts and keyed digests are stored.
 - **V-D12/V-D14 no I/O.** No migration, activation or verification path reads a credential,
   configuration option or network resource; the phase contains no HTTP/OAuth/webhook client.
 - **V-D13 least privilege.** Administrator: all five capabilities. `dzn_teacher`: only
   `dzn_connect_own_provider_calendar` and `dzn_view_provider_integrations`, and the Teacher role is
-  actively stripped of the management, revocation and ingestion grants. Background ingestion is a
-  named system actor with the bounded `dzn_ingest_provider_events` grant; participant identity and
-  delivery outcomes are never delegated to that actor.
+  actively stripped of the management, revocation and ingestion grants. A read requires the
+  management capability, or the view capability **and** exact ownership of the Teacher resolved
+  through the Phase-J principal link — being linked to a Teacher never by itself grants a read.
+  Background ingestion is a named system actor with the bounded `dzn_ingest_provider_events` grant;
+  participant identity and delivery outcomes are never delegated to that actor.
 
 ## 5. Modules
 
 | Artefact | Responsibility |
 | --- | --- |
-| `src/Core/Application/ProviderIntegrationRule.php` | Controlled vocabulary, lifecycle transitions, exact redirect/scope comparison, projection-fact extraction from a canonical schedule version. |
-| `src/Core/Application/ProviderIntegrationIdempotency.php` | Domain-separated key/payload/evidence/subject/provider-event digests. |
+| `src/Core/Application/ProviderIntegrationRule.php` | Controlled vocabulary, lifecycle transitions, exact redirect/scope comparison, proof-transport vocabulary, the authenticated delivery-envelope rule, projection-fact extraction from a canonical schedule version. |
+| `src/Core/Application/ProviderIntegrationIdempotency.php` | Domain-separated key/payload/evidence/subject/provider-event/proof digests. |
 | `src/Core/Application/IntegrationSecretService.php` | Seal/open/rotate the integration secret class; fail closed; redacted reporting. |
-| `src/Core/Application/ProviderIntegrationValidator.php` | Fail-closed row shapes plus the composed canonical Lesson/schedule/delivery validity a projection requires. |
-| `src/Core/Application/ProviderIntegrationService.php` | Connection lifecycle, identity mappings, projections and retractions, digest-only command evidence and replay. |
-| `src/Core/Application/ProviderEventIngestService.php` | Provider-event verification, dedup/conflict receipts, delegation to the Phase-P seam. |
-| `src/Core/Application/ProviderIntegrationReadService.php` | Capability-gated, object-level-authorised reads; credentials reported redacted only. |
+| `src/Core/Application/ProviderIntegrationValidator.php` | Fail-closed row shapes (connection, credential, mapping — including `pending` projections — receipt, handoff outcome, conflict, command) plus the composed canonical Lesson/schedule/delivery validity a projection requires. |
+| `src/Core/Application/ProviderIntegrationService.php` | Connection lifecycle, exact-lifecycle consent completion and competing-lifecycle settlement, identity mappings, projections and retractions, pending→acknowledged projection promotion, digest-only command evidence and replay. |
+| `src/Core/Application/ProviderEventIngestService.php` | Authenticated-envelope ingestion, immutable receipts, append-only handoff outcomes, dedup/conflict receipts, delegation to the Phase-P seam. |
+| `src/Core/Application/ProviderIntegrationReadService.php` | Capability-gated, object-level-authorised reads; credentials reported redacted only; receipts report their immutable receive state and their effective outcome separately. |
 | `src/Core/Application/Port/*.php` | `ProviderOAuthPort`, `ProviderCalendarPort`, `ProviderMeetingPort`, `ProviderEventNormalizer`. |
-| `src/Integrations/GoogleCalendarMeetAdapter.php` | The only Google-specific translation seam: pure, no HTTP client, no OAuth library, no credential, no webhook. |
+| `src/Integrations/GoogleCalendarMeetAdapter.php` | The only Google-specific translation seam: pure, no HTTP client, no OAuth library, no credential, no webhook, translation-only projections. |
 | `src/Integrations/ContractProviderAdapters.php` | Deterministic no-I/O adapters implementing all four ports for the evidence runs; credential material is never recorded. |
-| `src/Core/Infrastructure/Repository/ProviderIntegrationRepository.php` | All nine tables plus the Phase-V lock order (`Student–Course identity root → Enrolment → Term → canonical Lesson`). |
+| `src/Core/Infrastructure/Repository/ProviderIntegrationRepository.php` | All ten tables plus the Phase-V lock order (`Student–Course identity root → Enrolment → Term → canonical Lesson`). |
 
 Core never imports `Delnavazan\Platform\Integrations\*`; the adapters are injected through the ports.
 
@@ -132,13 +169,13 @@ Core never imports `Delnavazan\Platform\Integrations\*`; the adapters are inject
 
 | Artefact | Coverage | Status |
 | --- | --- | --- |
-| `tests/phase-2a2v-contract.php` | Static source contract: migration/verifier wiring, nine tables, provider neutrality, digest-only storage, capability wiring, seam names, no external call. | **EXECUTED — PASS** |
-| `tests/phase-2a2v-isolated-runtime.php` | Pure runtime proof of the rule, digest boundary, credential sealing (unique nonce/binding/fail-closed/rotation), Google translation seam, deterministic adapters and fail-closed shapes. 229 assertions. | **EXECUTED — PASS** |
-| `tests/phase-2a2v-migration-runtime.php` | Fresh Schema 27, additive 26→27, no backfill, repeat safety, per-capability repair, retained-027 and stale-version verification, malformed-storage rejection for provider/plaintext/mutable/digest/index/extra-table probes. | NOT EXECUTED HERE (needs WP-CLI + MariaDB) |
-| `tests/phase-2a2v-runtime.php` | Consent lifecycle, sealing, mappings, calendar/Meet projection against the exact canonical version, stale-version refusal, retraction without canonical mutation, Phase-P evidence seam, duplicate convergence, durable conflict, capability denial, object-level reads, digest-only persistence. | NOT EXECUTED HERE |
-| `tests/phase-2a2v-corruption-runtime.php` | Corrupt connection state/identity digest, credential versions and sealed material, mapping shapes, provider-event context/state, conflict kind and command evidence; every path fails closed and recovers after repair. | NOT EXECUTED HERE |
-| `tests/phase-2a2v-failure-runtime.php` | Injected write boundaries at the connection, projection and ingest gates: full rollback, no orphan provider reference, no falsely replayable command, no Phase-P fact from a rolled-back ingest. | NOT EXECUTED HERE |
-| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay`, `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-contract.php` | Static source contract: migration/verifier wiring, ten tables, provider neutrality, digest-only storage, capability wiring, seam names, authenticated-envelope requirement, pending→acknowledged projection boundary, immutable-outcome storage, consent-to-connection binding, read-capability requirement, no external call. | NOT EXECUTED HERE (see §7) |
+| `tests/phase-2a2v-isolated-runtime.php` | Pure runtime proof of the rule, the authenticated delivery envelope, the digest boundary, credential sealing (unique nonce/binding/fail-closed/rotation), the translation-only Google seam, deterministic adapters (acknowledging and translation-only) and fail-closed shapes. The suite prints its own assertion count. | NOT EXECUTED HERE (see §7) |
+| `tests/phase-2a2v-migration-runtime.php` | Fresh Schema 27, additive 26→27, no backfill, repeat safety, per-capability repair, retained-027 and stale-version verification, malformed-storage rejection for provider/plaintext/mutable/digest/index/extra-table/missing-outcome-table probes. | NOT EXECUTED HERE (needs WP-CLI + MariaDB) |
+| `tests/phase-2a2v-runtime.php` | Consent lifecycle with deterministic digest replay, exact-lifecycle completion with a competing pending consent, sealing, mappings, calendar/Meet projection against the exact canonical version, pending→acknowledged promotion, stale-version refusal, retraction without canonical mutation, authenticated Phase-P evidence seam, immutable receipt with an appended admission, duplicate convergence, durable conflict, capability denial, object-level reads including the view-capability requirement, digest-only persistence. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-corruption-runtime.php` | Corrupt connection state/identity digest, credential versions and sealed material, mapping shapes (including a pending projection), provider-event context/state/proof, handoff outcome, conflict kind and command evidence; every path fails closed and recovers after repair. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-failure-runtime.php` | Injected write boundaries at the connection, projection and ingest gates: full rollback, no orphan provider reference, no falsely replayable command, no Phase-P fact from a rolled-back ingest, and no reported admission for a receipt whose handoff outcome is absent. | NOT EXECUTED HERE |
+| `tests/phase-2a2v-concurrency-runner.sh` (+ setup/worker/verify) | Deterministic process-level matrix of §12: `connect_vs_revoke`, `authorization_replay` (two processes consuming one identical authorization state with one identical command key), `projection_vs_release`, `projection_vs_completion`, `duplicate_vs_conflicting_event`, `mapping_revoke_vs_ingest`, `teacher_archival_vs_connection`, `unrelated_teacher`. | NOT EXECUTED HERE |
 
 Runtime suites are gated on `DZN_PHASE_2A2V_RUNTIME_TEST` ∈
 `migration|authority|corruption|failure|concurrency` and refuse to run outside WP-CLI on a
@@ -155,13 +192,23 @@ DZN_PHASE_2A2V_REPO=<repo> DZN_PHASE_2A2V_WP_DIR=<wp> DZN_PHASE_2A2V_NET=<net> \
   sh tests/phase-2a2v-concurrency-runner.sh <mode>
 ```
 
-## 7. Adjacent regression and evidence executed for this candidate
+## 7. Evidence executed for this correction round
 
-- `php -l` over every Phase-V PHP file, `delnavazan-platform.php` and the modified `Migrator.php`: clean.
-- `sh -n tests/phase-2a2v-concurrency-runner.sh`: clean.
-- `git diff --check`: clean.
-- No live credential, no provider traffic, no production data, no Theme change and no deployment were
-  used or produced.
+Executed in the correcting environment (no PHP interpreter and no Docker/WordPress/MariaDB runtime is
+available there, and network access is restricted, so no PHP file could be linted or executed):
+
+- a structural balance check over every touched PHP file (all clean);
+- a full manual review of every touched PHP file against the reviewed findings;
+- `sh -n` is **not** applicable: the runner script was not modified;
+- `git diff --check` and a complete `git status` review before publication;
+- `php -l` over every touched PHP file: **NOT EXECUTED** (no PHP runtime in this environment) and
+  must be run in the disposable harness before merge, together with the runtime suites above.
+
+Every suite in §6, including the two that need no WordPress, is therefore marked NOT EXECUTED HERE.
+The correction round changed source that those suites assert on, so the earlier candidate's
+EXECUTED — PASS results for them no longer carry over and must be reproduced by the reviewer's harness
+before this candidate is accepted. No live credential, no provider traffic, no production data, no
+Theme change and no deployment were used or produced.
 
 ## 8. Explicit non-authority / deferrals
 
@@ -178,5 +225,65 @@ credential retention, webhook push versus bounded polling, and whether Meet join
 auto-settles ordinary delivery through Phase P. The candidate takes the fail-closed option for each:
 the scope set is deployment configuration validated as an exact set, a retraction quarantines locally
 and records a retryable outcome rather than assuming a delete, a revoked credential stays quarantined,
-transport is a deployment concern behind the normaliser port, and settlement remains Phase P's own
-decision.
+transport is a deployment concern behind the normaliser port (and must hand over an authenticated
+envelope), and settlement remains Phase P's own decision.
+
+## 9. Correction round 2 — blocking findings and their resolution
+
+Reviewed candidate `6c2ab1ce32676286d10a8248fab358ed02e7694a` / tree
+`ed10e67cf29bb4bcfc599175df0f20d351a3a78c`. Every finding is corrected in code, in storage, in the
+module documentation and in the test surface:
+
+1. **Consent replay could never converge (`ProviderIntegrationService.php`).** `beginAuthorization()`
+   generated the state/PKCE digests and the expiry *before* checking the recorded command, so a
+   repeated idempotency key always produced a different payload digest and the replay also omitted
+   `connection_id`. *Corrected:* the payload digest is computed from the deterministic request facts
+   only (domain, operation, provider, Teacher, principal, client, redirect, scope) and is compared
+   before any one-time material exists; the replay returns the recorded `connection_id` and the
+   recorded intent (`authorization_id`, `scope_snapshot`, `expires_at`, state) with no state, verifier
+   or challenge, which are still returned exactly once at creation and never persisted.
+   `tests/phase-2a2v-runtime.php` now asserts convergence, the recorded result and the absence of
+   one-time material on replay.
+2. **An authorization intent could complete another lifecycle.** Intents had no `connection_id` and
+   completion selected the newest authorizing connection for the Teacher/provider, so two pending
+   consent attempts could cross. *Corrected:* `integration_oauth_authorizations.connection_id` binds
+   every intent to the exact lifecycle its command created (`connection_authorization` index);
+   completion locks the intent, loads and locks **that** connection, requires it to be the matching
+   `authorizing` row, and `settleCompetingLifecycles()` explicitly rejects every other issued intent
+   and closes every competing authorizing or connected sibling before the new one takes the active
+   slot. `tests/phase-2a2v-runtime.php` §12 covers two pending attempts; the concurrency matrix's
+   `authorization_replay` mode now races two processes against one identical state.
+3. **No real Calendar/Meet projection could be recorded.** The only Google adapter returns a
+   translation with no `provider_object_reference`, while the service required that value and threw
+   `provider_reference_unusable`. *Corrected:* the port boundary now states both result shapes. A
+   translation-only result is persisted as a `pending` projection (no active slot, translation digest
+   as the provisional reference) and can never be read as a verified provider object; only a separate
+   `acknowledge_calendar_projection` / `acknowledge_meeting_projection` command carrying the
+   acknowledged provider result (digested immediately) may promote it to `verified`, with the unique
+   provider-reference index as the durable guard. `tests/phase-2a2v-runtime.php` §13 and the
+   translation-only adapter mode cover the flow.
+4. **A fabricated delivery was trusted as evidence.** The Google seam accepted any non-empty body with
+   any `x-goog-channel-token` header. *Corrected:* `ProviderIntegrationRule::deliveryEnvelope()`
+   requires a named trusted transport (`google_channel_jwt`, `google_pubsub_oidc`,
+   `deployment_gateway`), an explicit authentication flag, a UTC authenticated instant, the exact
+   body bound by SHA-256 digest, and a transport proof reference (stored only as a digest). A raw
+   delivery, a bare body or a channel token is refused, and only the authenticated envelope is handed
+   to the normaliser.
+5. **Admission was committed before the Phase-P handoff, and the append-only receipt was mutated.**
+   *Corrected:* `dzn_provider_ingest_events` is now immutable — a receipt is written once in its
+   `received` state and is never updated — and admission is a separate append-only row in the new
+   `dzn_provider_ingest_outcomes` table, written only after a successful Phase-P handoff and carrying
+   that handoff's result digest. A duplicate request without an admitted outcome re-runs the handoff
+   (idempotent in Phase P) instead of reporting a false admission; `markProcessingState()` and the
+   direct receipt update are gone. `tests/phase-2a2v-failure-runtime.php` §3b proves that a receipt
+   whose outcome is absent is reported as `received`, never as `admitted`.
+6. **A linked Teacher could read without the view capability.** `ProviderIntegrationReadService`
+   had a second own-Teacher branch that bypassed the capability check. *Corrected:* a self-service
+   read requires the view capability **and** exact Teacher ownership; the management capability still
+   covers every Teacher. `tests/phase-2a2v-runtime.php` §10 removes the capability from the linked
+   Teacher and proves the refusal.
+
+Behaviour that the review confirmed and that this round deliberately preserves: no canonical
+Lesson/schedule/delivery/attendance write, credential sealing and binding, append-preserving
+supersession, digest-only command evidence with unconditional payload-digest replay comparison, the
+immutable provider-event history, and the fail-closed option on every open product decision.

@@ -15,9 +15,9 @@ function dzn_vm_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeE
 $tables=array(
     'integration_connections','integration_credentials','integration_oauth_authorizations',
     'provider_identity_mappings','provider_calendar_event_mappings','provider_meeting_mappings',
-    'provider_ingest_events','provider_event_conflicts','provider_integration_commands',
+    'provider_ingest_events','provider_ingest_outcomes','provider_event_conflicts','provider_integration_commands',
 );
-$appendOnly=array('provider_ingest_events','provider_event_conflicts','provider_integration_commands');
+$appendOnly=array('provider_ingest_events','provider_ingest_outcomes','provider_event_conflicts','provider_integration_commands');
 $forbiddenTables=array('integration_lessons','integration_terms','integration_schedules','integration_notifications','integration_payments');
 $exists=static function(string $table) use($wpdb,$p):bool{return(string)$wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p.$table))===$p.$table;};
 $engine=static function(string $table) use($wpdb,$p):string{return strtolower((string)$wpdb->get_var($wpdb->prepare('SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s',$p.$table)));};
@@ -48,6 +48,13 @@ foreach(array('key_version'=>'varchar(32)','cipher_version'=>'varchar(32)','nonc
 }
 $identity=$column('integration_connections','identity_digest');
 dzn_vm_assert($identity&&$identity->Null==='YES','A connection identity digest must start unset until consent is validated');
+// A consent intent is bound to its exact lifecycle, and a receipt records its authenticating transport.
+$intentConnection=$column('integration_oauth_authorizations','connection_id');
+dzn_vm_assert($intentConnection&&str_contains(strtolower($intentConnection->Type),'bigint')&&str_contains(strtolower($intentConnection->Type),'unsigned')&&$intentConnection->Null==='NO','An authorization intent must be bound to exactly one connection');
+$transport=$column('provider_ingest_events','transport');
+dzn_vm_assert($transport&&strtolower($transport->Type)==='varchar(32)'&&$transport->Null==='NO','A provider receipt must record its authenticating transport');
+$outcome=$column('provider_ingest_outcomes','outcome');
+dzn_vm_assert($outcome&&strtolower($outcome->Type)==='varchar(16)'&&$outcome->Null==='NO','A handoff outcome must record a controlled outcome state');
 // No integration table may carry a provider-specific object column or a plaintext credential column.
 foreach($tables as $table){
     foreach(array('google','stripe','paypal','zoom','teams','access_token','refresh_token','client_secret') as $forbidden){
@@ -60,10 +67,13 @@ foreach(array(
     array('integration_connections','active_connection',true,array('provider_code','teacher_id','active_slot')),
     array('integration_credentials','connection_sequence',true,array('connection_id','credential_sequence')),
     array('integration_oauth_authorizations','state_digest',true,array('state_digest')),
+    array('integration_oauth_authorizations','connection_authorization',false,array('connection_id','authorization_state')),
     array('provider_identity_mappings','provider_subject',true,array('provider_code','subject_digest','active_slot')),
     array('provider_calendar_event_mappings','lesson_version',true,array('lesson_id','schedule_version_id','active_slot')),
     array('provider_meeting_mappings','lesson_version',true,array('lesson_id','schedule_version_id','active_slot')),
     array('provider_ingest_events','provider_event',true,array('provider_code','provider_event_key_digest')),
+    array('provider_ingest_outcomes','handoff_sequence',true,array('provider_ingest_event_id','handoff_attempt')),
+    array('provider_ingest_outcomes','event_outcome',false,array('provider_ingest_event_id','outcome')),
     array('provider_event_conflicts','conflict_identity',true,array('provider_code','provider_event_key_digest','conflicting_fact_digest')),
     array('provider_integration_commands','command_key_digest',true,array('command_key_digest')),
 ) as $spec){
@@ -78,6 +88,7 @@ foreach(array(
     array('provider_meeting_mappings','conference_digest'),array('provider_meeting_mappings','join_uri_digest'),
     array('provider_ingest_events','provider_event_key_digest'),array('provider_ingest_events','event_fact_digest'),
     array('provider_ingest_events','provider_account_digest'),array('provider_event_conflicts','conflicting_fact_digest'),
+    array('provider_ingest_events','proof_reference_digest'),array('provider_ingest_outcomes','provider_event_key_digest'),
     array('provider_integration_commands','command_key_digest'),array('provider_integration_commands','command_payload_digest'),
 ) as $digest){
     $row=$column($digest[0],$digest[1]);
@@ -139,6 +150,17 @@ $probeTable=$p.'integration_lessons';
 dzn_vm_assert($wpdb->query("CREATE TABLE {$probeTable} (id bigint unsigned NOT NULL AUTO_INCREMENT,PRIMARY KEY(id)) ENGINE=InnoDB")!==false,'Unexpected-table probe creation failed');
 $refused('an unexpected table claiming a Phase-V prefix');
 dzn_vm_assert($wpdb->query("DROP TABLE {$probeTable}")!==false,'Unexpected-table probe removal failed');
+Migrator::maybe_upgrade();
+
+// The immutable handoff-outcome storage is part of the phase: a missing or renamed one is refused.
+$probeOutcomes=$p.'provider_ingest_outcomes';
+dzn_vm_assert($wpdb->query("ALTER TABLE {$probeOutcomes} RENAME TO {$p}provider_ingest_outcomes_probe")!==false,'Handoff-outcome probe rename failed');
+$refused('a missing handoff-outcome table');
+dzn_vm_assert($wpdb->query("ALTER TABLE {$p}provider_ingest_outcomes_probe RENAME TO {$probeOutcomes}")!==false,'Handoff-outcome probe restoration failed');
+Migrator::maybe_upgrade();
+$wpdb->query("ALTER TABLE {$probeOutcomes} ADD COLUMN state varchar(16) NULL");
+$refused('a mutable column on the append-only handoff outcomes');
+dzn_vm_assert($wpdb->query("ALTER TABLE {$probeOutcomes} DROP COLUMN state")!==false,'Handoff-outcome mutable-column restoration failed');
 Migrator::maybe_upgrade();
 
 dzn_vm_assert($wpdb->query("ALTER TABLE {$p}integration_connections MODIFY identity_digest char(64) NOT NULL")!==false,'Identity-nullability probe failed');

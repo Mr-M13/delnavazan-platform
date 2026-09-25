@@ -4,7 +4,11 @@
 > merged):** the Integrations module owns exactly one provider integration surface — one Teacher
 > consent lifecycle per provider code, one sealed credential per connection, provider reference
 > mappings, a bounded Calendar/Meet projection seam, and provider-event ingestion into the Phase-P
-> evidence seam — plus its append-only receipts and digest-only command evidence. Core depends on the
+> evidence seam — plus its append-only receipts and digest-only command evidence. A projection that
+> cannot be acknowledged by its own port is recorded as `pending` and is promoted only by a separate
+> acknowledged provider result; ingestion accepts only a delivery envelope a named trusted transport
+> already authenticated, writes the receipt once and records admission as a separate appended handoff
+> outcome after Phase P accepted the fact. Core depends on the
 > four `Provider*Port` interfaces only and never imports `Delnavazan\Platform\Integrations\*`. The
 > phase owns no Lesson, schedule, delivery, attendance, settlement, payment, notification or Theme
 > storage: a projection mirrors an already-applicable canonical schedule version without mutating it,

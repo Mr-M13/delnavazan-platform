@@ -46,6 +46,12 @@ final class ProviderIntegrationIdempotency {
         return hash_hmac('sha256','provider_integration_evidence:'.$reference,wp_salt(self::SALT));
     }
 
+    /** The proof reference of an authenticating transport is stored only as a keyed digest. */
+    public static function proof(string $reference):string{
+        if(trim($reference)==='')throw new \InvalidArgumentException('Transport proof reference required');
+        return hash_hmac('sha256','provider_integration_proof:'.$reference,wp_salt(self::SALT));
+    }
+
     /** Nested arrays are canonicalised so a replayed fact set always produces one digest. */
     private static function canonical(array $value):array{
         foreach($value as $key=>$item){

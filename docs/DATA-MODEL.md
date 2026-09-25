@@ -6,13 +6,18 @@
 > nullable `active_slot`, `identity_digest` set only after identity/scope validation),
 > `dzn_integration_credentials` (`state`, `key_version`, `cipher_version`, `nonce`, `ciphertext` and a
 > quarantine/revocation instant — never a plaintext token column),
-> `dzn_integration_oauth_authorizations` (one-time consent intent: `state_digest`, `verifier_digest`,
-> client/scope/redirect/principal binding, `expires_at`, write-once `consumed_at`/`consumption_result`),
+> `dzn_integration_oauth_authorizations` (one-time consent intent bound to its exact `connection_id`:
+> `state_digest`, `verifier_digest`, client/scope/redirect/principal binding, `expires_at`, write-once
+> `consumed_at`/`consumption_result`, and an explicit `rejected` outcome for a superseded attempt),
 > `dzn_provider_identity_mappings` (keyed `subject_digest` → Core Teacher, versioned with
 > `active_slot`/`superseded_by_mapping_id`), `dzn_provider_calendar_event_mappings` and
 > `dzn_provider_meeting_mappings` (keyed provider digests → exact Lesson + canonical schedule
-> version, with the copied canonical interval and wall-clock provenance), append-only
-> `dzn_provider_ingest_events` (separate provider `occurred_at` and local `received_at`),
+> version, with the copied canonical interval and wall-clock provenance; a projection may be `pending`
+> until its provider result is acknowledged), append-only
+> `dzn_provider_ingest_events` (immutable receipt in a `received` state: separate provider
+> `occurred_at` and local `received_at`, plus the authenticating `transport` and its
+> `proof_reference_digest`), append-only `dzn_provider_ingest_outcomes` (the handoff outcome of each
+> attempt — the only place an admission is ever recorded, with its Phase-P result digest),
 > append-only `dzn_provider_event_conflicts` and append-only digest-only
 > `dzn_provider_integration_commands`. There is no provider-specific column, no raw provider payload,
 > no raw command key and no Lesson, schedule, delivery, attendance, notification or payment storage.

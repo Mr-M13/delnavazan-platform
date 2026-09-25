@@ -17,13 +17,20 @@ use Delnavazan\Platform\Core\Application\Port\{ProviderCalendarPort,ProviderEven
  * provider, without a live credential and without production data.
  */
 final class ContractProviderAdapters implements ProviderOAuthPort,ProviderCalendarPort,ProviderMeetingPort,ProviderEventNormalizer {
+    /** The synthetic transport has already acknowledged every provider write it was asked for. */
+    public const PROJECTION_ACKNOWLEDGED='acknowledged';
+    /** The synthetic transport only translates, mirroring the real Google seam. */
+    public const PROJECTION_PENDING='pending';
     /** @var array<int,array{port:string,call:array<string,mixed>}> */
     private array $calls=array();
     private array $validatedTokens=array();
+    private string $projectionMode=self::PROJECTION_ACKNOWLEDGED;
 
     /** @param array<string,string> $validatedTokens map of credential material => raw provider subject reference */
-    public function __construct(array $validatedTokens=array()){
+    public function __construct(array $validatedTokens=array(),string $projectionMode=self::PROJECTION_ACKNOWLEDGED){
         $this->validatedTokens=$validatedTokens;
+        if(!in_array($projectionMode,array(self::PROJECTION_ACKNOWLEDGED,self::PROJECTION_PENDING),true))throw new \InvalidArgumentException('Controlled projection mode required');
+        $this->projectionMode=$projectionMode;
     }
 
     /** @return array<int,array{port:string,call:array<string,mixed>}> */
@@ -65,16 +72,35 @@ final class ContractProviderAdapters implements ProviderOAuthPort,ProviderCalend
 
     public function project(array $command):array{
         $this->calls[]=array('port'=>(string)($command['provider_code']??''),'call'=>array('operation'=>(string)($command['operation']??'project'),'request'=>$this->safe($command)));
-        $reference='ref-'.substr(ProviderIntegrationIdempotency::payload(array('lesson_id'=>(int)($command['lesson_id']??0),'schedule_version_id'=>(int)($command['schedule_version_id']??0),'operation'=>(string)($command['operation']??'project'))),0,24);
-        return array('provider_object_reference'=>$reference,'join_uri_reference'=>$reference.'-join','provider_occurred_at_utc'=>(string)($command['now_utc']??'')?:gmdate('Y-m-d H:i:s'));
+        $facts=array('provider_code'=>(string)($command['provider_code']??''),'operation'=>(string)($command['operation']??'project'),'lesson_id'=>(int)($command['lesson_id']??0),'schedule_version_id'=>(int)($command['schedule_version_id']??0));
+        $occurred=(string)($command['now_utc']??'')?:gmdate('Y-m-d H:i:s');
+        if($this->projectionMode===self::PROJECTION_PENDING){
+            // A translation-only result carries no provider reference at all.
+            return array(
+                'provider_code'=>$facts['provider_code'],
+                'provider_request'=>array('method'=>'POST','path'=>'/synthetic/'.$facts['provider_code'],'body'=>array('lesson_id'=>$facts['lesson_id'],'schedule_version_id'=>$facts['schedule_version_id'])),
+                'provider_facts_digest'=>ProviderIntegrationIdempotency::payload($facts),
+                'provider_occurred_at_utc'=>$occurred,
+                'acknowledged'=>false,
+            );
+        }
+        $reference='ref-'.substr(ProviderIntegrationIdempotency::payload($facts),0,24);
+        return array('provider_object_reference'=>$reference,'join_uri_reference'=>$reference.'-join','provider_occurred_at_utc'=>$occurred,'acknowledged'=>true);
     }
 
-    public function verify(array $delivery):bool{
-        return isset($delivery['verified'])&&$delivery['verified']===true;
+    /** @param array<string,mixed> $envelope */
+    public function verify(array $envelope):bool{
+        try{
+            ProviderIntegrationRule::deliveryEnvelope($envelope);
+        }catch(\InvalidArgumentException){
+            return false;
+        }
+        return is_array($envelope['facts']??null);
     }
 
-    public function normalise(array $delivery):array{
-        $facts=$delivery['facts']??array();
+    /** @param array<string,mixed> $envelope */
+    public function normalise(array $envelope):array{
+        $facts=$envelope['facts']??array();
         if(!is_array($facts))throw new \InvalidArgumentException('Provider event body required');
         return $facts;
     }

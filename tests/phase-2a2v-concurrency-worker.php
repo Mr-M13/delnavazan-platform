@@ -37,11 +37,14 @@ $connect=static function(int $teacher,string $label) use($service,$scope,$eviden
     $begin=$service->beginAuthorization(array('provider_code'=>'google_calendar','teacher_id'=>$teacher,'client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>$scope)+$evidence($mode.'-'.$label.'-begin'),$key($mode.'-'.$label.'-begin'));
     return $service->completeAuthorization(array('state'=>(string)$begin['state'],'code'=>$label.'-'.$mode,'code_verifier'=>(string)$begin['code_verifier'],'redirect_uri'=>'https://academy.example/cb')+$evidence($mode.'-'.$label.'-complete'),$key($mode.'-'.$label.'-complete'));
 };
-$eventKey=$mode.'-event-'.substr(str_replace('-','',wp_generate_uuid4()),0,8);
-$delivery=static function(array $state,string $joinAt) use($eventKey):array{return array(
-    'provider_code'=>'google_meet','lesson_id'=>(int)$state['lesson_id'],'schedule_version_id'=>(int)$state['schedule_version_id'],'verified'=>true,
-    'facts'=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>$joinAt,'leave_at_utc'=>gmdate('Y-m-d H:i:s')),
-);};
+$given=is_array($state['delivery']??null)?$state['delivery']:array('event_key'=>$mode.'-event-'.substr(str_replace('-','',wp_generate_uuid4()),0,8),'observed_at'=>gmdate('Y-m-d H:i:s'),'leave_at_utc'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>gmdate('Y-m-d H:i:s'));
+$eventKey=(string)$given['event_key'];
+/** One authenticated transport envelope over the exact body the fixture already fixed. */
+$delivery=static function(array $state,string $joinAt) use($given,$eventKey):array{
+    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>(string)$given['observed_at'],'join_at_utc'=>$joinAt,'leave_at_utc'=>(string)$given['leave_at_utc']);
+    $body=(string)wp_json_encode($facts);
+    return array('provider_code'=>'google_meet','lesson_id'=>(int)$state['lesson_id'],'schedule_version_id'=>(int)$state['schedule_version_id'],'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-0000','facts'=>$facts);
+};
 try{
     if($mode==='connect_vs_revoke'){
         if($worker==='w1'){
@@ -54,19 +57,14 @@ try{
         }
         $result['ok']=true;
     }elseif($mode==='authorization_replay'){
-        if($worker==='w1'){
-            $result['action']='complete_authorization';
-            $hold('dzn_phase_2a2v_after_connection_write');
-            $result['outcome']=$connect((int)$state['teacher_id'],'replay');
-        }else{
-            $result['action']='competing_consent_after_consumption';
-            $intent=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}integration_oauth_authorizations WHERE teacher_id=%d ORDER BY id DESC LIMIT 1",(int)$state['teacher_id']));
-            if(!$intent)throw new RuntimeException('authorization intent fixture missing');
-            $result['consumed_state']=(string)$intent->authorization_state;
-            // A consumed authorization can never be revived, so the contender must build a fresh
-            // consent attempt instead of reusing the holder's one-time state.
-            $result['outcome']=$connect((int)$state['teacher_id'],'replay-second');
-        }
+        $pending=$state['pending_authorization']??null;
+        if(!is_array($pending))throw new RuntimeException('authorization replay fixture missing');
+        // Both processes attempt the identical completion of the identical state with the identical
+        // command key, so exactly one lifecycle may be consumed and the other must converge on the
+        // recorded command instead of minting a second consent or reviving the consumed state.
+        $result['action']=$worker==='w1'?'complete_authorization':'replay_completed_authorization';
+        if($worker==='w1')$hold('dzn_phase_2a2v_after_connection_write');
+        $result['outcome']=$service->completeAuthorization(array('state'=>(string)$pending['state'],'code'=>'race-'.$mode,'code_verifier'=>(string)$pending['code_verifier'],'redirect_uri'=>'https://academy.example/cb')+$evidence('race-complete'),'dzn-2a2v-race-complete-'.$mode);
         $result['ok']=true;
     }elseif($mode==='projection_vs_release'){
         if($worker==='w1'){
@@ -93,11 +91,11 @@ try{
         if($worker==='w1'){
             $result['action']='ingest_provider_event';
             $hold('dzn_phase_2a2v_after_ingest_write');
-            $result['outcome']=$ingest->ingest($delivery($state,gmdate('Y-m-d H:i:s')),$key('race-ingest'));
+            $result['outcome']=$ingest->ingest($delivery($state,(string)$given['join_at_utc']),$key('race-ingest'));
         }else{
             $result['action']='ingest_duplicate_or_conflicting_provider_event';
-            $join=gmdate('Y-m-d H:i:s');
-            if((string)getenv('DZN_PHASE_2A2V_VARIANT')==='conflict')$join=gmdate('Y-m-d H:i:s',strtotime((string)$state['start'].' UTC')+900);
+            $join=(string)$given['join_at_utc'];
+            if((string)getenv('DZN_PHASE_2A2V_VARIANT')==='conflict')$join=gmdate('Y-m-d H:i:s',strtotime((string)$given['join_at_utc'].' UTC')+900);
             $result['outcome']=$ingest->ingest($delivery($state,$join),$key('race-ingest-2'));
         }
         $result['ok']=true;
@@ -105,7 +103,7 @@ try{
         if($worker==='w1'){
             $result['action']='ingest_provider_event';
             $hold('dzn_phase_2a2v_after_ingest_write');
-            $result['outcome']=$ingest->ingest($delivery($state,gmdate('Y-m-d H:i:s')),$key('race-ingest'));
+            $result['outcome']=$ingest->ingest($delivery($state,(string)$given['join_at_utc']),$key('race-ingest'));
         }else{
             $result['action']='revoke_identity_mapping';
             $result['outcome']=$service->revokeIdentityMapping((int)$state['identity_mapping_id'],array('reason_code'=>'race_revoke')+$evidence('race-mapping-revoke'),$key('race-mapping-revoke'));

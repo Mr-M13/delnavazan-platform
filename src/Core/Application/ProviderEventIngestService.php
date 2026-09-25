@@ -8,14 +8,21 @@ use Delnavazan\Platform\Core\Support\Identifier;
 /**
  * Provider-event ingestion into the Phase-P evidence seam (Phase 2A.2-V, V-D8/V-D9).
  *
- * The integration layer is a trusted evidence *source*, never an evidence owner. It verifies the
- * delivery, translates it to provider-neutral facts, deduplicates on the provider event key against
- * the complete immutable context, records a durable conflict receipt for any changed context, and
- * then hands the facts to `CanonicalAttendanceIntakeService::ingestProviderEvidence`.
+ * The integration layer is a trusted evidence *source*, never an evidence owner. It accepts only a
+ * delivery envelope that a named trusted transport has already authenticated, translates that exact
+ * body to provider-neutral facts, deduplicates on the provider event key against the complete
+ * immutable context, records a durable conflict receipt for any changed context, and then hands the
+ * facts to `CanonicalAttendanceIntakeService::ingestProviderEvidence`. It performs no provider
+ * cryptography itself and never guesses that a delivery is genuine.
  *
  * It never resolves a participant identity, never asserts verification, never writes Phase-O outcome
  * storage, never settles attendance and never completes or cancels a Lesson. A provider conference or
  * a calendar event existing is an integration reference, not attendance evidence.
+ *
+ * The receipt is immutable and append-only: it records only that one exact authenticated delivery was
+ * received, and it is written before the Phase-P handoff so an interruption always leaves evidence.
+ * Admission is a separate appended outcome, written only after the handoff succeeded, so a receipt can
+ * never be read — or returned to a retrying caller — as admitted when Phase P never saw the fact.
  */
 final class ProviderEventIngestService {
     public function __construct(
@@ -29,71 +36,98 @@ final class ProviderEventIngestService {
     }
 
     /**
-     * Ingest one provider delivery.
+     * Ingest one authenticated provider delivery.
      *
-     * An exact duplicate converges on the recorded receipt; a materially different context is durably
-     * refused as a conflict and the original evidence row is never overwritten.
+     * A raw delivery is refused before anything is read from it. An exact duplicate converges on the
+     * recorded receipt and outcome, re-attempting the Phase-P handoff when no admission was ever
+     * recorded; a materially different context is durably refused as a conflict, and the original
+     * receipt and its history are never overwritten.
      */
     public function ingest(array $delivery,string $key):array{
         $this->requireCapability();
         $actor=$this->actor();
-        $providerCode=ProviderIntegrationRule::evidenceProviderCode((string)($delivery['provider_code']??''));
+        // A raw provider delivery is never evidence. Only an envelope a named trusted transport has
+        // already authenticated — naming the transport, the exact body it validated, the authenticated
+        // instant and the transport's own proof reference — reaches the normaliser, and the normaliser
+        // is handed that envelope and nothing else, so a header, a channel token or a bare body can
+        // never be promoted into attendance evidence.
+        $envelope=ProviderIntegrationRule::deliveryEnvelope($delivery);
+        $providerCode=$envelope['provider_code'];
         if(!$this->normalizer->verify($delivery))throw new \InvalidArgumentException('provider_event_unverified');
-        $facts=$this->normalizer->normalise($delivery);
+        $facts=$this->normalizer->normalise($envelope);
         $facts['provider_code']=$providerCode;
         $eventKey=trim((string)($facts['provider_event_key']??''));
         if($eventKey==='')throw new \InvalidArgumentException('Provider event key required');
         $eventKeyDigest=ProviderIntegrationIdempotency::providerEventKey($eventKey);
-        $lessonId=(int)($delivery['lesson_id']??$facts['lesson_id']??0);
-        $scheduleVersionId=(int)($delivery['schedule_version_id']??$facts['schedule_version_id']??0);
+        // The occurrence binding comes from the authenticated body whenever it names one: a
+        // caller-supplied hint may never move an authenticated delivery onto a different occurrence.
+        $lessonId=$this->occurrence((string)($facts['lesson_id']??''),(string)($delivery['lesson_id']??''));
+        $scheduleVersionId=$this->occurrence((string)($facts['schedule_version_id']??''),(string)($delivery['schedule_version_id']??''));
         if($lessonId<1||$scheduleVersionId<1)throw new \InvalidArgumentException('exact_occurrence_required');
         $context=$this->contextFacts($facts,$lessonId,$scheduleVersionId);
         $eventFactDigest=ProviderIntegrationIdempotency::payload($context);
         $digest=ProviderIntegrationIdempotency::key($key);
         $now=gmdate('Y-m-d H:i:s');
+        $eventId=0;$duplicate=false;
         $this->repository->begin();
         try{
             $this->repository->lockLessonRoots($lessonId);
             $existing=$this->repository->ingestEvent($providerCode,$eventKeyDigest,true);
             if($existing){
-                if(hash_equals((string)$existing->event_fact_digest,$eventFactDigest)){
-                    // Exact duplicate: no double count, no new receipt, and the recorded row must still
-                    // satisfy the aggregate contract before the duplicate is acknowledged.
-                    if(!ProviderIntegrationValidator::ingestEventShape($existing))throw new \RuntimeException('provider_event_receipt_corrupt');
+                if(!hash_equals((string)$existing->event_fact_digest,$eventFactDigest)){
+                    $kind=$this->conflictKind($existing,$context,$lessonId,$scheduleVersionId);
+                    $conflictId=$this->recordConflict($existing,$providerCode,$eventKeyDigest,$kind,$eventFactDigest,$lessonId,$scheduleVersionId,(string)$facts['observed_at'],$now,$actor);
                     $this->repository->commit();
-                    return array('ingest_event_id'=>(int)$existing->id,'processing_state'=>(string)$existing->processing_state,'conflict'=>false,'idempotent'=>true,'operation'=>'ingest_provider_event');
+                    return array('ingest_event_id'=>(int)$existing->id,'conflict_id'=>$conflictId,'conflict_kind'=>$kind,'processing_state'=>'conflicted','conflict'=>true,'idempotent'=>false,'operation'=>'ingest_provider_event');
                 }
-                $kind=$this->conflictKind($existing,$context,$lessonId,$scheduleVersionId);
-                $conflictId=$this->recordConflict($existing,$providerCode,$eventKeyDigest,$kind,$eventFactDigest,$lessonId,$scheduleVersionId,(string)$facts['observed_at'],$now,$actor);
+                // Exact duplicate. The receipt must still satisfy the aggregate contract, and it is
+                // only ever reported as admitted when an admitted handoff outcome already exists for
+                // it; otherwise the handoff is (re)attempted below, so an interrupted or failed
+                // request can never be answered with an admission that never happened.
+                if(!ProviderIntegrationValidator::ingestEventShape($existing))throw new \RuntimeException('provider_event_receipt_corrupt');
+                $eventId=(int)$existing->id;
+                $recorded=$this->repository->latestIngestOutcome($eventId,true);
+                if($recorded&&!ProviderIntegrationValidator::ingestOutcomeShape($recorded))throw new \RuntimeException('provider_event_outcome_corrupt');
+                if($recorded&&(string)$recorded->outcome==='admitted'){
+                    $this->repository->commit();
+                    return array('ingest_event_id'=>$eventId,'processing_state'=>'admitted','conflict'=>false,'idempotent'=>true,'operation'=>'ingest_provider_event');
+                }
                 $this->repository->commit();
-                return array('ingest_event_id'=>(int)$existing->id,'conflict_id'=>$conflictId,'conflict_kind'=>$kind,'processing_state'=>'conflicted','conflict'=>true,'idempotent'=>false,'operation'=>'ingest_provider_event');
+                $duplicate=true;
+            }else{
+                $eventId=$this->repository->insertIngestEvent(array(
+                    'uid'=>Identifier::uid(),'connection_id'=>isset($delivery['connection_id'])?(int)$delivery['connection_id']:null,
+                    'provider_code'=>$providerCode,'provider_event_key_digest'=>$eventKeyDigest,'event_fact_digest'=>$eventFactDigest,
+                    'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
+                    'participant_role'=>(string)$context['participant_role'],'provider_account_digest'=>(string)$context['provider_account_digest'],
+                    'event_sequence'=>$this->repository->maxEventSequence($providerCode)+1,
+                    'join_at_utc'=>$context['join_at_utc'],'leave_at_utc'=>$context['leave_at_utc'],
+                    'occurred_at'=>(string)$context['observed_at'],'received_at'=>$now,
+                    // The receipt records only that this exact delivery was received from this exact
+                    // authenticating transport. It is committed as `received` and never mutated again:
+                    // admission is a separate appended outcome written only after the Phase-P handoff.
+                    'processing_state'=>'received','reason_code'=>null,'conflicting_fact_digest'=>null,
+                    'transport'=>$envelope['transport'],'proof_reference_digest'=>$envelope['proof_reference_digest'],
+                    'created_at'=>$now,'created_by'=>$actor,
+                ));
+                // Deterministic gated boundary: the ingest receipt is written and the integration
+                // transaction is still open. Phase P is never called with an integration row held.
+                do_action('dzn_phase_2a2v_after_ingest_write',$eventId);
+                $this->repository->commit();
             }
-            $eventId=$this->repository->insertIngestEvent(array(
-                'uid'=>Identifier::uid(),'connection_id'=>isset($delivery['connection_id'])?(int)$delivery['connection_id']:null,
-                'provider_code'=>$providerCode,'provider_event_key_digest'=>$eventKeyDigest,'event_fact_digest'=>$eventFactDigest,
-                'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
-                'participant_role'=>(string)$context['participant_role'],'provider_account_digest'=>(string)$context['provider_account_digest'],
-                'event_sequence'=>$this->repository->maxEventSequence($providerCode)+1,
-                'join_at_utc'=>$context['join_at_utc'],'leave_at_utc'=>$context['leave_at_utc'],
-                'occurred_at'=>(string)$context['observed_at'],'received_at'=>$now,
-                'processing_state'=>'admitted','reason_code'=>null,'conflicting_fact_digest'=>null,
-                'created_at'=>$now,'created_by'=>$actor,
-            ));
-            // Deterministic gated boundary: the ingest receipt is written and the integration
-            // transaction is still open. Phase P is never called with an integration row held.
-            do_action('dzn_phase_2a2v_after_ingest_write',$eventId);
-            $this->repository->commit();
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='provider_event'&&($winner=$this->repository->ingestEvent($providerCode,$eventKeyDigest))){
-                if(!hash_equals((string)$winner->event_fact_digest,$eventFactDigest))throw new IdempotencyConflictException('Idempotency conflict');
-                return array('ingest_event_id'=>(int)$winner->id,'processing_state'=>(string)$winner->processing_state,'conflict'=>false,'idempotent'=>true,'operation'=>'ingest_provider_event');
-            }
-            throw $e;
+            $winner=$this->repository->duplicate($e)==='provider_event'?$this->repository->ingestEvent($providerCode,$eventKeyDigest):null;
+            if(!$winner)throw $e;
+            if(!hash_equals((string)$winner->event_fact_digest,$eventFactDigest))throw new IdempotencyConflictException('Idempotency conflict');
+            $eventId=(int)$winner->id;$duplicate=true;
         }
         // Phase P owns intake, identity resolution, assessment and any canonical consequence. The
         // integration layer supplies facts only, and its own transaction is already closed so no
-        // integration row is held across the Phase-P transaction.
+        // integration row is held across the Phase-P transaction. The receipt deliberately exists
+        // before this handoff: an interruption here leaves durable evidence and the next request
+        // repeats the handoff (Phase P is idempotent on the provider event key) instead of reporting
+        // an admission that never reached Phase P.
         $intakeInput=array(
             'provider_code'=>$providerCode,
             'provider_account_key'=>(string)$facts['provider_account_key'],
@@ -109,11 +143,33 @@ final class ProviderEventIngestService {
         try{
             $result=$this->intake->ingestProviderEvidence($lessonId,$scheduleVersionId,$intakeInput,$key);
         }catch(\Throwable$e){
-            $this->markProcessingState($eventId,'refused',$this->refusalCode($e));
+            $this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'refused',$this->refusalCode($e),null,$actor);
             throw $e;
         }
-        $this->markProcessingState($eventId,'admitted',null);
-        return array('ingest_event_id'=>$eventId,'processing_state'=>'admitted','conflict'=>false,'idempotent'=>false,'intake'=>$result,'operation'=>'ingest_provider_event');
+        // Only a successful Phase-P handoff appends the durable admission, and the admission records
+        // the exact Phase-P result it was written for.
+        $resultDigest=ProviderIntegrationIdempotency::payload(array(
+            'case_id'=>(int)($result['case_id']??0),'evidence_id'=>(int)($result['evidence_id']??0),
+            'created'=>isset($result['created'])?(bool)$result['created']:null,
+        ));
+        $this->recordOutcome($eventId,$providerCode,$eventKeyDigest,'admitted',null,$resultDigest,$actor);
+        return array('ingest_event_id'=>$eventId,'processing_state'=>'admitted','conflict'=>false,'idempotent'=>$duplicate,'intake'=>$result,'operation'=>'ingest_provider_event');
+    }
+
+    /**
+     * Resolve the occurrence binding of one delivery.
+     *
+     * An authenticated body that names an occurrence wins over a caller-supplied hint, and a delivery
+     * whose two bindings disagree is refused: a caller may never re-point an authenticated provider
+     * event at a different Lesson or schedule version.
+     */
+    private function occurrence(mixed $authenticated,mixed $claimed):int{
+        $fromBody=$authenticated===null?'':trim((string)$authenticated);
+        $fromHint=$claimed===null?'':trim((string)$claimed);
+        if($fromBody!==''&&(!ctype_digit($fromBody)||(int)$fromBody<1))throw new \InvalidArgumentException('provider_event_context_mismatch');
+        if($fromHint!==''&&(!ctype_digit($fromHint)||(int)$fromHint<1))throw new \InvalidArgumentException('exact_occurrence_required');
+        if($fromBody!==''&&$fromHint!==''&&$fromBody!==$fromHint)throw new \InvalidArgumentException('provider_event_context_mismatch');
+        return $fromBody!==''?(int)$fromBody:(int)$fromHint;
     }
 
     /**
@@ -161,12 +217,20 @@ final class ProviderEventIngestService {
         ));
     }
 
-    /** The recorded outcome of one ingest attempt is write-once: it is set exactly once, after Phase P. */
-    private function markProcessingState(int $eventId,string $state,?string $reason):void{
-        global $wpdb;
-        $result=$wpdb->update($wpdb->prefix.'dzn_provider_ingest_events',array('processing_state'=>$state,'reason_code'=>$reason),array('id'=>$eventId,'processing_state'=>'admitted'));
-        if(false===$result)throw new \RuntimeException('Provider event receipt update failed');
-        if($result===0&&$state!=='admitted')throw new \RuntimeException('Provider event receipt already settled');
+    /**
+     * Append one handoff outcome for a receipt; the immutable receipt table is never updated.
+     *
+     * Every attempt appends its own outcome, so an interrupted attempt is followed by a new row rather
+     * than by a mutation of the recorded history, and the latest row is always the effective outcome.
+     */
+    private function recordOutcome(int $eventId,string $providerCode,string $eventKeyDigest,string $outcome,?string $reason,?string $resultDigest,int $actor):int{
+        $now=gmdate('Y-m-d H:i:s');
+        return $this->repository->insertIngestOutcome(array(
+            'uid'=>Identifier::uid(),'provider_ingest_event_id'=>$eventId,'provider_code'=>$providerCode,
+            'provider_event_key_digest'=>$eventKeyDigest,'outcome'=>$outcome,'reason_code'=>$reason,
+            'intake_result_digest'=>$resultDigest,'recorded_at'=>$now,'recorded_by'=>$actor,
+            'created_at'=>$now,'created_by'=>$actor,
+        ));
     }
 
     private function refusalCode(\Throwable $e):string{

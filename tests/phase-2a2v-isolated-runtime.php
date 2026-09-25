@@ -76,6 +76,29 @@ $assert(!str_contains((string)wp_json_encode($evidence),'raw-staff-reference'),'
 $refused(fn()=>ProviderIntegrationRule::evidenceFacts(array('evidence_channel'=>'guess','evidence_reference'=>'x','evidence_at'=>'2026-09-25 10:00:00')),'a free-form evidence channel');
 $refused(fn()=>ProviderIntegrationRule::evidenceFacts(array('evidence_channel'=>'staff_record','evidence_reference'=>'x','evidence_at'=>'soon')),'a non-UTC evidence instant');
 
+// 3b. V-D8 delivery authenticity: only an envelope a named trusted transport already authenticated,
+// bound to the exact body it validated, may become provider evidence.
+$authenticated=static function(array $facts,string $providerCode='google_meet'):array{
+    $body=(string)wp_json_encode($facts);
+    return array(
+        'provider_code'=>$providerCode,'transport'=>'deployment_gateway','authenticated'=>true,
+        'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),
+        'proof_reference'=>'proof-0123456789abcdef','facts'=>$facts,
+    );
+};
+$assert(ProviderIntegrationRule::proofTransport('deployment_gateway')==='deployment_gateway','a named trusted transport must be admitted');
+$assert(ProviderIntegrationRule::proofTransport('GOOGLE_CHANNEL_JWT')==='google_channel_jwt','a transport identity must be normalised case-insensitively');
+$refused(fn()=>ProviderIntegrationRule::proofTransport('channel_token'),'an unlisted transport identity');
+$envelope=ProviderIntegrationRule::deliveryEnvelope($authenticated(array('event_key'=>'e-1')));
+$assert($envelope['transport']==='deployment_gateway'&&ProviderIntegrationRule::digest($envelope['proof_reference_digest']),'the authenticated envelope must record the transport and digest of its proof');
+$assert(!str_contains((string)wp_json_encode($envelope),'proof-0123456789abcdef'),'the raw transport proof must never survive into the envelope');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_meet','transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>'{}','body_digest'=>str_repeat('0',64),'proof_reference'=>'proof-0123456789abcdef')),'a body that does not match its declared digest');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_meet','transport'=>'deployment_gateway','authenticated'=>false,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>'{}','body_digest'=>hash('sha256','{}'),'proof_reference'=>'proof-0123456789abcdef')),'an unauthenticated delivery');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_meet','transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>'','body_digest'=>hash('sha256',''),'proof_reference'=>'proof-0123456789abcdef')),'an empty body');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_meet','transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>'{}','body_digest'=>hash('sha256','{}'),'proof_reference'=>'short')),'an envelope without a transport proof');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_calendar','transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>'{}','body_digest'=>hash('sha256','{}'),'proof_reference'=>'proof-0123456789abcdef')),'a projection-only provider code carrying attendance evidence');
+$refused(fn()=>ProviderIntegrationRule::deliveryEnvelope(array('provider_code'=>'google_meet','raw_body'=>'{}','headers'=>array('x-goog-channel-token'=>'t'))),'a raw delivery carrying a channel token');
+
 // 4. V-D6 projection facts are copied from the exact canonical schedule version, never derived.
 $version=(object)array('id'=>91,'version_number'=>2,'starts_at_utc'=>'2026-09-25 08:00:00','ends_at_utc'=>'2026-09-25 09:00:00','schedule_timezone'=>'Australia/Brisbane','local_wall_date'=>'2026-09-25','local_wall_time'=>'18:00:00');
 $facts=ProviderIntegrationRule::scheduleProjectionFacts($version);
@@ -107,6 +130,7 @@ $digests=array(
     ProviderIntegrationIdempotency::evidence('same'),
     ProviderIntegrationIdempotency::providerEventKey('same'),
     ProviderIntegrationIdempotency::providerPayload('same'),
+    ProviderIntegrationIdempotency::proof('same'),
 );
 $assert(count(array_unique($digests))===count($digests),'every digest domain must be separated from every other domain');
 $tampered=ProviderIntegrationIdempotency::payload(array('provider_code'=>'google_meet','provider_account_digest'=>ProviderIntegrationIdempotency::evidence('acct'),'join_at_utc'=>'2026-09-25 08:00:00'));
@@ -136,7 +160,7 @@ $refused(fn()=>$secrets->open(41,'google_calendar',$corrupt),'an unknown cipher 
 $redacted=IntegrationSecretService::redacted($sealed);
 $assert($redacted['sealed']===true&&!str_contains((string)wp_json_encode($redacted),'refresh-material'),'a redacted credential report must never carry material');
 
-// 7. Google translation seam: pure, exact, PKCE-bound, and never an I/O client.
+// 7. Google translation seam: pure, exact, PKCE-bound, translation-only, and never an I/O client.
 $adapter=new GoogleCalendarMeetAdapter();
 $uri=$adapter->authorizationUri(array('client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>'https://www.googleapis.com/auth/calendar.events','state'=>'state-value','code_challenge'=>'challenge-value'));
 foreach(array('client_id=client-1','redirect_uri=https%3A%2F%2Facademy.example%2Fcb','code_challenge=challenge-value','code_challenge_method=S256','state=state-value') as $needle)
@@ -144,17 +168,27 @@ foreach(array('client_id=client-1','redirect_uri=https%3A%2F%2Facademy.example%2
 $refused(fn()=>$adapter->authorizationUri(array('client_reference'=>'client-1','redirect_uri'=>'http://academy.example/cb','scope_snapshot'=>'https://www.googleapis.com/auth/calendar.events','state'=>'s','code_challenge'=>'c')),'an insecure redirect target');
 $refused(fn()=>$adapter->authorizationUri(array('client_reference'=>'','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>'https://www.googleapis.com/auth/calendar.events','state'=>'s','code_challenge'=>'c')),'a request without a client reference');
 $projection=$adapter->project(array('provider_code'=>'google_calendar','operation'=>'project','lesson_id'=>7,'schedule_version_id'=>91,'starts_at_utc'=>'2026-09-25 08:00:00','ends_at_utc'=>'2026-09-25 09:00:00','schedule_timezone'=>'Australia/Brisbane','local_wall_date'=>'2026-09-25','local_wall_time'=>'18:00:00','projection_reference'=>'ref-1','now_utc'=>'2026-09-25 07:00:00'));
-$assert(($projection['google_request']['body']['start']['dateTime']??'')==='2026-09-25T08:00:00Z','the provider write must carry the exact canonical start instant');
-$assert(($projection['google_request']['body']['end']['dateTime']??'')==='2026-09-25T09:00:00Z','the provider write must carry the exact canonical end instant');
-$assert(($projection['google_request']['body']['privateExtendedProperties']['dzn_schedule_version_id']??'')==='91','the provider write must name the exact canonical schedule version');
+$assert(($projection['provider_request']['body']['start']['dateTime']??'')==='2026-09-25T08:00:00Z','the provider write must carry the exact canonical start instant');
+$assert(($projection['provider_request']['body']['end']['dateTime']??'')==='2026-09-25T09:00:00Z','the provider write must carry the exact canonical end instant');
+$assert(($projection['provider_request']['body']['privateExtendedProperties']['dzn_schedule_version_id']??'')==='91','the provider write must name the exact canonical schedule version');
 $assert(ProviderIntegrationRule::digest($projection['provider_facts_digest']),'the provider command facts must be digested, not stored raw');
+$assert(($projection['acknowledged']??true)===false&&!isset($projection['provider_object_reference']),'a translation-only seam must never claim an acknowledged provider reference');
 $refused(fn()=>$adapter->project(array('provider_code'=>'google_calendar','operation'=>'project','lesson_id'=>7,'schedule_version_id'=>91,'starts_at_utc'=>'','ends_at_utc'=>'')),'a projection without a canonical interval');
-$assert($adapter->verify(array('provider_code'=>'google_meet','raw_body'=>'{}','headers'=>array()))===false,'an unverified provider delivery must be refused');
-$assert($adapter->verify(array('provider_code'=>'google_meet','raw_body'=>'{}','headers'=>array('x-goog-channel-token'=>'t')))===true,'a delivery carrying a verifiable envelope must pass the seam');
-$normalised=$adapter->normalise(array('provider_code'=>'google_meet','raw_body'=>(string)wp_json_encode(array('event_key'=>'e-1','participant_reference'=>'acct-1','participant_role'=>'teacher','observed_at'=>'2026-09-25 09:00:00','join_at_utc'=>'2026-09-25 08:00:00','leave_at_utc'=>'2026-09-25 08:40:00'))));
+$assert($adapter->verify(array('provider_code'=>'google_meet','raw_body'=>'{}','headers'=>array()))===false,'a raw provider delivery must be refused');
+$assert($adapter->verify(array('provider_code'=>'google_meet','raw_body'=>'{}','headers'=>array('x-goog-channel-token'=>'t')))===false,'a channel token is routing metadata and must never be accepted as proof');
+$assert($adapter->verify(array('provider_code'=>'google_meet','raw_body'=>'{}'))===false,'a bare body must be refused');
+$authenticatedDelivery=$authenticated(array('event_key'=>'e-1','participant_reference'=>'acct-1','participant_role'=>'teacher','observed_at'=>'2026-09-25 09:00:00','join_at_utc'=>'2026-09-25 08:00:00','leave_at_utc'=>'2026-09-25 08:40:00'));
+$assert($adapter->verify($authenticatedDelivery),'an authenticated transport envelope must pass the seam');
+$rebound=$authenticatedDelivery;$rebound['body_digest']=hash('sha256','{}');
+$assert($adapter->verify($rebound)===false,'an envelope that does not bind the exact body must be refused');
+$unproven=$authenticatedDelivery;$unproven['proof_reference']='short';
+$assert($adapter->verify($unproven)===false,'an envelope without a transport proof must be refused');
+$normalised=$adapter->normalise($authenticatedDelivery);
 $assert($normalised['provider_code']==='google_meet'&&$normalised['participant_role']==='teacher','a normalised provider event must be provider-neutral');
 $assert($normalised['provider_account_key']==='acct-1'&&$normalised['join_at_utc']==='2026-09-25 08:00:00','the normaliser must return the raw account reference for Phase-P digesting and the exact instants');
-$refused(fn()=>$adapter->normalise(array('provider_code'=>'google_meet','raw_body'=>(string)wp_json_encode(array('event_key'=>'e-1','participant_reference'=>'acct-1','participant_role'=>'teacher','observed_at'=>'later')))),'a provider event without a usable UTC instant');
+$assert($normalised['lesson_id']===null,'a provider event that names no occurrence must not inherit one');
+$refused(fn()=>$adapter->normalise($authenticated(array('event_key'=>'e-1','participant_reference'=>'acct-1','participant_role'=>'teacher','observed_at'=>'later'))),'a provider event without a usable UTC instant');
+$refused(fn()=>$adapter->normalise($authenticated(array('event_key'=>'e-1','participant_reference'=>'acct-1','participant_role'=>'teacher','observed_at'=>'2026-09-25 09:00:00','join_at_utc'=>'whenever'))),'a provider event with a non-UTC join instant');
 
 // 8. Deterministic contract adapters: in-memory only, call-recording, credential-redacting.
 $oauth=new ContractProviderAdapters(array('material-1'=>'subject-1'));
@@ -169,6 +203,11 @@ $deterministicA=$oauth->project(array('provider_code'=>'google_meet','operation'
 $deterministicB=$oauth->project(array('provider_code'=>'google_meet','operation'=>'project','lesson_id'=>7,'schedule_version_id'=>91,'now_utc'=>'2026-09-25 07:00:00'));
 $assert($deterministicA['provider_object_reference']===$deterministicB['provider_object_reference'],'the contract adapter must be deterministic for identical canonical facts');
 $assert($oauth->count('google_meet')===2,'the projection calls must be recorded per provider code');
+$assert($oauth->verify(array('provider_code'=>'google_meet','raw_body'=>'{}'))===false,'the deterministic transport must refuse a raw delivery');
+$assert($oauth->verify($authenticated(array('provider_event_key'=>'e-1')))===true,'the deterministic transport must accept an authenticated envelope');
+$translationOnly=new ContractProviderAdapters(array(),ContractProviderAdapters::PROJECTION_PENDING);
+$translation=$translationOnly->project(array('provider_code'=>'google_calendar','operation'=>'project','lesson_id'=>7,'schedule_version_id'=>91,'now_utc'=>'2026-09-25 07:00:00'));
+$assert(isset($translation['provider_request'])&&!isset($translation['provider_object_reference'])&&ProviderIntegrationRule::digest($translation['provider_facts_digest']),'a translation-only transport must return a request and no provider reference');
 
 // 9. Fail-closed shape validation over stored rows.
 $connection=(object)array('id'=>1,'provider_code'=>'google_calendar','teacher_id'=>5,'connection_state'=>'connected','connection_version'=>2,'lifecycle_sequence'=>1,'identity_state'=>'verified','active_slot'=>1,'identity_digest'=>str_repeat('b',64),'scope_snapshot'=>'https://www.googleapis.com/auth/calendar.events');
@@ -187,10 +226,30 @@ $assert(ProviderIntegrationValidator::mappingShape((object)array('id'=>1,'provid
 $assert(!ProviderIntegrationValidator::mappingShape((object)array('id'=>1,'provider_code'=>'google_calendar','teacher_id'=>5,'subject_digest'=>str_repeat('c',64),'mapping_state'=>'verified','mapping_version'=>1,'active_slot'=>null),'connection_identity'),'a verified mapping without an active slot must fail closed');
 $assert(ProviderIntegrationValidator::mappingShape((object)array('id'=>2,'provider_code'=>'google_calendar','lesson_id'=>7,'schedule_version_id'=>91,'event_digest'=>str_repeat('d',64),'projection_state'=>'verified','mapping_version'=>1,'active_slot'=>1),'calendar_event'),'a verified calendar projection must validate');
 $assert(ProviderIntegrationValidator::mappingShape((object)array('id'=>3,'provider_code'=>'google_meet','lesson_id'=>7,'schedule_version_id'=>91,'conference_digest'=>str_repeat('e',64),'join_uri_digest'=>str_repeat('f',64),'projection_state'=>'verified','mapping_version'=>1,'active_slot'=>1),'meeting_conference'),'a verified conference projection must validate');
-$event=(object)array('id'=>1,'provider_code'=>'google_meet','provider_event_key_digest'=>str_repeat('1',64),'event_fact_digest'=>str_repeat('2',64),'provider_account_digest'=>str_repeat('3',64),'event_sequence'=>1,'processing_state'=>'admitted','occurred_at'=>'2026-09-25 08:00:00','received_at'=>'2026-09-25 08:00:05');
+$event=(object)array('id'=>1,'provider_code'=>'google_meet','provider_event_key_digest'=>str_repeat('1',64),'event_fact_digest'=>str_repeat('2',64),'provider_account_digest'=>str_repeat('3',64),'event_sequence'=>1,'processing_state'=>'received','occurred_at'=>'2026-09-25 08:00:00','received_at'=>'2026-09-25 08:00:05','transport'=>'deployment_gateway','proof_reference_digest'=>str_repeat('7',64));
 $assert(ProviderIntegrationValidator::ingestEventShape($event),'a well-formed provider event receipt must validate');
 $future=clone $event;$future->occurred_at='2026-09-25 09:00:00';
 $assert(!ProviderIntegrationValidator::ingestEventShape($future),'a provider instant after the local receipt must fail closed');
+$unproven=clone $event;$unproven->proof_reference_digest=null;
+$assert(!ProviderIntegrationValidator::ingestEventShape($unproven),'a receipt without a transport proof must fail closed');
+$unproven=clone $event;$unproven->transport='';
+$assert(!ProviderIntegrationValidator::ingestEventShape($unproven),'a receipt without an authenticating transport must fail closed');
+$unproven=clone $event;$unproven->processing_state='settled';
+$assert(!ProviderIntegrationValidator::ingestEventShape($unproven),'an uncontrolled receipt state must fail closed');
+$pendingProjection=(object)array('id'=>4,'provider_code'=>'google_calendar','lesson_id'=>7,'schedule_version_id'=>91,'event_digest'=>str_repeat('a',64),'projection_state'=>'pending','mapping_version'=>1,'active_slot'=>null);
+$assert(ProviderIntegrationValidator::mappingShape($pendingProjection,'calendar_event'),'a pending translation must validate as a projection');
+$pendingProjection->active_slot=1;
+$assert(!ProviderIntegrationValidator::mappingShape($pendingProjection,'calendar_event'),'a pending translation must never hold an active slot');
+$outcome=(object)array('id'=>1,'provider_ingest_event_id'=>1,'provider_code'=>'google_meet','provider_event_key_digest'=>str_repeat('1',64),'handoff_attempt'=>1,'outcome'=>'admitted','reason_code'=>null,'intake_result_digest'=>str_repeat('9',64),'recorded_at'=>'2026-09-25 08:00:05');
+$assert(ProviderIntegrationValidator::ingestOutcomeShape($outcome),'an admitted handoff outcome must validate');
+$refusal=clone $outcome;$refusal->outcome='refused';$refusal->reason_code='evidence_refused';$refusal->intake_result_digest=null;
+$assert(ProviderIntegrationValidator::ingestOutcomeShape($refusal),'a refused handoff outcome must carry its reason');
+$refusal=clone $outcome;$refusal->outcome='refused';$refusal->reason_code='';$refusal->intake_result_digest=null;
+$assert(!ProviderIntegrationValidator::ingestOutcomeShape($refusal),'a refusal without a reason must fail closed');
+$refusal=clone $outcome;$refusal->outcome='maybe';
+$assert(!ProviderIntegrationValidator::ingestOutcomeShape($refusal),'an uncontrolled handoff outcome must fail closed');
+$refusal=clone $outcome;$refusal->handoff_attempt=0;
+$assert(!ProviderIntegrationValidator::ingestOutcomeShape($refusal),'a handoff outcome without an attempt number must fail closed');
 $assert(ProviderIntegrationValidator::conflictShape((object)array('id'=>1,'provider_code'=>'google_meet','provider_event_key_digest'=>str_repeat('1',64),'conflicting_fact_digest'=>str_repeat('2',64),'conflict_kind'=>'cross_interval')),'a recorded conflict receipt must validate');
 $assert(!ProviderIntegrationValidator::conflictShape((object)array('id'=>1,'provider_code'=>'google_meet','provider_event_key_digest'=>str_repeat('1',64),'conflicting_fact_digest'=>str_repeat('2',64),'conflict_kind'=>'whatever')),'an uncontrolled conflict kind must fail closed');
 $command=(object)array('command_domain'=>'provider_integration_v1','operation'=>'project_meeting_conference','command_key_digest'=>str_repeat('4',64),'command_payload_digest'=>str_repeat('5',64));

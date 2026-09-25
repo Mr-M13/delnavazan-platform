@@ -24,16 +24,27 @@ final class ProviderIntegrationRule {
     public const PURPOSES=array('connection_identity','calendar_event','meeting_conference');
     public const CONNECTION_STATES=array('disconnected','authorizing','connected','refresh_failed','revoking','revoke_failed','revoked');
     public const CREDENTIAL_STATES=array('active','quarantined','revoked');
-    public const MAPPING_STATES=array('verified','unverified','revoked');
+    /** A projection may be recorded as `pending` while only its provider translation exists. */
+    public const MAPPING_STATES=array('pending','verified','unverified','revoked');
     public const AUTHORIZATION_STATES=array('issued','consumed','expired','rejected');
-    public const INGEST_STATES=array('admitted','converged','conflicted','refused');
+    /** Receipt states: a receipt is always written in its receive state and never mutated afterwards. */
+    public const INGEST_STATES=array('received','admitted','converged','conflicted','refused');
+    /** The append-only handoff outcomes a provider-event receipt may accumulate, in order. */
+    public const INGEST_OUTCOMES=array('admitted','refused');
     public const CONFLICT_KINDS=array('changed_payload','cross_lesson','cross_schedule_version','cross_context','cross_participant','cross_interval');
     /** Controlled provenance channels for Phase-V commands. A free-form channel is never accepted. */
     public const EVIDENCE_CHANNELS=array('staff_record','authenticated_platform','document_reference','provider_callback','system_ingest');
+    /**
+     * Controlled identities of a trusted transport that has already performed the cryptographic
+     * validation of one provider delivery. Phase V never verifies a provider secret itself, so it
+     * refuses a raw delivery outright and accepts only an envelope a named transport authenticated.
+     */
+    public const PROOF_TRANSPORTS=array('google_channel_jwt','google_pubsub_oidc','deployment_gateway');
     public const OPERATIONS=array(
         'begin_authorization','complete_authorization','refresh_connection','disconnect_connection','revoke_connection',
         'record_identity_mapping','revoke_identity_mapping','project_calendar_event','retract_calendar_projection',
-        'project_meeting_conference','retract_meeting_projection','ingest_provider_event',
+        'project_meeting_conference','retract_meeting_projection',
+        'acknowledge_calendar_projection','acknowledge_meeting_projection','ingest_provider_event',
     );
     /** Lifecycle exits, per the locked V-D2 owner decision. */
     private const TRANSITIONS=array(
@@ -63,6 +74,45 @@ final class ProviderIntegrationRule {
     public static function purpose(string $purpose):string{
         if(!in_array($purpose,self::PURPOSES,true))throw new \InvalidArgumentException('Controlled mapping purpose required');
         return $purpose;
+    }
+
+    /** The identity of a trusted transport that has already authenticated one provider delivery. */
+    public static function proofTransport(string $transport):string{
+        $transport=strtolower(trim($transport));
+        if(!in_array($transport,self::PROOF_TRANSPORTS,true))throw new \InvalidArgumentException('provider_event_unverified');
+        return $transport;
+    }
+
+    /**
+     * Reduce one provider delivery to the authenticated envelope only.
+     *
+     * Phase V performs no provider cryptography and holds no provider secret: a delivery is trusted
+     * only when a named transport has already validated it and hands over the exact body it validated,
+     * bound to the authenticated instant and to the transport's own proof reference. A raw delivery —
+     * a bare body, a header set, or a channel token with no transport proof — is refused, so a
+     * fabricated payload can never become attendance evidence. The proof reference is digested here
+     * and the raw value never reaches storage.
+     *
+     * @param array<string,mixed> $delivery
+     * @return array{provider_code:string,transport:string,authenticated_at:string,raw_body:string,body_digest:string,proof_reference_digest:string}
+     */
+    public static function deliveryEnvelope(array $delivery):array{
+        $providerCode=self::evidenceProviderCode((string)($delivery['provider_code']??''));
+        $transport=self::proofTransport((string)($delivery['transport']??''));
+        if(($delivery['authenticated']??null)!==true)throw new \InvalidArgumentException('provider_event_unverified');
+        $authenticatedAt=(string)($delivery['authenticated_at']??'');
+        if(!self::utc($authenticatedAt)||$authenticatedAt>gmdate('Y-m-d H:i:s'))throw new \InvalidArgumentException('provider_event_unverified');
+        $body=(string)($delivery['raw_body']??'');
+        if(trim($body)==='')throw new \InvalidArgumentException('provider_event_unverified');
+        $digest=trim((string)($delivery['body_digest']??''));
+        if(!hash_equals(hash('sha256',$body),$digest))throw new \InvalidArgumentException('provider_event_unverified');
+        $proof=trim((string)($delivery['proof_reference']??''));
+        if(strlen($proof)<16)throw new \InvalidArgumentException('provider_event_unverified');
+        return array(
+            'provider_code'=>$providerCode,'transport'=>$transport,'authenticated_at'=>$authenticatedAt,
+            'raw_body'=>$body,'body_digest'=>$digest,
+            'proof_reference_digest'=>ProviderIntegrationIdempotency::proof($proof),
+        );
     }
 
     /** Whether one recorded connection state may move to another recorded connection state. */

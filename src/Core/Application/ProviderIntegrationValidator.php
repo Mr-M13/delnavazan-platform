@@ -63,6 +63,10 @@ final class ProviderIntegrationValidator {
         if(!ProviderIntegrationRule::digest($event->provider_event_key_digest??null))return false;
         if(!ProviderIntegrationRule::digest($event->event_fact_digest??null))return false;
         if(!ProviderIntegrationRule::digest($event->provider_account_digest??null))return false;
+        // The receipt records the trusted transport that authenticated the delivery and the digest of
+        // its proof: a receipt without provenance could not have been authenticated by anyone.
+        if((string)($event->transport??'')==='')return false;
+        if(!ProviderIntegrationRule::digest($event->proof_reference_digest??null))return false;
         if((int)($event->event_sequence??0)<1)return false;
         if(!in_array((string)($event->processing_state??''),ProviderIntegrationRule::INGEST_STATES,true))return false;
         if(!ProviderIntegrationRule::utc($event->occurred_at??null)||!ProviderIntegrationRule::utc($event->received_at??null))return false;
@@ -70,6 +74,24 @@ final class ProviderIntegrationValidator {
         // Provider time and local time are separate facts: a provider instant may never be in the future
         // of the local receipt, and the local receipt may never precede the provider instant.
         return $occurred<=$received;
+    }
+
+    /**
+     * One append-only handoff outcome for a provider-event receipt.
+     *
+     * Admission is only ever recorded by an outcome row that exists after a successful Phase-P
+     * handoff, so a receipt with no admitted outcome can never be reported as admitted.
+     */
+    public static function ingestOutcomeShape(object $outcome):bool{
+        if((int)($outcome->id??0)<1||(int)($outcome->provider_ingest_event_id??0)<1)return false;
+        if(!in_array((string)($outcome->provider_code??''),ProviderIntegrationRule::EVIDENCE_PROVIDER_CODES,true))return false;
+        if(!ProviderIntegrationRule::digest($outcome->provider_event_key_digest??null))return false;
+        $state=(string)($outcome->outcome??'');
+        if(!in_array($state,ProviderIntegrationRule::INGEST_OUTCOMES,true))return false;
+        if((int)($outcome->handoff_attempt??0)<1)return false;
+        if(!ProviderIntegrationRule::utc($outcome->recorded_at??null))return false;
+        if($state==='refused')return trim((string)($outcome->reason_code??''))!=='';
+        return ProviderIntegrationRule::digest($outcome->intake_result_digest??null);
     }
 
     public static function conflictShape(object $conflict):bool{

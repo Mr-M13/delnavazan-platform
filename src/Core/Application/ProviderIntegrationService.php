@@ -58,7 +58,12 @@ final class ProviderIntegrationService {
      * The acting principal must resolve to that Teacher through the Phase-J teacher principal link;
      * an administrator acting for another Teacher needs the integration-management capability, and a
      * Teacher may only ever connect their own calendar. The returned `state` and `code_verifier` exist
-     * only in this response: neither is ever persisted or logged.
+     * only in this response: neither is ever persisted or logged, and a replay of the identical command
+     * returns the recorded connection result without any one-time material.
+     *
+     * A reconnect starts a new lifecycle: an already-connected connection keeps its active slot and
+     * stays usable while the new consent is pending, and the new consent settles every competing
+     * lifecycle explicitly when it completes.
      */
     public function beginAuthorization(array $input,string $key):array{
         $actor=$this->actor();
@@ -74,25 +79,21 @@ final class ProviderIntegrationService {
         if(!str_starts_with($redirectUri,'https://'))throw new \InvalidArgumentException('Exact HTTPS redirect target required');
         $scopeSnapshot=ProviderIntegrationRule::scopeSnapshot($input['scope_snapshot']??'');
         $evidence=ProviderIntegrationRule::evidenceFacts($input);
-        $state=rtrim(strtr(base64_encode(random_bytes(32)),'+/','-_'),'=');
-        $verifier=rtrim(strtr(base64_encode(random_bytes(48)),'+/','-_'),'=');
-        $challenge=rtrim(strtr(base64_encode(hash('sha256',$verifier,true)),'+/','-_'),'=');
-        $stateDigest=ProviderIntegrationIdempotency::evidence($state);
-        $verifierDigest=ProviderIntegrationIdempotency::evidence($verifier);
-        $now=gmdate('Y-m-d H:i:s');
-        $expiresAt=gmdate('Y-m-d H:i:s',time()+self::AUTHORIZATION_TTL_SECONDS);
-        $digest=ProviderIntegrationIdempotency::key($key);
+        // The idempotency digest is taken over the deterministic request facts only. The one-time
+        // state, the PKCE verifier and the expiry are generated strictly after the recorded-command
+        // check, so repeating one command key reconstructs the identical digest and converges instead
+        // of minting fresh randomness that could never match its own recorded payload.
         $facts=array(
             'domain'=>ProviderIntegrationRule::COMMAND_DOMAIN,'operation'=>'begin_authorization',
             'provider_code'=>$providerCode,'teacher_id'=>$teacherId,'principal_user_id'=>$actor,
             'client_reference'=>$clientReference,'redirect_uri'=>$redirectUri,'scope_snapshot'=>$scopeSnapshot,
-            'state_digest'=>$stateDigest,'verifier_digest'=>$verifierDigest,'expires_at'=>$expiresAt,
         );
         $payload=ProviderIntegrationIdempotency::payload($facts);
+        $digest=ProviderIntegrationIdempotency::key($key);
         $this->repository->begin();
         try{
             if($winner=$this->repository->command($digest)){
-                $replay=$this->replay($winner,$payload,'begin_authorization',$this->authorizationResultFromFacts($facts));
+                $replay=$this->replay($winner,$payload,'begin_authorization',$this->authorizationReplayResult($winner,$facts));
                 $this->repository->commit();
                 return $replay;
             }
@@ -101,8 +102,13 @@ final class ProviderIntegrationService {
             // Revalidate the principal link inside the transaction: the link may have been revoked
             // between the capability check and this write.
             if(!$this->resolvesOwnTeacher($actor,$teacherId)&&!current_user_can(self::MANAGE_CAPABILITY))throw new \RuntimeException('Unauthorized');
-            $active=$this->repository->activeConnection($providerCode,$teacherId,true);
-            if($active&&(string)$active->connection_state==='connected')throw new \InvalidArgumentException('provider_connection_already_connected');
+            $now=gmdate('Y-m-d H:i:s');
+            $expiresAt=gmdate('Y-m-d H:i:s',time()+self::AUTHORIZATION_TTL_SECONDS);
+            $state=rtrim(strtr(base64_encode(random_bytes(32)),'+/','-_'),'=');
+            $verifier=rtrim(strtr(base64_encode(random_bytes(48)),'+/','-_'),'=');
+            $challenge=rtrim(strtr(base64_encode(hash('sha256',$verifier,true)),'+/','-_'),'=');
+            $stateDigest=ProviderIntegrationIdempotency::evidence($state);
+            $verifierDigest=ProviderIntegrationIdempotency::evidence($verifier);
             $sequence=$this->repository->maxLifecycleSequence($providerCode,$teacherId)+1;
             $connectionId=$this->repository->insertConnection(array(
                 'uid'=>Identifier::uid(),'provider_code'=>$providerCode,'teacher_id'=>$teacherId,
@@ -111,25 +117,29 @@ final class ProviderIntegrationService {
                 'identity_digest'=>null,'identity_state'=>'unverified','failure_reason_code'=>null,
                 'authorized_at'=>$now,'created_at'=>$now,'created_by'=>$actor,'updated_at'=>$now,'updated_by'=>$actor,
             ));
+            // The intent is bound to exactly the connection this command created, so completing it can
+            // only ever settle that one lifecycle — never whichever sibling happens to be newest.
             $authorizationId=$this->repository->insertAuthorization(array(
                 'uid'=>Identifier::uid(),'provider_code'=>$providerCode,'teacher_id'=>$teacherId,
+                'connection_id'=>$connectionId,
                 'principal_user_id'=>$actor,'client_reference'=>$clientReference,'redirect_uri'=>$redirectUri,
                 'scope_snapshot'=>$scopeSnapshot,'state_digest'=>$stateDigest,'verifier_digest'=>$verifierDigest,
                 'authorization_state'=>'issued','issued_at'=>$now,'expires_at'=>$expiresAt,
                 'consumed_at'=>null,'consumption_result'=>null,'failure_reason_code'=>null,
                 'created_at'=>$now,'created_by'=>$actor,
             ));
-            $this->recordCommand($digest,$payload,'begin_authorization',$providerCode,$teacherId,$connectionId,null,null,$connectionId,'authorizing',$now,$actor);
+            $this->recordCommand($digest,$payload,'begin_authorization',$providerCode,$teacherId,$connectionId,null,null,$authorizationId,'authorizing',$now,$actor);
             $this->repository->commit();
             return array(
                 'connection_id'=>$connectionId,'authorization_id'=>$authorizationId,'provider_code'=>$providerCode,
                 'teacher_id'=>$teacherId,'state'=>$state,'code_verifier'=>$verifier,'code_challenge'=>$challenge,
                 'code_challenge_method'=>'S256','redirect_uri'=>$redirectUri,'scope_snapshot'=>$scopeSnapshot,
-                'expires_at'=>$expiresAt,'evidence'=>$evidence,'operation'=>'begin_authorization','created'=>true,
+                'expires_at'=>$expiresAt,'authorization_state'=>'issued','evidence'=>$evidence,
+                'operation'=>'begin_authorization','created'=>true,
             );
         }catch(\Throwable$e){
             $this->repository->rollback();
-            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload,'begin_authorization',$this->authorizationResultFromFacts($facts));
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload,'begin_authorization',$this->authorizationReplayResult($winner,$facts));
             throw $e;
         }
     }
@@ -175,10 +185,17 @@ final class ProviderIntegrationService {
             if(!hash_equals((string)$intent->verifier_digest,$verifierDigest))throw new \InvalidArgumentException('authorization_verifier_mismatch');
             if(!ProviderIntegrationRule::sameRedirectUri((string)$intent->redirect_uri,$redirectUri))throw new \InvalidArgumentException('authorization_redirect_mismatch');
             $this->requireCapabilityFor($actor,$teacherId,array(self::CONNECT_CAPABILITY,self::MANAGE_CAPABILITY));
-            // Exactly one active connection may exist: any authorizing or connected sibling is closed first.
-            $this->supersedeActiveConnections($providerCode,$teacherId,$now,$actor);
-            $connection=$this->repository->authorizingConnection($providerCode,$teacherId,true);
-            if(!$connection)throw new \InvalidArgumentException('authorization_connection_required');
+            // Complete exactly the lifecycle this intent was issued for: never whichever authorizing
+            // sibling happens to be newest. Two pending attempts therefore settle themselves, instead
+            // of one state being able to finish another lifecycle.
+            $connectionId=(int)$intent->connection_id;
+            if($connectionId<1)throw new \InvalidArgumentException('authorization_connection_required');
+            $connection=$this->repository->connection($connectionId,true);
+            if(!$connection
+                ||(string)$connection->provider_code!==$providerCode
+                ||(int)$connection->teacher_id!==$teacherId
+                ||(string)$connection->connection_state!=='authorizing')throw new \InvalidArgumentException('authorization_connection_required');
+            $this->settleCompetingLifecycles($providerCode,$teacherId,$connectionId,$now,$actor);
             $exchanged=$this->oauth->exchange(array(
                 'client_reference'=>(string)$intent->client_reference,'redirect_uri'=>(string)$intent->redirect_uri,
                 'code'=>$code,'code_verifier'=>$verifier,'scope_snapshot'=>(string)$intent->scope_snapshot,'now_utc'=>$now,
@@ -447,6 +464,22 @@ final class ProviderIntegrationService {
         return $this->retract($mappingId,'meeting_conference','retract_meeting_projection',$input,$key);
     }
 
+    /**
+     * Record the acknowledged provider result for one pending calendar projection.
+     *
+     * A translation-only adapter (the real Google seam) never acknowledges its own write, so the
+     * acknowledgement is a separate command: only this transition may mark a calendar mapping verified,
+     * and the acknowledged provider reference is digested here and never stored in the clear.
+     */
+    public function acknowledgeCalendarProjection(int $mappingId,array $input,string $key):array{
+        return $this->acknowledge($mappingId,'calendar_event','acknowledge_calendar_projection',$input,$key);
+    }
+
+    /** Record the acknowledged provider result for one pending conference projection. */
+    public function acknowledgeMeetingProjection(int $mappingId,array $input,string $key):array{
+        return $this->acknowledge($mappingId,'meeting_conference','acknowledge_meeting_projection',$input,$key);
+    }
+
     private function project(string $providerCode,string $projectionReference,array $input,string $key):array{
         $actor=$this->actor();
         $this->requireCapability(self::MANAGE_CAPABILITY);
@@ -477,8 +510,8 @@ final class ProviderIntegrationService {
                 return $replay;
             }
             $existing=$providerCode==='google_meet'
-                ?$this->repository->activeMeetingMapping($lessonId,$scheduleVersionId,true)
-                :$this->repository->activeCalendarMapping($lessonId,$scheduleVersionId,true);
+                ?($this->repository->activeMeetingMapping($lessonId,$scheduleVersionId,true)??$this->repository->pendingMeetingMapping($lessonId,$scheduleVersionId,true))
+                :($this->repository->activeCalendarMapping($lessonId,$scheduleVersionId,true)??$this->repository->pendingCalendarMapping($lessonId,$scheduleVersionId,true));
             if($existing)throw new \InvalidArgumentException('projection_already_recorded');
             $connection=$this->connectionForProjection($providerCode,$lessonId,$now);
             $subjectReference=$this->connectionSubjectReference((int)$connection->id,(string)$connection->provider_code,$connection);
@@ -491,7 +524,22 @@ final class ProviderIntegrationService {
             );
             $result=$providerCode==='google_meet'?$this->meeting->project($command):$this->calendar->project($command);
             $objectReference=trim((string)($result['provider_object_reference']??''));
-            if($objectReference==='')throw new \RuntimeException('provider_reference_unusable');
+            if($objectReference===''){
+                // A port without a transport (the real Google seam) can only ever return the translation
+                // it would send. The translation is recorded as an explicitly `pending` projection, and
+                // the mapping only becomes a verified provider reference through a separate acknowledged
+                // provider result: a translation alone never claims that the provider object exists.
+                $request=$result['provider_request']??$result['google_request']??null;
+                $translationDigest=(string)($result['provider_facts_digest']??'');
+                if(!is_array($request)||!ProviderIntegrationRule::digest($translationDigest))throw new \RuntimeException('provider_reference_unusable');
+                $mappingId=$this->recordPendingProjection($providerCode,$connection,$lessonId,$scheduleVersionId,$applicable['facts'],$translationDigest,$now,$actor);
+                $this->recordCommand($digest,$payload,$operation,$providerCode,(int)$connection->teacher_id,(int)$connection->id,$lessonId,$scheduleVersionId,$mappingId,'pending',$now,$actor);
+                // Deterministic gated boundary: the pending translation is written and the transaction
+                // is still open.
+                do_action('dzn_phase_2a2v_after_projection_write',$mappingId);
+                $this->repository->commit();
+                return array('mapping_id'=>$mappingId,'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,'provider_code'=>$providerCode,'operation'=>$operation,'projection_state'=>'pending','acknowledgement_required'=>true,'evidence'=>$evidence,'created'=>true);
+            }
             $mapping=array(
                 'uid'=>Identifier::uid(),'connection_id'=>(int)$connection->id,'provider_code'=>$providerCode,
                 'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
@@ -547,9 +595,15 @@ final class ProviderIntegrationService {
             }
             // Retraction quarantines the local reference only; canonical scheduling and delivery truth
             // are never touched, and no provider delete is attempted without an authorised transport.
+            // A projection that is still awaiting its acknowledged provider result is retractable too,
+            // because no verified provider reference was ever recorded for it. An already-retracted
+            // mapping converges on the recorded revocation instead of re-withdrawing it.
+            $state=(string)$mapping->projection_state;
+            if($state==='revoked')return array('mapping_id'=>$mappingId,'mapping_state'=>'revoked','evidence'=>$evidence,'operation'=>$operation,'idempotent'=>true,'created'=>false);
+            if(!in_array($state,array('pending','verified'),true))throw new \InvalidArgumentException('integration_mapping_malformed');
             $update=array('projection_state'=>'revoked','active_slot'=>null,'mapping_version'=>(int)$mapping->mapping_version+1,'revoked_at'=>$now,'updated_at'=>$now,'updated_by'=>$actor);
-            if($purpose==='meeting_conference')$this->repository->updateMeetingMapping($mappingId,$update,array('projection_state'=>'verified'));
-            else $this->repository->updateCalendarMapping($mappingId,$update,array('projection_state'=>'verified'));
+            if($purpose==='meeting_conference')$this->repository->updateMeetingMapping($mappingId,$update,array('projection_state'=>$state));
+            else $this->repository->updateCalendarMapping($mappingId,$update,array('projection_state'=>$state));
             $this->recordCommand($digest,$payload,$operation,(string)$mapping->provider_code,null,(int)$mapping->connection_id,(int)$mapping->lesson_id,(int)$mapping->schedule_version_id,$mappingId,'revoked',$now,$actor);
             $this->repository->commit();
             return array('mapping_id'=>$mappingId,'mapping_state'=>'revoked','evidence'=>$evidence,'operation'=>$operation,'created'=>true);
@@ -557,6 +611,94 @@ final class ProviderIntegrationService {
             $this->repository->rollback();
             // Retraction evidence is reconstructed inside the transaction, so a duplicate-key race fails
             // closed here and converges on the caller's identical re-issue.
+            throw $e;
+        }
+    }
+
+    /**
+     * Record the provider translation of one exact occurrence without claiming the object exists.
+     *
+     * The row carries the translation digest as its provider reference and holds no active slot, so no
+     * read, retraction or duplicate projection can treat it as a verified provider object. Only an
+     * acknowledged provider result may promote it.
+     */
+    private function recordPendingProjection(string $providerCode,object $connection,int $lessonId,int $scheduleVersionId,array $facts,string $translationDigest,string $now,int $actor):int{
+        $mapping=array(
+            'uid'=>Identifier::uid(),'connection_id'=>(int)$connection->id,'provider_code'=>$providerCode,
+            'lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,
+            'projection_state'=>'pending','mapping_version'=>1,'active_slot'=>null,'superseded_by_mapping_id'=>null,
+            'starts_at_utc'=>$facts['starts_at_utc'],'ends_at_utc'=>$facts['ends_at_utc'],
+            'schedule_timezone'=>$facts['schedule_timezone'],'local_wall_date'=>$facts['local_wall_date'],
+            'local_wall_time'=>$facts['local_wall_time'],
+            'provider_occurred_at_utc'=>$now,
+            'recorded_at'=>$now,'recorded_by'=>$actor,'updated_at'=>$now,'updated_by'=>$actor,
+        );
+        if($providerCode==='google_meet'){
+            $mapping['conference_digest']=$translationDigest;
+            $mapping['join_uri_digest']=$translationDigest;
+            return $this->repository->insertMeetingMapping($mapping);
+        }
+        $mapping['event_digest']=$translationDigest;
+        return $this->repository->insertCalendarMapping($mapping);
+    }
+
+    /**
+     * Promote one pending projection with the acknowledged provider result and nothing else.
+     *
+     * The acknowledged reference is digested immediately, so the raw provider value never reaches
+     * storage, the command evidence or a read model.
+     */
+    private function acknowledge(int $mappingId,string $purpose,string $operation,array $input,string $key):array{
+        $actor=$this->actor();
+        $this->requireCapability(self::MANAGE_CAPABILITY);
+        $reference=trim((string)($input['provider_object_reference']??''));
+        if($reference==='')throw new \InvalidArgumentException('Acknowledged provider reference required');
+        $objectDigest=ProviderIntegrationIdempotency::subject($reference,$purpose);
+        $evidence=ProviderIntegrationRule::evidenceFacts($input);
+        $digest=ProviderIntegrationIdempotency::key($key);
+        $now=gmdate('Y-m-d H:i:s');
+        $this->repository->begin();
+        try{
+            $mapping=$purpose==='meeting_conference'?$this->repository->meetingMapping($mappingId,true):$this->repository->calendarMapping($mappingId,true);
+            if(!$mapping)throw new \InvalidArgumentException('integration_mapping_required');
+            if(!ProviderIntegrationValidator::mappingShape($mapping,$purpose))throw new \InvalidArgumentException('integration_mapping_malformed');
+            // The acknowledgement arrives after the projection, so the canonical occurrence is
+            // revalidated under the Phase-V lock order: a version that went stale in between may never
+            // be promoted to a verified provider reference.
+            $this->repository->lockLessonRoots((int)$mapping->lesson_id);
+            $applicable=ProviderIntegrationValidator::projectionApplicable((int)$mapping->lesson_id,(int)$mapping->schedule_version_id,$this->schedules,$this->lessons,true);
+            if(!$applicable['applicable'])throw new \InvalidArgumentException((string)$applicable['reason']);
+            if(!ProviderIntegrationValidator::occurrenceAggregateValid((int)$mapping->lesson_id,$this->repository,$this->schedules,$this->lessons,true))throw new \InvalidArgumentException('canonical_lesson_aggregate_invalid');
+            $facts=array(
+                'domain'=>ProviderIntegrationRule::COMMAND_DOMAIN,'operation'=>$operation,'mapping_id'=>$mappingId,
+                'lesson_id'=>(int)$mapping->lesson_id,'schedule_version_id'=>(int)$mapping->schedule_version_id,
+                'provider_object_digest'=>$objectDigest,
+            );
+            $payload=ProviderIntegrationIdempotency::payload($facts);
+            if($winner=$this->repository->command($digest)){
+                $replay=$this->replay($winner,$payload,$operation,array('mapping_id'=>$mappingId,'mapping_state'=>'verified','operation'=>$operation,'idempotent'=>true));
+                $this->repository->commit();
+                return $replay;
+            }
+            if((string)$mapping->projection_state!=='pending')throw new \InvalidArgumentException('projection_not_pending');
+            $update=array('projection_state'=>'verified','active_slot'=>1,'mapping_version'=>(int)$mapping->mapping_version+1,'updated_at'=>$now,'updated_by'=>$actor);
+            if($purpose==='meeting_conference'){
+                $update['conference_digest']=$objectDigest;
+                $update['join_uri_digest']=ProviderIntegrationIdempotency::subject((string)($input['join_uri_reference']??$reference),$purpose);
+                $this->repository->updateMeetingMapping($mappingId,$update,array('projection_state'=>'pending'));
+            }else{
+                $update['event_digest']=$objectDigest;
+                $this->repository->updateCalendarMapping($mappingId,$update,array('projection_state'=>'pending'));
+            }
+            $this->recordCommand($digest,$payload,$operation,(string)$mapping->provider_code,null,(int)$mapping->connection_id,(int)$mapping->lesson_id,(int)$mapping->schedule_version_id,$mappingId,'verified',$now,$actor);
+            $this->repository->commit();
+            return array('mapping_id'=>$mappingId,'mapping_state'=>'verified','provider_code'=>(string)$mapping->provider_code,'lesson_id'=>(int)$mapping->lesson_id,'schedule_version_id'=>(int)$mapping->schedule_version_id,'evidence'=>$evidence,'operation'=>$operation,'created'=>true);
+        }catch(\Throwable$e){
+            $this->repository->rollback();
+            // A duplicate key on the provider reference index means an acknowledged provider object was
+            // already claimed by another active projection: a durable refusal, never a silent overwrite.
+            if(in_array($this->repository->duplicate($e),array('provider_event','provider_conference'),true))throw new \InvalidArgumentException('projection_already_recorded');
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest)))return $this->replay($winner,$payload,$operation,array('mapping_id'=>$mappingId,'mapping_state'=>'verified','operation'=>$operation,'idempotent'=>true));
             throw $e;
         }
     }
@@ -614,11 +756,29 @@ final class ProviderIntegrationService {
     /**
      * Exactly one active connection per Teacher and provider code.
      *
-     * An existing authorizing or connected sibling is closed append-preservingly before a new consent
-     * becomes active; the unique active slot is the durable guarantee, and this method only prepares it.
+     * Completing one consent settles every competing lifecycle explicitly and append-preservingly: a
+     * sibling consent that is still pending is closed and its own issued intent is recorded as
+     * rejected, an already-connected sibling is disconnected and its credential quarantined, and the
+     * unique active slot remains the durable guarantee. Nothing is decided by recency or by a tie-break.
      */
-    private function supersedeActiveConnections(string $providerCode,int $teacherId,string $now,int $actor):void{
+    private function settleCompetingLifecycles(string $providerCode,int $teacherId,int $completedConnectionId,string $now,int $actor):void{
+        foreach($this->repository->issuedAuthorizations($providerCode,$teacherId) as $intent){
+            if((int)$intent->connection_id===$completedConnectionId)continue;
+            $this->repository->updateAuthorization((int)$intent->id,array(
+                'authorization_state'=>'rejected','consumed_at'=>$now,'consumption_result'=>'superseded',
+                'failure_reason_code'=>'superseded_authorization',
+            ),array('authorization_state'=>'issued'));
+        }
+        foreach($this->repository->authorizingConnections($providerCode,$teacherId) as $sibling){
+            if((int)$sibling->id===$completedConnectionId)continue;
+            $this->repository->updateConnection((int)$sibling->id,array(
+                'connection_state'=>'disconnected','active_slot'=>null,
+                'connection_version'=>(int)$sibling->connection_version+1,'disconnected_at'=>$now,
+                'updated_at'=>$now,'updated_by'=>$actor,
+            ),array('connection_state'=>'authorizing'));
+        }
         foreach($this->repository->connections($providerCode,$teacherId) as $existing){
+            if((int)$existing->id===$completedConnectionId)continue;
             if((string)$existing->connection_state==='connected'){
                 $this->repository->updateConnection((int)$existing->id,array(
                     'connection_state'=>'disconnected','active_slot'=>null,
@@ -636,8 +796,25 @@ final class ProviderIntegrationService {
         return array('connection_id'=>(int)$connection->id,'connection_state'=>(string)$connection->connection_state,'operation'=>$operation,'idempotent'=>true);
     }
 
-    private function authorizationResultFromFacts(array $facts):array{
-        return array('provider_code'=>$facts['provider_code'],'teacher_id'=>$facts['teacher_id'],'scope_snapshot'=>$facts['scope_snapshot'],'expires_at'=>$facts['expires_at'],'operation'=>'begin_authorization','idempotent'=>true);
+    /**
+     * The recorded result of one consent initiation.
+     *
+     * A replay converges on the connection the command created and reports the intent that is bound to
+     * it. The one-time state, verifier and challenge were returned exactly once when the command was
+     * first executed and are never reconstructible — only their digests were ever persisted.
+     */
+    private function authorizationReplayResult(object $command,array $facts):array{
+        $connectionId=$command->connection_id===null?null:(int)$command->connection_id;
+        if($connectionId===null)throw new \RuntimeException('Emptied integration result');
+        $intent=$this->repository->authorizationForConnection($connectionId);
+        if(!$intent)throw new \RuntimeException('Emptied integration result');
+        return array(
+            'connection_id'=>$connectionId,'authorization_id'=>(int)$intent->id,
+            'provider_code'=>(string)$command->provider_code,'teacher_id'=>(int)$facts['teacher_id'],
+            'scope_snapshot'=>(string)$intent->scope_snapshot,'expires_at'=>(string)$intent->expires_at,
+            'authorization_state'=>(string)$intent->authorization_state,
+            'operation'=>'begin_authorization','idempotent'=>true,
+        );
     }
 
     private function recordCommand(string $digest,string $payload,string $operation,string $providerCode,?int $teacherId,?int $connectionId,?int $lessonId,?int $scheduleVersionId,?int $mappingId,string $state,string $now,int $actor):int{

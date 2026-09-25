@@ -16,7 +16,7 @@
 if(getenv('DZN_PHASE_2A2V_RUNTIME_TEST')!=='authority'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-V runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2r1-fixture.php';
 require __DIR__.'/phase-2a2r2-fixture.php';
-use Delnavazan\Platform\Core\Application\{CanonicalAttendanceIdentityService,ProviderIntegrationReadService,ProviderIntegrationService,ProviderEventIngestService};
+use Delnavazan\Platform\Core\Application\{CanonicalAttendanceIdentityService,ProviderIntegrationIdempotency,ProviderIntegrationReadService,ProviderIntegrationService,ProviderEventIngestService};
 use Delnavazan\Platform\Integrations\ContractProviderAdapters;
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_v_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
@@ -73,6 +73,8 @@ dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}integr
 dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}integration_oauth_authorizations WHERE verifier_digest=%s",$rawVerifier))===0,'the raw PKCE verifier must never persist');
 $replayBegin=$service($ports)->beginAuthorization(array('provider_code'=>'google_calendar','teacher_id'=>$teacherId,'client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>$scope)+$evidence('begin'),dzn_v_key('begin'));
 dzn_v_assert($replayBegin['idempotent']===true&&(int)$replayBegin['connection_id']===$connectionId,'an identical consent command must replay idempotently');
+dzn_v_assert((int)$replayBegin['authorization_id']===(int)$begin['authorization_id']&&(string)$replayBegin['authorization_state']==='issued','a consent replay must report the recorded authorization result');
+dzn_v_assert(!isset($replayBegin['state'])&&!isset($replayBegin['code_verifier'])&&!isset($replayBegin['code_challenge']),'a consent replay must never re-issue one-time consent material');
 dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}integration_connections WHERE provider_code='google_calendar' AND teacher_id=%d",$teacherId))===1,'a replay must not create a second consent attempt');
 
 // 3. Completion: exact redirect and scope, one-time consumption, sealed credential, verified identity.
@@ -162,16 +164,31 @@ $accountKey='acct-v-'.$runSuffix;$studentAccount='acct-v-student-'.$runSuffix;
 $join=gmdate('Y-m-d H:i:s',strtotime((string)$target->starts_at_utc.' UTC')+60);
 $leave=gmdate('Y-m-d H:i:s',strtotime((string)$target->starts_at_utc.' UTC')+1800);
 $observed=gmdate('Y-m-d H:i:s',strtotime((string)$target->starts_at_utc.' UTC')+1800);
-$delivery=static fn(string $eventKey,string $account,string $role,string $joinAt,string $leaveAt,string $observedAt):array=>array(
-    'provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,
-    'facts'=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey.'-payload','participant_role'=>$role,'provider_account_key'=>$account,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt,'provenance_reference'=>'prov-'.$eventKey,'evidence_reference'=>'ref-'.$eventKey),
-);
+// Every delivery is an envelope a named trusted transport already authenticated over the exact body.
+$delivery=static function(string $eventKey,string $account,string $role,string $joinAt,string $leaveAt,string $observedAt) use($lessonId,$versionId):array{
+    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey.'-payload','participant_role'=>$role,'provider_account_key'=>$account,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt,'provenance_reference'=>'prov-'.$eventKey,'evidence_reference'=>'ref-'.$eventKey);
+    $body=(string)wp_json_encode($facts);
+    return array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-00000000','facts'=>$facts);
+};
 $admitted=$ingestService->ingest($delivery('v-event-'.$runSuffix,$accountKey,'teacher',$join,$leave,$observed),dzn_v_key('ingest'));
 dzn_v_assert((int)$admitted['ingest_event_id']>0&&$admitted['conflict']===false,'a provider event must record an integration receipt');
 $receipt=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_ingest_events WHERE id=%d",(int)$admitted['ingest_event_id']));
 dzn_v_assert($receipt&&preg_match('/^[a-f0-9]{64}$/D',(string)$receipt->provider_event_key_digest)===1&&preg_match('/^[a-f0-9]{64}$/D',(string)$receipt->provider_account_digest)===1,'a provider event must persist only keyed digests');
 dzn_v_assert((string)$receipt->occurred_at!==(string)$receipt->received_at||(string)$receipt->occurred_at===$observed,'provider and local instants must be stored as separate facts');
 dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_ingest_events WHERE provider_event_key_digest=%s",'v-event-'.$runSuffix))===0,'a raw provider event key must never persist');
+dzn_v_assert((string)$receipt->processing_state==='received','an ingest receipt must be recorded in its immutable receive state, never as admitted');
+dzn_v_assert((string)$receipt->transport==='deployment_gateway'&&preg_match('/^[a-f0-9]{64}$/D',(string)$receipt->proof_reference_digest)===1,'a receipt must record its authenticating transport and the digest of its proof');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_ingest_events WHERE processing_state='admitted'"))===0,'no immutable receipt may ever be mutated into an admission');
+$outcome=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d ORDER BY handoff_attempt DESC LIMIT 1",(int)$admitted['ingest_event_id']));
+dzn_v_assert($outcome&&(string)$outcome->outcome==='admitted'&&(int)$outcome->handoff_attempt===1,'admission must be a separate appended handoff outcome');
+dzn_v_assert(preg_match('/^[a-f0-9]{64}$/D',(string)$outcome->intake_result_digest)===1,'an admission must record the Phase-P result it was written for');
+$readEvents=(new ProviderIntegrationReadService())->events($lessonId);
+dzn_v_assert(count($readEvents)===1,'the Lesson read model must report the recorded receipt');
+dzn_v_assert((string)$readEvents[0]['processing_state']==='admitted'&&(string)$readEvents[0]['received_state']==='received','the read model must report the effective outcome and the immutable receive state separately');
+// A caller may never re-point an authenticated delivery at a different occurrence.
+$mismatched=$delivery('v-mismatch-'.$runSuffix,$accountKey,'teacher',$join,$leave,$observed);
+$mismatched['facts']['lesson_id']=$lessonId+1000;
+dzn_v_rejected(fn()=>$ingestService->ingest($mismatched,dzn_v_key('ingest-mismatch')),'provider_event_context_mismatch','a delivery whose authenticated body names another occurrence');
 // Phase P owns the canonical consequence: whatever it decided, the evidence row it recorded (if any)
 // belongs to a Phase-P case, never to this phase.
 $phasePEvidence=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}canonical_attendance_evidence WHERE provider_event_key_digest=%s",hash_hmac('sha256','canonical_attendance_event_key:v-event-'.$runSuffix,wp_salt('dzn_canonical_attendance'))));
@@ -198,6 +215,14 @@ wp_set_current_user($principal);
 dzn_v_assert((int)$readService->connection($activeConnectionId)['connection_id']===$activeConnectionId,'a linked Teacher must read its own connection');
 $other=$wpdb->get_row($wpdb->prepare("SELECT id FROM {$p}integration_connections WHERE id<>%d LIMIT 1",$activeConnectionId));
 if($other)dzn_v_rejected(fn()=>$readService->connection((int)$other->id),'Unauthorized','a Teacher reading another Teacher connection');
+// Being linked to a Teacher never by itself grants a read: the view capability is required as well.
+$current=wp_get_current_user();
+dzn_v_assert(!current_user_can(ProviderIntegrationService::MANAGE_CAPABILITY)&&current_user_can(ProviderIntegrationService::VIEW_CAPABILITY),'the linked Teacher principal must hold the self-service view capability and not the management capability');
+$current->remove_cap(ProviderIntegrationService::VIEW_CAPABILITY);
+dzn_v_rejected(fn()=>$readService->connection($activeConnectionId),'Unauthorized','a linked Teacher without the view capability');
+dzn_v_rejected(fn()=>$readService->lessonIntegrations($lessonId),'Unauthorized','a linked Teacher without the view capability reading a Lesson');
+$current->add_cap(ProviderIntegrationService::VIEW_CAPABILITY);
+dzn_v_assert((int)$readService->connection($activeConnectionId)['connection_id']===$activeConnectionId,'a linked Teacher with the view capability must read its own connection again');
 wp_set_current_user(1);
 
 // 11. Digest-only command evidence: no raw key, payload, state or provider reference anywhere.
@@ -213,5 +238,41 @@ foreach(array('dzn-2a2v-','calendar-ref-','meet-ref-') as $needle){
 }
 $changed=(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_integration_commands WHERE operation='complete_authorization'"));
 dzn_v_assert($changed>0,'the completed consent flow must leave exactly one recorded command per operation');
+
+// 12. Two pending consent attempts settle exactly one lifecycle: each intent completes the connection
+// it was created for, and the competing lifecycle is settled explicitly rather than by recency.
+$raceService=$service(new ContractProviderAdapters(array()));
+$raceA=$raceService->beginAuthorization(array('provider_code'=>'google_calendar','teacher_id'=>$teacherId,'client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>$scope)+$evidence('race-a'),dzn_v_key('race-a'));
+$raceB=$raceService->beginAuthorization(array('provider_code'=>'google_calendar','teacher_id'=>$teacherId,'client_reference'=>'client-1','redirect_uri'=>'https://academy.example/cb','scope_snapshot'=>$scope)+$evidence('race-b'),dzn_v_key('race-b'));
+dzn_v_assert((int)$raceA['connection_id']!==(int)$raceB['connection_id'],'each consent attempt must create its own lifecycle generation');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT connection_id FROM {$p}integration_oauth_authorizations WHERE id=%d",(int)$raceB['authorization_id']))===(int)$raceB['connection_id'],'an authorization intent must be bound to exactly its own connection');
+$raceCompleted=$raceService->completeAuthorization(array('state'=>(string)$raceA['state'],'code'=>'code-race-a','code_verifier'=>(string)$raceA['code_verifier'],'redirect_uri'=>'https://academy.example/cb')+$evidence('race-complete-a'),dzn_v_key('race-complete-a'));
+dzn_v_assert((int)$raceCompleted['connection_id']===(int)$raceA['connection_id'],'a completion must settle exactly the lifecycle its intent was issued for');
+dzn_v_assert((string)$connectionRow((int)$raceA['connection_id'])->connection_state==='connected','the completed consent must own the active connection');
+dzn_v_assert((string)$connectionRow((int)$raceB['connection_id'])->connection_state==='disconnected','a competing pending lifecycle must be settled explicitly');
+dzn_v_assert((string)$wpdb->get_var($wpdb->prepare("SELECT authorization_state FROM {$p}integration_oauth_authorizations WHERE id=%d",(int)$raceB['authorization_id']))==='rejected','a competing consent intent must be rejected explicitly');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}integration_connections WHERE provider_code='google_calendar' AND teacher_id=%d AND active_slot=1",$teacherId))===1,'exactly one lifecycle may hold the active slot after a competing consent race');
+
+// 13. A translation-only adapter records a pending projection; only an acknowledged provider result
+// may ever mark that mapping verified.
+$pendingService=$service(new ContractProviderAdapters(array(),ContractProviderAdapters::PROJECTION_PENDING));
+$pending=$pendingService->projectMeetingConference(array('lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'projection_reference'=>'meet-pending-1')+$evidence('project-meet-pending'),dzn_v_key('project-meet-pending'));
+dzn_v_assert((int)$pending['mapping_id']>0&&(string)$pending['projection_state']==='pending'&&$pending['acknowledgement_required']===true,'a translation-only adapter must record a pending projection');
+$pendingRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_meeting_mappings WHERE id=%d",(int)$pending['mapping_id']));
+dzn_v_assert($pendingRow&&(string)$pendingRow->projection_state==='pending'&&$pendingRow->active_slot===null,'a pending translation must never hold an active reference');
+dzn_v_assert(preg_match('/^[a-f0-9]{64}$/D',(string)$pendingRow->conference_digest)===1&&(string)$pendingRow->conference_digest!==ProviderIntegrationIdempotency::subject('meet-pending-1','meeting_conference'),'a pending projection must persist the translation digest, not a provider reference');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_meeting_mappings WHERE lesson_id=%d AND active_slot=1",$lessonId))===0,'a pending translation must never be counted as an active integration reference');
+$pendingReplay=$pendingService->projectMeetingConference(array('lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'projection_reference'=>'meet-pending-1')+$evidence('project-meet-pending'),dzn_v_key('project-meet-pending'));
+dzn_v_assert($pendingReplay['idempotent']===true&&(int)$pendingReplay['mapping_id']===(int)$pending['mapping_id'],'an identical pending projection command must replay idempotently');
+dzn_v_rejected(fn()=>$pendingService->acknowledgeCalendarProjection((int)$pending['mapping_id'],array('provider_object_reference'=>'conference-ref-1')+$evidence('ack-wrong-purpose'),dzn_v_key('ack-wrong-purpose')),'integration_mapping_required','a calendar acknowledgement of a conference mapping');
+$acknowledged=$pendingService->acknowledgeMeetingProjection((int)$pending['mapping_id'],array('provider_object_reference'=>'conference-ref-1','join_uri_reference'=>'https://meet.example/room-1')+$evidence('ack-meet'),dzn_v_key('ack-meet'));
+dzn_v_assert((string)$acknowledged['mapping_state']==='verified','an acknowledged provider result must verify the pending projection');
+$verifiedRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}provider_meeting_mappings WHERE id=%d",(int)$pending['mapping_id']));
+dzn_v_assert($verifiedRow&&(string)$verifiedRow->projection_state==='verified'&&(int)$verifiedRow->active_slot===1&&(int)$verifiedRow->mapping_version===(int)$pendingRow->mapping_version+1,'an acknowledged projection must become the active verified reference');
+dzn_v_assert(hash_equals((string)$verifiedRow->conference_digest,ProviderIntegrationIdempotency::subject('conference-ref-1','meeting_conference')),'only the acknowledged provider reference may become the recorded digest');
+dzn_v_assert(hash_equals((string)$verifiedRow->join_uri_digest,ProviderIntegrationIdempotency::subject('https://meet.example/room-1','meeting_conference')),'an acknowledged join reference must persist only as a keyed digest');
+dzn_v_rejected(fn()=>$pendingService->acknowledgeMeetingProjection((int)$pending['mapping_id'],array('provider_object_reference'=>'conference-ref-2')+$evidence('ack-again'),dzn_v_key('ack-again')),'projection_not_pending','a second acknowledgement of an already-verified projection');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_meeting_mappings WHERE conference_digest LIKE %s OR join_uri_digest LIKE %s",'%conference-ref-1%','%meet.example%'))===0,'a raw acknowledged provider reference must never persist');
+dzn_v_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}provider_integration_commands WHERE operation='acknowledge_meeting_projection'"))>0,'an acknowledgement must leave its own command evidence');
 
 echo "Phase 2A.2-V runtime passed\n";

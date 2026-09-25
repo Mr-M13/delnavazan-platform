@@ -84,27 +84,47 @@ dzn_vf_assert((int)$projected['mapping_id']>0&&$count('provider_calendar_event_m
 
 // 3. Provider evidence: a failure after the receipt write must leave neither a receipt nor a Phase-P fact.
 $eventKey='v-failure-'.substr(str_replace('-','',wp_generate_uuid4()),0,8);
-$delivery=static fn(string $joinAt):array=>array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,'facts'=>array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>gmdate('Y-m-d H:i:s'),'join_at_utc'=>$joinAt,'leave_at_utc'=>gmdate('Y-m-d H:i:s')));
+// The observation instants are fixed once, so an exact duplicate is a genuine duplicate and only a
+// deliberately re-joined delivery is a conflict.
+$observedAt=gmdate('Y-m-d H:i:s');$leaveAt=gmdate('Y-m-d H:i:s');$joinAt=gmdate('Y-m-d H:i:s');
+$delivery=static function(string $joinAt) use($lessonId,$versionId,$eventKey,$observedAt,$leaveAt):array{
+    $facts=array('provider_code'=>'google_meet','provider_event_key'=>$eventKey,'provider_payload_key'=>$eventKey,'participant_role'=>'teacher','provider_account_key'=>'acct-'.$eventKey,'observed_at'=>$observedAt,'join_at_utc'=>$joinAt,'leave_at_utc'=>$leaveAt);
+    $body=(string)wp_json_encode($facts);
+    return array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'transport'=>'deployment_gateway','authenticated'=>true,'authenticated_at'=>gmdate('Y-m-d H:i:s'),'raw_body'=>$body,'body_digest'=>hash('sha256',$body),'proof_reference'=>'proof-'.$eventKey.'-0000','facts'=>$facts);
+};
 $inject('dzn_phase_2a2v_after_ingest_write');
-$caught=null;try{$ingestService->ingest($delivery(gmdate('Y-m-d H:i:s')),dzn_vf_key('ingest-fail'));}catch(Throwable$e){$caught=$e;}
+$caught=null;try{$ingestService->ingest($delivery($joinAt),dzn_vf_key('ingest-fail'));}catch(Throwable$e){$caught=$e;}
 $clear('dzn_phase_2a2v_after_ingest_write');
 dzn_vf_assert($caught!==null&&str_contains($caught->getMessage(),'injected_write_boundary'),'the injected ingest failure must surface');
 dzn_vf_assert($count('provider_ingest_events','provider_event_key_digest=%s',array(hash_hmac('sha256','provider_integration_event_key:'.$eventKey,wp_salt('dzn_provider_integration'))))===0,'a failed ingest must leave no integration receipt');
 $phasePKey=hash_hmac('sha256','canonical_attendance_event_key:'.$eventKey,wp_salt('dzn_canonical_attendance'));
 dzn_vf_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}canonical_attendance_evidence WHERE provider_event_key_digest=%s",$phasePKey))===0,'a rolled-back ingest must never have handed the fact to Phase P');
-$admitted=$ingestService->ingest($delivery(gmdate('Y-m-d H:i:s')),dzn_vf_key('ingest-fail'));
+$admitted=$ingestService->ingest($delivery($joinAt),dzn_vf_key('ingest-fail'));
 dzn_vf_assert((int)$admitted['ingest_event_id']>0,'the identical retry must record exactly one receipt');
 dzn_vf_assert($count('provider_ingest_events','lesson_id=%d',array($lessonId))===1,'the convergent retry must leave exactly one receipt for the occurrence');
+dzn_vf_assert($count('provider_ingest_outcomes','provider_ingest_event_id=%d AND outcome=%s',array((int)$admitted['ingest_event_id'],'admitted'))===1,'a successful handoff must append exactly one admission');
+
+// 3b. An interruption between the receipt commit and the handoff outcome must never be reported as an
+// admission: the effective outcome stays `received` until the handoff actually succeeds.
+$ingestEventId=(int)$admitted['ingest_event_id'];
+dzn_vf_assert($wpdb->query($wpdb->prepare("DELETE FROM {$p}provider_ingest_outcomes WHERE provider_ingest_event_id=%d",$ingestEventId))!==false,'outcome removal failed');
+$events=(new \Delnavazan\Platform\Core\Application\ProviderIntegrationReadService())->events($lessonId);
+$states=array();foreach($events as $event)$states[(int)$event['ingest_event_id']]=(string)$event['processing_state'];
+dzn_vf_assert(($states[$ingestEventId]??'')==='received','a receipt without an admitted outcome must never be reported as admitted');
+$recovered=$ingestService->ingest($delivery($joinAt),dzn_vf_key('ingest-interrupted'));
+dzn_vf_assert((string)$recovered['processing_state']==='admitted'&&$recovered['idempotent']===true&&(int)$recovered['ingest_event_id']===$ingestEventId,'an interrupted handoff must converge once the handoff succeeds');
+dzn_vf_assert($count('provider_ingest_outcomes','provider_ingest_event_id=%d AND outcome=%s',array($ingestEventId,'admitted'))===1,'a converged retry must append exactly one admission');
+dzn_vf_assert($count('provider_ingest_events','lesson_id=%d',array($lessonId))===1,'an interrupted retry must never duplicate the receipt');
 
 // 4. Structural boundaries: convergence, one conflict receipt, one active projection, one retraction.
-$duplicate=$ingestService->ingest($delivery(gmdate('Y-m-d H:i:s')),dzn_vf_key('ingest-duplicate'));
+$duplicate=$ingestService->ingest($delivery($joinAt),dzn_vf_key('ingest-duplicate'));
 dzn_vf_assert($duplicate['idempotent']===true,'an exact duplicate provider event must converge');
 dzn_vf_assert($count('provider_ingest_events','lesson_id=%d',array($lessonId))===1,'a duplicate provider event must not create a second receipt');
-$conflicting=$ingestService->ingest(array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,'facts'=>array_merge($delivery(gmdate('Y-m-d H:i:s'))['facts'],array('join_at_utc'=>gmdate('Y-m-d H:i:s',strtotime('+600 seconds'))))),dzn_vf_key('ingest-conflict'));
+$conflicting=$ingestService->ingest($delivery(gmdate('Y-m-d H:i:s',strtotime($joinAt.' UTC')+600)),dzn_vf_key('ingest-conflict'));
 dzn_vf_assert($conflicting['conflict']===true,'a changed provider-event context must be refused as a conflict');
 dzn_vf_assert($count('provider_event_conflicts','lesson_id=%d',array($lessonId))===1,'a conflicting provider event must leave exactly one conflict receipt');
 dzn_vf_assert($count('provider_ingest_events','lesson_id=%d',array($lessonId))===1,'a conflicting provider event must never overwrite or duplicate the original receipt');
-$second=$ingestService->ingest(array('provider_code'=>'google_meet','lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'verified'=>true,'facts'=>array_merge($delivery(gmdate('Y-m-d H:i:s'))['facts'],array('join_at_utc'=>gmdate('Y-m-d H:i:s',strtotime('+1200 seconds'))))),dzn_vf_key('ingest-conflict-2'));
+$second=$ingestService->ingest($delivery(gmdate('Y-m-d H:i:s',strtotime($joinAt.' UTC')+1200)),dzn_vf_key('ingest-conflict-2'));
 dzn_vf_assert($conflicting['conflict_id']===$second['conflict_id'],'an identical conflict must reuse exactly one conflict receipt');
 dzn_vf_rejected(fn()=>$service->projectCalendarEvent(array('lesson_id'=>$lessonId,'schedule_version_id'=>$versionId,'projection_reference'=>'calendar-ref-other')+$evidence('project-other'),dzn_vf_key('project-other')),'projection_already_recorded','a second active projection for one occurrence');
 $retracted=$service->retractCalendarProjection((int)$projected['mapping_id'],array('reason_code'=>'failure_probe')+$evidence('retract'),dzn_vf_key('retract'));

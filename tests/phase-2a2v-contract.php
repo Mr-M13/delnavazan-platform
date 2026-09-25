@@ -31,7 +31,7 @@ foreach(array(
     '027_google_calendar_meet_provider_integration','install_google_calendar_meet_provider_integration','verify_google_calendar_meet_provider_integration_schema',
     'integration_connections','integration_credentials','integration_oauth_authorizations',
     'provider_identity_mappings','provider_calendar_event_mappings','provider_meeting_mappings',
-    'provider_ingest_events','provider_event_conflicts','provider_integration_commands',
+    'provider_ingest_events','provider_ingest_outcomes','provider_event_conflicts','provider_integration_commands',
     'dzn_connect_own_provider_calendar','dzn_manage_provider_integrations','dzn_revoke_provider_integrations',
     'dzn_ingest_provider_events','dzn_view_provider_integrations','dzn_platform_capability_version_2a2v',
 ) as $needle)if(!str_contains($migration.$plugin,$needle))throw new RuntimeException('Missing Phase V migration contract: '.$needle);
@@ -47,10 +47,10 @@ if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO'))throw 
 if(stripos($install,'google_')!==false||stripos($install,'zoom')!==false||stripos($install,'teams')!==false)throw new RuntimeException('Phase V storage must stay provider-neutral');
 if(stripos($install,'token')!==false||stripos($install,'secret')!==false||stripos($install,'password')!==false)throw new RuntimeException('Phase V domain storage must never carry a plaintext credential column');
 preg_match_all('/CREATE TABLE \{\$p\}([a-z_]+)/',$install,$created);
-$declaredTables=array('integration_connections','integration_credentials','integration_oauth_authorizations','provider_identity_mappings','provider_calendar_event_mappings','provider_meeting_mappings','provider_ingest_events','provider_event_conflicts','provider_integration_commands');
+$declaredTables=array('integration_connections','integration_credentials','integration_oauth_authorizations','provider_identity_mappings','provider_calendar_event_mappings','provider_meeting_mappings','provider_ingest_events','provider_ingest_outcomes','provider_event_conflicts','provider_integration_commands');
 $createdTables=$created[1];sort($createdTables);sort($declaredTables);
-if($createdTables!==$declaredTables)throw new RuntimeException('Migration 027 must create exactly the nine declared Phase V tables');
-if(count(array_unique($createdTables))!==9)throw new RuntimeException('Migration 027 must declare each Phase V table exactly once');
+if($createdTables!==$declaredTables)throw new RuntimeException('Migration 027 must create exactly the ten declared Phase V tables');
+if(count(array_unique($createdTables))!==10)throw new RuntimeException('Migration 027 must declare each Phase V table exactly once');
 if(!str_contains($migration,'$phaseVGrants')||!str_contains($migration,'$teacherVRole'))throw new RuntimeException('Phase V capability repair must ensure every grant and deny the Teacher role');
 
 // Locked Phase-V owner decisions and controlled vocabularies.
@@ -58,7 +58,10 @@ foreach(array(
     "PROVIDER_CODES=array('google_calendar','google_meet')","EVIDENCE_PROVIDER_CODES=array('google_meet')",
     "PURPOSES=array('connection_identity','calendar_event','meeting_conference')",
     "CONNECTION_STATES=array('disconnected','authorizing','connected','refresh_failed','revoking','revoke_failed','revoked')",
-    "CREDENTIAL_STATES=array('active','quarantined','revoked')","MAPPING_STATES=array('verified','unverified','revoked')",
+    "CREDENTIAL_STATES=array('active','quarantined','revoked')","MAPPING_STATES=array('pending','verified','unverified','revoked')",
+    "INGEST_STATES=array('received','admitted','converged','conflicted','refused')","INGEST_OUTCOMES=array('admitted','refused')",
+    "PROOF_TRANSPORTS=array('google_channel_jwt','google_pubsub_oidc','deployment_gateway')",
+    "'acknowledge_calendar_projection','acknowledge_meeting_projection'",
     "CONFLICT_KINDS=array('changed_payload','cross_lesson','cross_schedule_version','cross_context','cross_participant','cross_interval')",
     "COMMAND_DOMAIN='provider_integration_v1'","RULE_VERSION='provider_neutral_google_calendar_meet_v1'",
     "EVIDENCE_CHANNELS=array('staff_record','authenticated_platform','document_reference','provider_callback','system_ingest')",
@@ -98,6 +101,40 @@ foreach(array('dzn_connect_own_provider_calendar','dzn_manage_provider_integrati
     if(!str_contains($service,$capability))throw new RuntimeException('Phase V capability wiring is incomplete: '.$capability);
 if(!str_contains($service,'teacher_principal_links')&&!str_contains($repository,'teacher_principal_links'))throw new RuntimeException('Teacher self-connect must revalidate the Phase-J principal link');
 if(!str_contains($read,'authorizeTeacher')||!str_contains($read,'authorizeLesson'))throw new RuntimeException('Reads must enforce object-level authorisation against the exact Teacher and Lesson');
+
+// Delivery authenticity: a raw delivery, a header or a channel token is never proof. Only a delivery
+// envelope a named trusted transport authenticated over the exact body may reach the normaliser.
+if(!str_contains($rule,'deliveryEnvelope')||!str_contains($ingest,'deliveryEnvelope'))throw new RuntimeException('A provider delivery must be reduced to an authenticated transport envelope');
+if(str_contains($adapter,'x-goog-channel-token'))throw new RuntimeException('The Google seam must never treat a channel token as proof of authenticity');
+if(!str_contains($ingest,'ProviderIntegrationRule::deliveryEnvelope($delivery)'))throw new RuntimeException('The ingest seam must validate the authenticated envelope before the normaliser');
+if(!str_contains($ingest,'$facts=$this->normalizer->normalise($envelope)'))throw new RuntimeException('Only the authenticated envelope may be handed to the normaliser');
+if(str_contains($ingest,'$delivery[\'headers\']'))throw new RuntimeException('The ingest seam must never read a raw header set');
+if(!str_contains($rule,'hash_equals(hash(\'sha256\',$body),$digest)'))throw new RuntimeException('The authenticated body must be bound to the envelope by digest');
+
+// Port boundary: a translation-only adapter records a pending projection, and only a separate
+// acknowledged provider result may mark a mapping verified.
+if(!str_contains($service,'recordPendingProjection')||!str_contains($service,'acknowledge_calendar_projection')||!str_contains($service,'acknowledgeMeetingProjection'))throw new RuntimeException('A translation-only projection must persist a pending mapping and require an acknowledgement');
+if(str_contains($adapter,'provider_object_reference'))throw new RuntimeException('The Google translation seam can never return an acknowledged provider reference');
+if(!str_contains($adapter,"'acknowledged'=>false"))throw new RuntimeException('The Google translation seam must report its projection as unacknowledged');
+if(!str_contains($service,"'projection_not_pending'"))throw new RuntimeException('A mapping must only be verified from its pending translation');
+if(!str_contains($service,'provider_request')||!str_contains($service,"'projection_state'=>'pending'"))throw new RuntimeException('A translation-only projection must be recorded as a pending mapping');
+
+// Immutable durable handoff: the receipt table is never updated, admission is an appended outcome, and
+// the mapping tables carry a pending state.
+if(str_contains($ingest,'markProcessingState'))throw new RuntimeException('The ingest receipt must never be mutated after it is written');
+if(str_contains($ingest,'$wpdb->update')||str_contains($ingest,'dzn_provider_ingest_events'))throw new RuntimeException('The ingest seam must never write the receipt table directly');
+if(!str_contains($ingest,'recordOutcome')||!str_contains($repository,'insertIngestOutcome'))throw new RuntimeException('Admission must be recorded as an appended handoff outcome');
+if(!str_contains($migration,'provider_ingest_outcomes'))throw new RuntimeException('The handoff outcome storage must exist');
+if(!str_contains($validator,'ingestOutcomeShape'))throw new RuntimeException('A handoff outcome must be validated fail-closed');
+
+// Consent identity: every authorization intent is bound to exactly the lifecycle it was created for.
+if(!str_contains($migration,'connection_authorization'))throw new RuntimeException('An authorization intent must be bound to its exact connection');
+if(!str_contains($service,'settleCompetingLifecycles'))throw new RuntimeException('Competing consent lifecycles must be settled explicitly');
+if(str_contains($service,'authorizingConnection('))throw new RuntimeException('Completion must never select whichever authorizing connection is newest');
+
+// Self-service reads require the view capability as well as exact Teacher ownership.
+if(!str_contains($read,'VIEW_CAPABILITY'))throw new RuntimeException('Self-service reads must require the view capability');
+if(str_contains($read,'if($this->isOwnTeacher($teacherId))return;'))throw new RuntimeException('A linked Teacher must never read without the view capability');
 
 // V-D12/V-D14: no migration-time or build-time external call, credential read or provider traffic anywhere.
 foreach(array('wp_remote_','wp_safe_remote_','curl_','fsockopen','stream_socket_client','new \\SoapClient','google-api-php-client') as $forbidden)
