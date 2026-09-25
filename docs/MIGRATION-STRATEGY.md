@@ -1,5 +1,28 @@
 # Delnavazan Platform Migration Strategy
 
+## 028_payment_execution_seam_provider_adapter (Phase 2A.2-T, candidate, unmerged)
+
+Additive on top of the Phase-V candidate at Schema 27. It creates exactly fifteen tables
+(`payment_provider_accounts`, `_account_events`, `_account_commands`, `payment_provider_objects`,
+`_object_events`, `_object_commands`, `payment_provider_secrets`, `payment_execution_commands`,
+`payment_execution_attempts`, `payment_execution_results`, `payment_execution_dispatches`,
+`payment_provider_event_receipts`, `payment_provider_events`, `payment_provider_event_decisions`,
+`payment_provider_secret_events`), performs no backfill, infers no provider account, mapping, secret or
+event, adds no column to any existing table, opens no provider connection and makes no external call.
+`verify_payment_execution_schema()` runs after migration 028, on current-schema verification and
+unconditionally before the schema option may advance to 28 — including the retained-028/stale-version
+path — and it rejects a table outside the declared set, a non-InnoDB table, a missing `id`/`PRIMARY
+KEY(id)` or `uid`/`UNIQUE uid`, a raw-reference column, a plaintext credential column, a mutable column on
+an append-only table, a digest outside the six declared optional digests, a `*_id` whose parent does not
+itself declare the identity it is referenced by, a dispatch-claim defect (missing arbitration index, a
+non-`DISPATCH_STATES` state, two live claims on one subject, a claim coexisting with anything but its own
+descriptor refusal, an incomplete or tampered sealed envelope, a non-positive generation, a lease rule
+violation), a NULL-able or wrongly-ordered secret scope, and any academic, notification or settlement
+table smuggled into the phase. The R1 and R2 verifiers are re-run rather than duplicated, so the phase
+must add no column to any `commercial_*` or R2 table. Schema 25 → 28 and 26 → 28 are repeat-safe and leave
+every R1 and R2 row unchanged. **The migration has not been executed in this environment: PHP and the
+disposable WordPress + MariaDB runtime are unavailable.**
+
 `025_commercial_purchase_funding_authority` (Phase 2A.2-R1, **merged and closed on `main`**) is
 additive only: it creates the commercial purchase, offer, obligation, funding, pattern,
 protected-capacity and exception storage, performs no backfill, infers no purchase, settles no

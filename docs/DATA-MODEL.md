@@ -1,5 +1,24 @@
 # Delnavazan Platform Conceptual Data Model
 
+> **Phase 2A.2-T storage (Schema 028, candidate) — not authoritative until independently reviewed and
+> merged:** provider-neutral payment execution only. Fifteen additive tables: `dzn_payment_provider_accounts`
+> and its append-only account event/command pair, `dzn_payment_provider_objects` and its append-only
+> object event/command pair, `dzn_payment_provider_secrets` (authenticated ciphertext plus its nonce and
+> versions, one active row per declared scope), `dzn_payment_execution_commands` (immutable, with no
+> terminal column of its own), `dzn_payment_execution_attempts` and `dzn_payment_execution_results`
+> (append-only, at most one of each per command, `UNIQUE command_result`), `dzn_payment_execution_dispatches`
+> (the phase's only mutable execution row — the durable dispatch claim and the only home of the
+> adapter-sealed descriptor), `dzn_payment_provider_event_receipts`, `dzn_payment_provider_events` and
+> `dzn_payment_provider_event_decisions`. Every table declares `id bigint unsigned NOT NULL AUTO_INCREMENT`
+> with `PRIMARY KEY(id)` and `uid char(26) NOT NULL` with `UNIQUE uid(uid)`; every `*_id` reference is
+> `bigint unsigned` with a declared named index and a declared parent — a Schema 028 table or a frozen
+> external authoritative parent (`students`, `commercial_offers`, `commercial_purchases`,
+> `commercial_offer_obligations`, `commercial_payment_evidence`, `collection_intents`, `renewal_cycles`,
+> `recurring_enrolments`). No raw provider reference, credential, card field or IBAN is stored anywhere;
+> the only place a raw provider reference can exist is the adapter-sealed descriptor ciphertext, which Core
+> cannot open. No column was added to any commercial, R1 or R2 table. See
+> [PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md](PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md).
+
 > **Phase 2A.2-V storage (Schema 27, candidate) — not authoritative until independently reviewed and
 > merged:** provider-neutral integration metadata only. `dzn_integration_connections` (one active
 > Teacher+provider connection per lifecycle generation, mutable `connection_state`/`connection_version`,

@@ -1,5 +1,16 @@
 # Delnavazan Platform Module Boundaries
 
+> **Phase 2A.2-T candidate boundary (Schema 028, not authoritative until independently reviewed and
+> merged):** Core gains the provider-neutral payment-execution seam — the port, the request/outcome
+> vocabulary, the provider registry, the execution command/attempt/result authority with its single
+> mutable dispatch claim, the provider account and mapping registry, the provider-event intake and the
+> authenticated-encryption secret vault. Integrations gains exactly one provider client surface
+> (`src/Integrations/Payment/Stripe/`) implementing that port plus the public webhook route. Core never
+> names a provider SDK class, endpoint, header or payload field; only an adapter seals or opens a dispatch
+> descriptor; only the adapter registered for a provider may decrypt its own secret class. Neither module
+> may create, mutate or delete a Term, Enrolment, Lesson, schedule, attendance outcome, academy
+> obligation, funded allowance, protected claim, provider recurring model or notification record.
+
 > **Phase 2A.2-V candidate boundary (Schema 27, not authoritative until independently reviewed and
 > merged):** the Integrations module owns exactly one provider integration surface — one Teacher
 > consent lifecycle per provider code, one sealed credential per connection, provider reference

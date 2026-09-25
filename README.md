@@ -9,13 +9,14 @@ Delnavazan Platform is the incremental, internally controlled foundation for mov
 | Item | State |
 |---|---|
 | Authoritative main | Phase 2A.2-R1 implementation merge at `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25 / R1 complete), with the R1 and R2 candidates materialised on top at `559b1736621c9ed32e41dd2b785dd0f040dcb647` |
-| Platform / schema | 0.1.0 / **27 candidate** |
-| Migrations | 001–027 candidate; latest `027_google_calendar_meet_provider_integration` |
+| Platform / schema | 0.1.0 / **28 candidate** |
+| Migrations | 001–028 candidate; latest `028_payment_execution_seam_provider_adapter` |
 | Latest merged slice | Phase 2A.2-R1 — Commercial Purchase, Funding & Current-Term Capacity Authority (Schema 25; merged / closed) |
 | Previous merged slice | Phase 2A.2-Q — Post-Intro Continuation & Slot Reservation Authority (Schema 24) |
-| Active Platform candidate | Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (Schema 27 / migration `027_google_calendar_meet_provider_integration` / build `phase2a2v-provider-neutral-google-calendar-meet-20260925.5`; **reconstructed** after the loss of the previously recorded candidate `3724edb3…`, with **correction round 2** applied to the review-failed candidate `6c2ab1ce…`, **correction round 3** applied to the review-failed candidate `d9eec897…`, **correction round 4** applied to the review-failed candidate `d9c47b60…` — canonical lock order and provider-scoped receipt sequence — and **correction round 5** applied to the review-failed candidate `389a5463…` — the durable conflict receipt for a changed context that loses the provider-event-key race — awaiting independent review) |
-| Previous Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; correction rounds 1–6 applied, awaiting independent review) |
-| Next boundary | **Phase V candidate awaiting independent review.** No live credential, provider traffic, production data, Stripe, notification delivery, Theme change, deployment or production cutover is authorised |
+| Active Platform candidate | Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter (Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build `phase2a2t-payment-execution-seam-stripe-adapter-20260924.7`; **awaiting independent review** — implements the round-7 contract `docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md`, additive on top of the V candidate. **Its §17 runtime, webhook, migration, secret, corruption, failure and concurrency suites have not been executed: PHP and the disposable runtime are unavailable in the implementation environment.**) |
+| Previous Platform candidate | Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration (Schema 27; five correction rounds applied, awaiting independent review) |
+| Earlier Platform candidate | Phase 2A.2-R2 — Renewal, Next-Term, Recurring Enrolment/Collection, Recovery, Lapse & Refund Authority (Schema 26; correction rounds 1–6 applied, awaiting independent review) |
+| Next boundary | **Phase T candidate awaiting independent review and the outstanding Phase T runtime evidence.** No live credential, provider traffic, production data, live charge, refund, notification delivery, Theme change, deployment or production cutover is authorised |
 
 Read [the continuity record](docs/DELNAVAZAN-CORE-CONTINUITY.md) before beginning work. It records exact SHAs, the locked Booking Request → Proposal → Acceptance → Conversion hierarchy, Theme/staging state, commercial facts and the current execution posture.
 

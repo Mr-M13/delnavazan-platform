@@ -3,6 +3,37 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-T — Provider-Neutral Payment Execution Seam & Stripe Adapter — candidate, unmerged — 2026-09-25
+
+Schema 28 / migration `028_payment_execution_seam_provider_adapter` / build
+`phase2a2t-payment-execution-seam-stripe-adapter-20260924.7`, additive on top of the Phase-V candidate
+(Schema 27). Implements the RFC-style contract in
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 7, SHA-256
+`c803116df033ee01149353cfbb11238176f3ffa98a444892ae9e1d6fb89ddf81`).
+
+- **Owns:** the provider-neutral execution seam (port, request/outcome vocabulary, provider registry), the
+  provider account and object-mapping registry, the immutable execution command with its append-only
+  attempt/result rows and its single mutable dispatch claim, the Stripe adapter and its exact-raw-body
+  webhook route, the durable provider-event intake with its bounded ordered R2 consequence, the
+  authenticated-encryption secret vault, and Schema 028 with its fail-closed verifier.
+- **Does not own:** any live provider call, credential, charge, refund, payout, notification delivery,
+  Term/Enrolment/Lesson/schedule/attendance write, provider recurring model, automatic-charge lead time,
+  recovery threshold, refund consequence, portal, Theme or deployment authority. `LIVE_EXECUTION_PROVIDERS`
+  and `PROVISIONABLE_PROVIDERS` are empty, so the Stripe adapter is provably incapable of an outbound call
+  and no code path — not even the capability-authorised vault surface — can store a Stripe credential.
+- **Dispatch integrity:** the command, its sealed dispatch descriptor and its dispatch claim commit
+  together before the account-root lock is released; the provider call happens outside any transaction;
+  the envelope is opened exactly once, in the non-mutating pre-call preflight; the `ok` verdict mints the
+  one-use capability the single call consumes; a descriptor failure before any call ends a `claimed` claim
+  `released` with a durable `refused`/`dispatch_descriptor_unavailable` result; an expired lease is taken
+  over by exactly one fenced generation and reconciled before any re-issue.
+- **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
+  §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
+  sixteen-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
+  mandatory acceptance gate and remains outstanding.
+- **Candidates and merge:** single coherent candidate, no merge, no deployment.
+
 ## Phase 2A.2-V — Provider-Neutral Google Calendar & Meet Integration — candidate, unmerged — 2026-09-25
 
 Schema 27 / migration `027_google_calendar_meet_provider_integration` / build

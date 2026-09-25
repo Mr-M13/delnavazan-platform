@@ -8,10 +8,10 @@
  */
 defined( 'ABSPATH' ) || exit;
 define( 'DZN_PLATFORM_VERSION', '0.1.0' );
-define( 'DZN_PLATFORM_SCHEMA_VERSION', '27' );
+define( 'DZN_PLATFORM_SCHEMA_VERSION', '28' );
 // Package-stamped runtime-validation identity. This is deliberately explicit
 // because production packages do not include Git metadata.
-define( 'DZN_PLATFORM_BUILD_ID', 'phase2a2v-provider-neutral-google-calendar-meet-20260925.5' );
+define( 'DZN_PLATFORM_BUILD_ID', 'phase2a2t-payment-execution-seam-stripe-adapter-20260924.7' );
 // Temporary Phase 1F beta diagnostic. Define as false before loading the
 // plugin to disable it; remove after the nonce failure is understood.
 defined( 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS' ) || define( 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', true );
@@ -30,5 +30,7 @@ register_activation_hook( __FILE__, array( 'Delnavazan\\Platform\\Core\\Infrastr
 add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
 	Delnavazan\Platform\Admin\Controller\Menu::register();
+	Delnavazan\Platform\Admin\Controller\PaymentExecutionController::register();
 } );
 add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Public\\BookingRequestRestController', 'register' ) );
+add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Integrations\\Payment\\Stripe\\StripeWebhookController', 'register' ) );
