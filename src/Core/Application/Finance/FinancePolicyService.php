@@ -156,6 +156,7 @@ final class FinancePolicyService {
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_policy_commands',$operation);
         $policy=FinanceSupport::replayResultRow((int)$row->result_policy_id,fn(int $id)=>$this->policies->byId($id,true),array(
             'policy_key'=>(string)$row->policy_key,
             'policy_version'=>$row->policy_version===null?null:(int)$row->policy_version,

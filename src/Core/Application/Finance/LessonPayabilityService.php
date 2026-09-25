@@ -217,12 +217,20 @@ final class LessonPayabilityService {
      * The evaluation must exist, still name the command's own Lesson, still reproduce its declared
      * derivation digest and vocabulary, and still be bound to a snapshot of that Lesson; an override's
      * recorded override row must still name the evaluation it produced and carry the recorded reason.
-     * A missing or mismatched row fails closed (`upstream_aggregate_invalid`/`snapshot_missing_for_lesson`
-     * for a corrupt shape, `command_replay_conflict` for a result that no longer matches the command).
+     * The command's exact typed result shape is re-proved first, and every required reference is
+     * cross-linked: `evaluate` records `result_evaluation_id` alone, so an evaluation that carries an
+     * override, or a command row that carries a `result_override_id` it never recorded, fails closed;
+     * `override` must name one override row whose own typed result is the re-loaded evaluation, whose
+     * `result_override_id` and `override_id` selector both name that row, and whose prior evaluation is
+     * the one the command recorded — so a substituted secondary result id can never be returned as a
+     * converged replay. A missing or mismatched row fails closed
+     * (`upstream_aggregate_invalid`/`snapshot_missing_for_lesson` for a corrupt shape,
+     * `command_replay_conflict` for a result that no longer matches the command).
      */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_payability_commands',$operation);
         $evaluation=FinanceSupport::replayResultRow((int)$row->result_evaluation_id,fn(int $id)=>$this->evaluations->evaluationById($id,true),array(
             'lesson_id'=>(int)$row->lesson_id,
         ),'finance_payability_evaluations');
@@ -232,13 +240,21 @@ final class LessonPayabilityService {
         if(!FinanceRule::member((string)$evaluation->disposition,FinanceRule::DISPOSITIONS)||!FinanceRule::member((string)$evaluation->basis_code,FinanceRule::BASIS_CODES))throw new FinanceRefusalException('upstream_aggregate_invalid','The replayed evaluation no longer carries a declared disposition and basis');
         $snapshot=$this->snapshots->byId((int)$evaluation->snapshot_id,true);
         if(!$snapshot||(int)$snapshot->lesson_id!==(int)$evaluation->lesson_id)throw new FinanceRefusalException('snapshot_missing_for_lesson','The replayed evaluation is no longer bound to a snapshot of its own Lesson');
-        if($operation==='evaluate')FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('lesson_id'=>(int)$evaluation->lesson_id,'operation'=>'evaluate'),'finance_payability_evaluations');
+        $overrideId=null;
+        if($operation==='evaluate'){
+            if($evaluation->override_id!==null)throw new FinanceRefusalException('command_replay_conflict','A replayed derivation names an evaluation that carries an override it never recorded');
+            FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('lesson_id'=>(int)$evaluation->lesson_id,'operation'=>'evaluate'),'finance_payability_evaluations');
+        }
         if($operation==='override'){
             if($evaluation->override_id===null)throw new FinanceRefusalException('command_replay_conflict','A replayed override names an evaluation that carries no override');
             $override=$this->evaluations->overrideById((int)$evaluation->override_id,true);
             if(!$override||(int)$override->result_evaluation_id!==(int)$evaluation->id||(int)$override->lesson_id!==(int)$evaluation->lesson_id)throw new FinanceRefusalException('payability_override_target_invalid','The replayed override no longer names the evaluation it produced');
+            if((int)$row->result_override_id!==(int)$override->id)throw new FinanceRefusalException('command_replay_conflict','The recorded override result no longer names the override the replayed evaluation carries');
+            if($row->override_id===null||(int)$row->override_id!==(int)$override->id)throw new FinanceRefusalException('command_replay_conflict','The recorded override selector no longer names the override the replayed evaluation carries');
+            if($row->evaluation_id===null||(int)$row->evaluation_id!==(int)$override->prior_evaluation_id)throw new FinanceRefusalException('command_replay_conflict','The recorded override no longer names the prior evaluation the command recorded');
             FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('lesson_id'=>(int)$evaluation->lesson_id,'disposition'=>(string)$evaluation->disposition,'reason'=>(string)$row->reason_code,'operation'=>'override'),'finance_payability_overrides');
+            $overrideId=(int)$override->id;
         }
-        return array('evaluation_id'=>(int)$evaluation->id,'override_id'=>$row->result_override_id===null?null:(int)$row->result_override_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        return array('evaluation_id'=>(int)$evaluation->id,'override_id'=>$overrideId,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

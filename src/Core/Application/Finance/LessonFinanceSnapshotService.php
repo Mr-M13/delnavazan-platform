@@ -114,11 +114,14 @@ final class LessonFinanceSnapshotService {
      * declared derivation digest over its own recorded facts, and still name a rate row and version that
      * exist and cover its own locked snapshot instant (`snapshot_derivation_mismatch`, §8.5, is the
      * owning code for a corrupt shape). A deleted or mismatched snapshot is never reported as a
-     * converged capture.
+     * converged capture, and the command's exact typed result shape is re-proved first: a `capture`
+     * records `result_snapshot_id` and nothing else, so a `result_correction_id` a corrupted command row
+     * smuggled onto it fails closed instead of being returned as a converged secondary result.
      */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_snapshot_commands',$operation);
         $snapshot=FinanceSupport::replayResultRow((int)$row->result_snapshot_id,fn(int $id)=>$this->snapshots->byId($id,true),array(
             'lesson_id'=>(int)$row->lesson_id,
             'teacher_id'=>(int)$row->teacher_id,
@@ -127,7 +130,8 @@ final class LessonFinanceSnapshotService {
         $rate=$this->rates->byId((int)$snapshot->rate_id,true);
         if(!$rate||(int)$rate->rate_version!==(int)$snapshot->rate_version)throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed snapshot names a rate row and version that do not exist');
         if(!FinanceRateIntegrity::covers($rate,(string)$snapshot->snapshot_instant_utc))throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed snapshot names a rate interval that does not cover its own locked instant');
+        if((int)$row->snapshot_id!==(int)$row->result_snapshot_id)throw new FinanceRefusalException('command_replay_conflict','The recorded capture no longer names its own snapshot as both its selector and its typed result');
         FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('lesson_id'=>(int)$snapshot->lesson_id,'operation'=>'capture'),'finance_lesson_snapshots');
-        return array('snapshot_id'=>(int)$snapshot->id,'correction_id'=>$row->result_correction_id===null?null:(int)$row->result_correction_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        return array('snapshot_id'=>(int)$snapshot->id,'correction_id'=>null,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

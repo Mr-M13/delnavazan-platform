@@ -397,6 +397,29 @@ final class FinanceSupport {
         if(!hash_equals($payloadDigest,self::payload($facts)))throw new FinanceRefusalException('command_replay_conflict','The recorded '.$aggregate.' result row no longer reproduces the command it recorded');
     }
 
+    /**
+     * §15.3: a replay may only report the exact typed result shape its own operation declares.
+     *
+     * `FinanceRule::COMMAND_OPERATION_RESULTS` declares, per command table and operation, the typed
+     * `result_*` columns that operation records. Every required typed result must be present, and every
+     * other typed result column of that same table must be `NULL`; anything else fails closed with
+     * `command_replay_conflict` and preserves the original command record. This is what stops a corrupted
+     * command row from carrying a second, unrelated typed result — a substituted override, correction, run
+     * or exception id — into a successful replay of an operation that never records it.
+     */
+    public static function assertReplayResultShape(object $row,string $commandTable,string $operation):void{
+        $declared=FinanceRule::commandOperationResults($commandTable,$operation);
+        if($declared===null)throw new FinanceRefusalException('command_replay_conflict','A command row whose operation is not declared for its own command table can never replay as that operation');
+        foreach(FinanceRule::commandResultColumns($commandTable) as $column){
+            $recorded=$row->{$column}??null;
+            if(in_array($column,$declared,true)){
+                if($recorded===null)throw new FinanceRefusalException('command_replay_conflict','The recorded command row does not carry the '.$column.' its own operation records');
+            }elseif($recorded!==null){
+                throw new FinanceRefusalException('command_replay_conflict','The recorded command row carries a '.$column.' its own operation never records');
+            }
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Transactions and row helpers
     // ---------------------------------------------------------------------

@@ -76,6 +76,67 @@ final class FinanceRule {
         $success=self::commandSuccessState($operation);
         return $operation==='run'?array($success,self::COMMAND_FAILED_STATE):array($success);
     }
+
+    /**
+     * §15.3: the typed `result_*` columns each declared command table carries.
+     *
+     * Every command table declares only typed result references and no polymorphic `result_id`, so the
+     * exact shape of a recorded command's result is declarable: an operation records the typed results
+     * below and leaves every other typed result column of its own table `NULL`.
+     */
+    public const COMMAND_RESULT_COLUMNS=array(
+        'finance_policy_commands'=>array('result_policy_id'),
+        'finance_teacher_rate_commands'=>array('result_rate_id'),
+        'finance_snapshot_commands'=>array('result_snapshot_id','result_correction_id'),
+        'finance_payability_commands'=>array('result_evaluation_id','result_override_id'),
+        'finance_statement_commands'=>array('result_statement_id'),
+        'finance_reconciliation_commands'=>array('result_run_id','result_exception_id'),
+    );
+
+    /**
+     * §15.3: the exact typed result fields each operation records, and the ones it must never carry.
+     *
+     * The declaration is keyed by command table because three operation names (`record`, `supersede`,
+     * `withdraw`) exist on more than one table with a different typed result. A replay may only report the
+     * typed result shape its own operation declared: a required typed result that is absent, or any other
+     * typed result column of the same table carrying a value, fails closed (`command_replay_conflict`) so
+     * a corrupted command row can never smuggle an unrelated override, correction, run or exception into a
+     * successful replay of another operation.
+     */
+    public const COMMAND_OPERATION_RESULTS=array(
+        'finance_policy_commands'=>array(
+            'record'=>array('result_policy_id'),'supersede'=>array('result_policy_id'),'withdraw'=>array('result_policy_id'),
+        ),
+        'finance_teacher_rate_commands'=>array(
+            'record'=>array('result_rate_id'),'close'=>array('result_rate_id'),'withdraw'=>array('result_rate_id'),
+        ),
+        'finance_snapshot_commands'=>array(
+            'capture'=>array('result_snapshot_id'),
+            'correct_snapshot'=>array('result_snapshot_id','result_correction_id'),
+        ),
+        'finance_payability_commands'=>array(
+            'evaluate'=>array('result_evaluation_id'),
+            'override'=>array('result_evaluation_id','result_override_id'),
+        ),
+        'finance_statement_commands'=>array(
+            'draft'=>array('result_statement_id'),'issue'=>array('result_statement_id'),
+            'withdraw'=>array('result_statement_id'),'supersede'=>array('result_statement_id'),
+        ),
+        'finance_reconciliation_commands'=>array(
+            'run'=>array('result_run_id'),
+            'resolve_exception'=>array('result_exception_id'),
+        ),
+    );
+
+    /** §15.3: the typed result columns of one declared command table, or an empty set if undeclared. */
+    public static function commandResultColumns(string $commandTable):array{
+        return self::COMMAND_RESULT_COLUMNS[$commandTable]??array();
+    }
+    /** §15.3: the exact typed result columns one command operation records, or `null` if undeclared. */
+    public static function commandOperationResults(string $commandTable,string $operation):?array{
+        if(!in_array($commandTable,self::TABLES,true))throw new \InvalidArgumentException('Declared Finance command table required');
+        return self::COMMAND_OPERATION_RESULTS[$commandTable][$operation]??null;
+    }
     /** U-D18: the evidence channels a Finance command may record. */
     public const EVIDENCE_CHANNELS=array('staff_record','authenticated_platform','document_reference');
     /** §11.2: reconciliation finding severities. */

@@ -340,13 +340,16 @@ final class TeacherStatementService {
      * totals, line-set and derivation proof together with the §10.1 timezone-triple proof. Each operation
      * additionally re-proves its own recorded outcome: `draft` the exact drafted period, `issue` the
      * one-time issuance evidence, `withdraw` the terminal withdrawn state, `supersede` the predecessor's
-     * recorded move to the successor the replay names. A missing, mismatched or corrupt result fails
-     * closed (`statement_derivation_mismatch`/`statement_totals_mismatch` for a corrupt recorded shape,
+     * recorded move to the successor the replay names. The command's exact typed result shape is re-proved
+     * first: every statement operation records `result_statement_id` and nothing else. A missing,
+     * mismatched or corrupt result fails closed
+     * (`statement_derivation_mismatch`/`statement_totals_mismatch` for a corrupt recorded shape,
      * `command_replay_conflict` for a result that no longer matches the command).
      */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_statement_commands',$operation);
         $statement=FinanceSupport::replayResultRow((int)$row->result_statement_id,fn(int $id)=>$this->statements->byId($id,true),array('teacher_id'=>(int)$row->teacher_id),'finance_statements');
         FinanceStatementIntegrity::assertTotals((int)$statement->id,$this->statements,$this->snapshots,$this->evaluations);
         FinanceStatementIntegrity::assertTimezoneTriple($statement);

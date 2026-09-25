@@ -9,8 +9,8 @@ Schema 30 / migration `030_finance_payability_rate_statement_authority` / build
 `phase2a2u-finance-payability-rate-statement-20260925.1`, additive on the Phase-T candidate tree at
 Schema 29 and explicitly scoped to that recorded base (contract §20 prerequisite 2). It implements the
 contract `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md` (SHA-256
-`c679a6fa14c1824da8481e364e2aaa396823a8a7f0277ef08de6b4c8a553cc3b`, whose §0g records correction
-round 2 and whose §0h records correction round 3).
+`dec2c93a7e763d14ca9bb2a8594cb62b88063a414f866a439f7110c53572b3a8`, whose §0g records correction
+round 2, whose §0h records correction round 3 and whose §0i records correction round 4).
 
 **Independent review correction round 2** (the review of `86d57606cabcddba15d076edfe14fb4e7257e60f` /
 tree `6010181bfbf66e01fa49154c9ba266d1dd4888c4` returned FAIL — CORRECTION REQUIRED with six blocking
@@ -78,6 +78,47 @@ reset, rebase, amend or force-push):
   suite's fixture flow is corrected with it so a canonical capture resolves the Lesson's own recorded
   outcome anchor; the remaining §18 runtime suites are still written-but-not-executed and the disposable
   WordPress + MariaDB runtime is still required.
+
+**Independent review correction round 4** (the review of
+`5e0daf221918634a047c83e9b5034b9f833ea7d9` / tree `0968a4f6b96ea828848354b09a473c2f3001cac4` returned
+FAIL — CORRECTION REQUIRED with two blocking findings on §15.3; both are closed on this descendant,
+additively, with no reset, rebase, amend or force-push):
+
+- The snapshot-correction replay now reconstitutes and checks the recorded command payload. The
+  `correct_snapshot` command facts are built in one place (`FinanceCorrectionService::correctionFacts()`,
+  fed canonically on the write path), and `replay()` rebuilds exactly those facts from the **re-loaded
+  correction row** and proves them against the recorded `command_payload_digest` with
+  `FinanceSupport::assertReplayPayload()`, so a corrupted `result_correction_id` that names a different,
+  self-consistent correction of the same Lesson, snapshot and reason — the substitution the review named —
+  is refused `command_replay_conflict` instead of converging on it. The typed `result_snapshot_id` and the
+  `correction_id` selector are cross-linked to the row the replay re-loaded (U-C10-BLOCK-001).
+- Every replay now re-proves the **exact typed result shape its own operation declares**. §15.3 declares,
+  per command table and operation, the typed `result_*` columns that operation records
+  (`FinanceRule::COMMAND_RESULT_COLUMNS`, `FinanceRule::COMMAND_OPERATION_RESULTS`,
+  `FinanceRule::commandOperationResults()`), and the new shared
+  `FinanceSupport::assertReplayResultShape()` requires every required typed result to be present and every
+  other typed result column of that same table to be `NULL` — so a corrupted command row can never smuggle
+  a second, unrelated typed result into a successful replay. `LessonPayabilityService::replay()` returns
+  the **verified** override row the re-loaded evaluation carries (never the recorded
+  `command.result_override_id`) and additionally cross-links the command's override selector, its typed
+  override result and its prior-evaluation selector; an `evaluate` must name an evaluation that carries no
+  override. `LessonFinanceSnapshotService::replay()` returns no secondary result and requires a capture's
+  selector and typed result to be the one snapshot; `FinanceReconciliationService::replay()` returns no
+  secondary run or exception result and cross-links each operation's selector to the row it typed
+  (U-C10-BLOCK-002).
+- Coverage: `tests/phase-2a2u-replay-unit.php` (**executed and passing**) now also proves the declared
+  typed result columns and per-operation shapes and the fail-closed answer for a substituted, an absent
+  and an undeclared secondary typed result, and proves the correction command facts' canonical
+  reconstitution (the facts rebuilt from a recorded correction row reproduce the recorded
+  `command_payload_digest` exactly, while a substituted corrected amount or corrected rate row is
+  refused); `tests/phase-2a2u-corruption-runtime.php` (written, **not
+  executed**) gains one substituted-secondary-result probe per command family — correction, capture,
+  derivation, override, reconciliation run and exception resolution — plus assertions that a converged
+  override replay reports the override its own evaluation carries and that a converged capture, run and
+  resolution replay report no secondary result; and `tests/phase-2a2u-contract.php` (**executed and
+  passing**) scans the declarations, the helper, every family's shape re-proof, the absence of any replay
+  that returns a recorded typed result without re-loading it, and the presence of every substitution
+  probe. Contract §0i records the round in §15.3.
 
 - **A versioned finance policy registry** with four declared keys and a single reason-code allowlist; a
   version is immutable in value with exactly one auditable `status` column that moves at most twice in one

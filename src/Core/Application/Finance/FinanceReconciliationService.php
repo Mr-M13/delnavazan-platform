@@ -223,17 +223,24 @@ final class FinanceReconciliationService {
      * A replayed `run` must exist, still reproduce its recorded period and scope, still carry the state
      * its command row recorded, and still pass the §11.2 run/finding proof including the recomputed
      * findings digest. A replayed `resolve_exception` must name an exception that is still resolved and
-     * still carries its resolution evidence. A missing or mismatched result fails closed
-     * (`upstream_aggregate_invalid` for a corrupt recorded shape, `command_replay_conflict` for a result
-     * that no longer matches the command) and preserves the original command row.
+     * still carries its resolution evidence. Both operations re-prove their exact typed result shape
+     * first — a `run` records `result_run_id` alone and a `resolve_exception` records `result_exception_id`
+     * alone — so a secondary typed result a corrupted command row smuggled onto the other operation fails
+     * closed, and every required reference is cross-linked (the run selector names the run it recorded,
+     * the exception selector names the exception a resolution recorded). A missing or mismatched result
+     * fails closed (`upstream_aggregate_invalid` for a corrupt recorded shape, `command_replay_conflict`
+     * for a result that no longer matches the command) and preserves the original command row.
      */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_reconciliation_commands',$operation);
         if($operation==='run'){
             $run=FinanceSupport::replayResultRow((int)$row->result_run_id,fn(int $id)=>$this->reconciliation->runById($id,true),array(
                 'teacher_id'=>$row->teacher_id===null?null:(int)$row->teacher_id,
             ),'finance_reconciliation_runs');
+            if($row->run_id===null||(int)$row->run_id!==(int)$run->id)throw new FinanceRefusalException('command_replay_conflict','The recorded run selector no longer names the run the command recorded as its result');
+            if($row->exception_id!==null)throw new FinanceRefusalException('command_replay_conflict','The recorded run carries an exception selector its own operation never records');
             if((string)$run->state!==(string)$row->result_state)throw new FinanceRefusalException('command_replay_conflict','The recorded reconciliation run no longer carries the outcome state its command recorded');
             $findings=$this->reconciliation->findings((int)$run->id);
             FinanceReconciliationIntegrity::assertRun($run,$findings);
@@ -248,13 +255,15 @@ final class FinanceReconciliationService {
             );
             if(!hash_equals((string)$run->findings_digest,FinanceReconciliationIntegrity::findingsDigest($ordered)))throw new FinanceRefusalException('upstream_aggregate_invalid','The replayed reconciliation run no longer reproduces its recorded findings digest');
             FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('start'=>(string)$run->period_start_utc,'end'=>(string)$run->period_end_utc,'teacher_id'=>$run->teacher_id===null?null:(int)$run->teacher_id,'operation'=>'run'),'finance_reconciliation_runs');
-            return array('run_id'=>(int)$run->id,'exception_id'=>$row->result_exception_id===null?null:(int)$row->result_exception_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+            return array('run_id'=>(int)$run->id,'exception_id'=>null,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
         }
         $exception=FinanceSupport::replayResultRow((int)$row->result_exception_id,fn(int $id)=>$this->reconciliation->exceptionById($id,true),array(
             'teacher_id'=>$row->teacher_id===null?null:(int)$row->teacher_id,
         ),'finance_exceptions');
+        if($row->exception_id===null||(int)$row->exception_id!==(int)$exception->id)throw new FinanceRefusalException('command_replay_conflict','The recorded exception selector no longer names the exception the command recorded as its result');
+        if($row->run_id!==null)throw new FinanceRefusalException('command_replay_conflict','The recorded resolution carries a run selector its own operation never records');
         if((string)$exception->state!=='resolved'||$exception->resolved_at===null||$exception->resolved_by===null)throw new FinanceRefusalException('command_replay_conflict','A replayed exception resolution names an exception that never recorded its resolution evidence');
         FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,array('exception_id'=>(int)$exception->id,'operation'=>'resolve_exception'),'finance_exceptions');
-        return array('run_id'=>$row->result_run_id===null?null:(int)$row->result_run_id,'exception_id'=>(int)$exception->id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
+        return array('run_id'=>null,'exception_id'=>(int)$exception->id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
 }

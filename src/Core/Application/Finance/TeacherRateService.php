@@ -197,6 +197,7 @@ final class TeacherRateService {
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_teacher_rate_commands',$operation);
         $rate=FinanceSupport::replayResultRow((int)$row->result_rate_id,fn(int $id)=>$this->rates->byId($id,true),array(
             'teacher_id'=>(int)$row->teacher_id,
             'scope_kind'=>(string)$row->scope_kind,

@@ -41,7 +41,12 @@ final class FinanceCorrectionService {
         if(!$snapshot)throw new FinanceRefusalException('snapshot_missing_for_lesson','A correction names the exact prior snapshot it corrects');
         $teacherId=(int)$snapshot->teacher_id;
         $reason=FinanceSupport::operatorReason($input);
-        $payload=FinanceSupport::payload(array('lesson_id'=>$lessonId,'snapshot_id'=>(int)$snapshot->id,'rate_id'=>(int)($input['corrected_rate_id']??0),'version'=>(int)($input['corrected_rate_version']??0),'amount'=>$input['corrected_derived_amount_minor']??null,'currency'=>(string)($input['corrected_currency']??''),'reason'=>$reason,'operation'=>'correct_snapshot'));
+        $payload=FinanceSupport::payload(self::correctionFacts(
+            $lessonId,(int)$snapshot->id,
+            self::canonicalInt($input['corrected_rate_id']??0),self::canonicalInt($input['corrected_rate_version']??0),
+            self::canonicalInt($input['corrected_derived_amount_minor']??null),self::canonicalCurrency($input['corrected_currency']??''),
+            $reason
+        ));
         $command=array('command_domain'=>FinanceRule::DOMAIN,'operation'=>'correct_snapshot','command_key_digest'=>$digest,'command_payload_digest'=>$payload,'teacher_id'=>$teacherId,'lesson_id'=>$lessonId,'snapshot_id'=>(int)$snapshot->id,'correction_id'=>null,'result_state'=>FinanceRule::commandSuccessState('correct_snapshot'),'result_snapshot_id'=>(int)$snapshot->id,'result_correction_id'=>null,'reason_code'=>$reason,'created_at'=>$now,'created_by'=>$actor);
         $lock=static fn()=>FinanceSupport::lockTeacherRoot($teacherId,$actor);
         return FinanceSupport::runCommand($lock,'finance_snapshot_commands',$command,function()use($lessonId,$snapshot,$input,$actor,$now,$digest,$payload,$reason,&$command){
@@ -116,17 +121,33 @@ final class FinanceCorrectionService {
      * The correction must exist, still name the command's own Lesson and prior snapshot, still reproduce
      * its declared derivation digest over its own recorded restatement, still name a corrected rate row
      * and version that exist, and still carry the command's recorded reason. Its base snapshot must still
-     * reproduce the digest the correction named as its prior snapshot. Anything else fails closed and
-     * preserves the original command row.
+     * reproduce the digest the correction named as its prior snapshot, and — the correction replay's own
+     * missing link — the re-loaded correction must still reproduce the *exact command payload* the command
+     * recorded, reconstituted from the correction row's own canonical facts, and must still be the
+     * snapshot the command recorded as its typed result. A corrupted `result_correction_id` that names a
+     * different, self-consistent correction of the same Lesson and snapshot therefore fails closed
+     * instead of converging on the substituted row. Anything else fails closed and preserves the original
+     * command row.
      */
     private function replay(object $row,string $payload,string $operation):array{
         if(!hash_equals((string)$row->command_payload_digest,$payload)||(string)$row->operation!==$operation)throw new FinanceRefusalException('command_replay_conflict','A materially different replay is refused and the original record is preserved');
         FinanceSupport::assertReplayState($row,$operation);
+        FinanceSupport::assertReplayResultShape($row,'finance_snapshot_commands',$operation);
         $correction=FinanceSupport::replayResultRow((int)$row->result_correction_id,fn(int $id)=>$this->snapshots->correctionById($id,true),array(
             'snapshot_id'=>(int)$row->snapshot_id,
             'lesson_id'=>(int)$row->lesson_id,
         ),'finance_snapshot_corrections');
         if((string)$correction->reason_code!==(string)$row->reason_code)throw new FinanceRefusalException('command_replay_conflict','The replayed correction no longer carries the reason the command recorded');
+        // §15.3: the recorded command payload is a pure function of the correction row's own recorded
+        // facts, so the re-loaded correction must still reproduce it exactly.
+        FinanceSupport::assertReplayPayload((string)$row->command_payload_digest,self::correctionFacts(
+            (int)$correction->lesson_id,(int)$correction->snapshot_id,
+            (int)$correction->corrected_rate_id,(int)$correction->corrected_rate_version,
+            (int)$correction->corrected_derived_amount_minor,(string)$correction->corrected_currency,
+            (string)$correction->reason_code
+        ),'finance_snapshot_corrections');
+        if((int)$row->result_snapshot_id!==(int)$correction->snapshot_id)throw new FinanceRefusalException('command_replay_conflict','The recorded correction result no longer names the snapshot the command recorded as its result');
+        if($row->correction_id!==null&&(int)$row->correction_id!==(int)$correction->id)throw new FinanceRefusalException('command_replay_conflict','The recorded correction selector no longer names the correction the command recorded as its result');
         $values=array(
             'snapshot_id'=>(int)$correction->snapshot_id,'lesson_id'=>(int)$correction->lesson_id,
             'corrected_rate_id'=>(int)$correction->corrected_rate_id,'corrected_rate_version'=>(int)$correction->corrected_rate_version,
@@ -143,4 +164,23 @@ final class FinanceCorrectionService {
         if(!hash_equals((string)$snapshot->derivation_digest,(string)$correction->prior_snapshot_digest))throw new FinanceRefusalException('snapshot_derivation_mismatch','The replayed correction no longer names the digest of the snapshot it corrected');
         return array('correction_id'=>(int)$correction->id,'snapshot_id'=>(int)$correction->snapshot_id,'recorded'=>true,'idempotent'=>true,'command_id'=>(int)$row->id);
     }
+    /**
+     * §15.3: the canonical command facts of one `correct_snapshot` command.
+     *
+     * The recorded payload is a pure function of the correction row the command wrote — its Lesson and
+     * snapshot, its corrected rate row and version, its corrected derived amount and currency, and its
+     * operator reason — so both the write path and the replay path build the digested facts here, and a
+     * replay reconstitutes exactly these facts from the re-loaded correction row.
+     */
+    private static function correctionFacts(int $lessonId,int $snapshotId,mixed $rateId,mixed $rateVersion,mixed $derivedAmount,mixed $currency,string $reason):array{
+        return array('lesson_id'=>$lessonId,'snapshot_id'=>$snapshotId,'rate_id'=>$rateId,'version'=>$rateVersion,'amount'=>$derivedAmount,'currency'=>$currency,'reason'=>$reason,'operation'=>'correct_snapshot');
+    }
+    /** A canonical exact-integer when the caller supplied one, otherwise the raw value (refused later). */
+    private static function canonicalInt(mixed $value):mixed{
+        if(is_int($value))return $value;
+        if(is_string($value)&&preg_match('/^\d{1,15}$/D',trim($value))===1)return (int)trim($value);
+        return $value;
+    }
+    /** A canonical ISO-4217 literal (upper-cased, trimmed) whatever casing the caller supplied. */
+    private static function canonicalCurrency(mixed $value):string{return strtoupper(trim((string)$value));}
 }

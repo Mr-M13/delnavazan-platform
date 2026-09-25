@@ -1,16 +1,18 @@
 # Phase 2A.2-U — Finance, Payability, Effective-Dated Teacher Rates, Statements & Audited Corrections (Schema 30)
 
-**Status:** implementation candidate — **independent review correction round 3 applied** (the review of
-`97a572937e07c021bf9c0fc9c65da23cdae92e08` / tree `370eda98f7aa84182c7d06c91cbca7caf79637c2` returned
-FAIL — CORRECTION REQUIRED with one blocking finding on §15.3 replay re-verification; it is closed, with
-the round-2 corrections and round-1 corrections retained — see §6–§7). Not authoritative until independently
-reviewed and merged; not deployed and not merged.
+**Status:** implementation candidate — **independent review correction round 4 applied** (the review of
+`5e0daf221918634a047c83e9b5034b9f833ea7d9` / tree `0968a4f6b96ea828848354b09a473c2f3001cac4` returned
+FAIL — CORRECTION REQUIRED with two blocking findings on §15.3 — the correction replay never
+reconstituted the recorded command payload, and a replay could return an unverified secondary typed
+result; both are closed, with the round-3, round-2 and round-1 corrections retained — see §6–§8). Not
+authoritative until independently reviewed and merged; not deployed and not merged.
 **Schema:** 30 / migration `030_finance_payability_rate_statement_authority`.
 **Build:** `phase2a2u-finance-payability-rate-statement-20260925.1`.
 **Contract:** `docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md`
-(SHA-256 `c679a6fa14c1824da8481e364e2aaa396823a8a7f0277ef08de6b4c8a553cc3b`; correction round 2 adds
-§0g and the §6.2/§7.2/§9.2/§9.3/§10.5/§12.2/§13.5/§15.3/§15.4/§15.5 amendments, and correction round 3
-adds §0h — the §15.3 replay re-verification the sections already required).
+(SHA-256 `dec2c93a7e763d14ca9bb2a8594cb62b88063a414f866a439f7110c53572b3a8`; correction round 2 adds
+§0g and the §6.2/§7.2/§9.2/§9.3/§10.5/§12.2/§13.5/§15.3/§15.4/§15.5 amendments, correction round 3
+adds §0h — the §15.3 replay re-verification the sections already required — and correction round 4 adds
+§0i and the §15.3 amendment that declares the exact typed result shape of every operation).
 **Base:** `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279` — the materialised Phase 2A.2-T candidate tree at
 Schema 29. Phase T (and R2, V) remain unmerged candidates; this candidate is therefore **explicitly
 scoped to that recorded base**, exactly as contract §20 prerequisite 2 allows, and it consumes no
@@ -104,10 +106,11 @@ is implemented conservatively and is flagged here rather than left implicit.
 | Evidence | Status |
 | --- | --- |
 | Source contract suite (`tests/phase-2a2u-contract.php`) | **Executed and passing** under a PHP 8.5.8 WASM CLI (`php-wasm`, PHP 8.5.8, no WordPress and no database): `phase-2a2u-contract: OK`. Two defects in the suite itself were found and corrected with it — a malformed `str_contains()` needle for the per-capability repair and a closure `use` clause carrying a default value in `tests/phase-2a2u-corruption-runtime.php` |
-| §15.3 replay re-verification unit suite (`tests/phase-2a2u-replay-unit.php`) | **Executed and passing** under the same PHP 8.5.8 WASM CLI, with no WordPress and no database: `phase-2a2u-replay-unit: OK`. It loads the four real classes the shared helpers live in (stubbing only `wp_salt()`, the digest key) and proves the declared answers of a replay: a `refused` row converges on its own reason code, a run may replay `completed` or `failed`, a non-declared state, an absent or deleted typed result, a result naming another aggregate row and a result that no longer reproduces the command payload all fail closed with `command_replay_conflict`, and a matching result is returned |
+| §15.3 replay re-verification unit suite (`tests/phase-2a2u-replay-unit.php`) | **Executed and passing** under the same PHP 8.5.8 WASM CLI, with no WordPress and no database: `phase-2a2u-replay-unit: OK`. It loads the four real classes the shared helpers live in (stubbing only `wp_salt()`, the digest key) and proves the declared answers of a replay: a `refused` row converges on its own reason code, a run may replay `completed` or `failed`, a non-declared state, an absent or deleted typed result, a result naming another aggregate row and a result that no longer reproduces the command payload all fail closed with `command_replay_conflict`, and a matching result is returned. Round 4 adds the declared typed result columns and per-operation shapes and proves that a substituted secondary typed result, an absent required typed result and a secondary result the operation never records all fail closed `command_replay_conflict` |
+| §15.3 correction-payload reconstitution proof (inside `tests/phase-2a2u-replay-unit.php`) | **Executed and passing**: the facts the correction replay rebuilds from a recorded correction row reproduce the recorded `command_payload_digest` exactly, while a substituted corrected amount or corrected rate row is refused `command_replay_conflict` (round 4, §8) |
 | PHP syntax of the whole candidate | **Executed and passing**: all 461 `.php` files of `src/`, `tests/`, `delnavazan-platform.php` and `uninstall.php` tokenise and parse cleanly under PHP 8.5.8 (`token_get_all(..., TOKEN_PARSE)`) |
 | Migration/verifier at all three call sites | Implemented; **not executed** |
-| Runtime, statement, reconciliation, corruption, failure suites | Written; **not executed** — the corruption suite now carries one §15.3 corruption-replay probe per command family, and its fixture flow is corrected so a canonical capture resolves the Lesson's own recorded outcome anchor (round 3, §6) |
+| Runtime, statement, reconciliation, corruption, failure suites | Written; **not executed** — the corruption suite carries one §15.3 corruption-replay probe per command family **plus one substituted-secondary-typed-result probe per family** (round 4, §8), and its fixture flow is corrected so a canonical capture resolves the Lesson's own recorded outcome anchor (round 3, §6) |
 | Concurrency runner (`phase-2a2u-concurrency-runner.sh` + setup/worker/verify) | Written; **not executed** |
 | Adjacent L/M/M0/N/O/P/Q/R1/R2/T regressions | **Not re-run** |
 
@@ -212,3 +215,43 @@ flagged; the same repair is **still outstanding** for `-runtime.php`, `-statemen
 `-reconciliation-runtime.php` and `-failure-runtime.php`, which remain written-but-not-executed, and the
 disposable WordPress + MariaDB runtime is still required to execute every §18 authority, migration,
 corruption, failure and concurrency suite. No runtime evidence is claimed for this candidate.
+
+## 8. Independent review correction round 4 (implementation candidate)
+
+The independent review of `5e0daf221918634a047c83e9b5034b9f833ea7d9` (tree
+`0968a4f6b96ea828848354b09a473c2f3001cac4`) returned **FAIL — CORRECTION REQUIRED** with two blocking
+findings, U-C10-BLOCK-001 and U-C10-BLOCK-002. Both are closed on this descendant (additive history only:
+no reset, no rebase, no amend, no force-push) and contract §0i records them in §15.3, the section that
+governs them.
+
+| # | Finding | Where the correction lives |
+| --- | --- | --- |
+| 1 | The correction replay never reconstituted and checked the recorded command payload, so a corrupted `result_correction_id` pointing at a *different* valid correction for the same Lesson, snapshot and reason converged on the substituted result (its own derivation digest passes) | `FinanceCorrectionService::correctionFacts()` is now the one place the `correct_snapshot` command facts are built — the write path feeds it the canonical `corrected_rate_id`/`corrected_rate_version`/`corrected_derived_amount_minor`/`corrected_currency` (`canonicalInt()`/`canonicalCurrency()`), and `replay()` reconstitutes exactly those facts from the **re-loaded correction row** and proves them with `FinanceSupport::assertReplayPayload()` against the recorded `command_payload_digest`. A correction whose corrected rate row, version, corrected amount or currency differs is refused `command_replay_conflict` even though its own recorded derivation digest is self-consistent. The replay also cross-links the command's typed `result_snapshot_id` (and its `correction_id` selector) to the snapshot and correction row it re-loaded |
+| 2 | Override replay verified the override reached through `evaluation->override_id` but returned the unverified `command.result_override_id`; the same unverified secondary-result pattern existed for the snapshot `capture`'s `result_correction_id` and the reconciliation `run`'s `result_exception_id` / `resolve_exception`'s `result_run_id` | §15.3 now declares the exact typed result shape of every operation (`FinanceRule::COMMAND_RESULT_COLUMNS`, `FinanceRule::COMMAND_OPERATION_RESULTS`, `FinanceRule::commandOperationResults()`) and every family re-proves it through the new shared `FinanceSupport::assertReplayResultShape()`: every required typed result of the operation must be present, and every other typed result column of that same table must be `NULL`. `LessonPayabilityService::replay()` returns the **verified** override row the re-loaded evaluation carries and additionally requires the command's `result_override_id` and `override_id` selector to name that row and its `evaluation_id` selector to name the override's prior evaluation; `evaluate` must name an evaluation that carries no override. `LessonFinanceSnapshotService::replay()` returns no secondary result and requires the capture's selector and typed result to be the one snapshot. `FinanceReconciliationService::replay()` returns no secondary result and cross-links each operation's selector to the row it typed |
+
+**Coverage added with the correction, and what is executed.** `tests/phase-2a2u-contract.php` (source
+scan, **executed and passing**) now asserts the two declarations, their per-operation shapes (all twelve
+declared mutating operations), the shared shape helper and its two fail-closed messages, that each of the
+seven command families calls `FinanceSupport::assertReplayResultShape()`, that no replay returns a
+recorded typed result without re-loading it, and that the corruption suite carries the nine family probes
+plus six substituted-secondary-result probes and the report-shape assertions.
+`tests/phase-2a2u-replay-unit.php` (**executed and passing**, no WordPress and no database) additionally
+proves the declared columns and shapes and the fail-closed answer for a substituted, an absent and an
+undeclared secondary typed result, and — through reflection over the service's own private facts builder,
+which loads the class without constructing it and so needs no repository — proves the correction command
+facts' **canonical reconstitution**: the facts rebuilt from a recorded correction row reproduce the
+recorded `command_payload_digest` exactly, while a substituted corrected amount or corrected rate row is
+refused `command_replay_conflict`. `tests/phase-2a2u-corruption-runtime.php` (written, **not executed**)
+gains one substitution probe per command family — correction, capture, derivation, override,
+reconciliation run and exception resolution — each corrupting a *real, valid* secondary typed result (the
+correction probe substitutes a second, valid correction of one snapshot, the exact substitution the review
+named), proving the identical replay fails closed `command_replay_conflict`, restoring the command row
+exactly and proving the identical replay then converges; it also proves that a converged override replay
+reports the override its own evaluation carries and that a converged capture, run and resolution replay
+report no secondary result. Every 461 candidate PHP file still parses cleanly under PHP 8.5.8.
+
+**Still outstanding, unchanged by this round.** No runtime, migration, corruption, failure or concurrency
+evidence is claimed: those suites need the disposable WordPress + MariaDB runtime, which does not exist in
+this environment, and executing every §18 suite on it remains a mandatory acceptance gate before this
+candidate may be merged. The fixture-flow repair §6 flagged is still outstanding for `-runtime.php`,
+`-statement-runtime.php`, `-reconciliation-runtime.php` and `-failure-runtime.php`.

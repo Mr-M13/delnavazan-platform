@@ -230,6 +230,35 @@ rebased, never force-pushed), and §15.3 — which already required this — is 
 | --- | --- |
 | U-C9-BLOCK-001 — `replay()` returned a recorded result id without re-loading or validating the authoritative result row | §15.3 permits an idempotent replay **only after the authoritative aggregate and the recorded result row are re-verified**, and every command family now does exactly that. Two declarations make it uniform and enforceable: `FinanceRule::commandOutcomeStates()` names the *one* declared non-refusal outcome state of each operation (plus `failed` for a reconciliation run, and never `refused`), and `FinanceSupport` gains the three shared helpers `assertReplayState()` (a `refused` row converges on its refusal; any other undeclared state fails closed `command_replay_conflict`), `replayResultRow()` (the typed result is re-loaded under the held root with its own named-index locking read, must exist, and must still carry the command's own selectors or the replay fails closed `command_replay_conflict`), and `assertReplayPayload()` (the recorded result must still reproduce the exact command payload). Each service's `replay()` then re-proves its own section's derivation: the policy version row's key/version/vocabulary and recorded payload (`record`), the §7 rate integrity proof and the exact recorded closure/retraction, the §8.2 snapshot digest with its rate row, version and interval coverage, the §9.1 evaluation derivation digest bound to its own snapshot (and, for `override`, the override row that names it), the §12.2 correction derivation digest with its corrected rate and prior-snapshot digest, the §10.3 statement totals/line-set/derivation proof and §10.1 timezone triple plus the per-operation recorded outcome (`issue` evidence, `withdraw` state, `supersede` predecessor move), and the §11.2 run/finding proof with the recomputed findings digest (and, for `resolve_exception`, the resolution evidence). A deleted, corrupted or mismatched result therefore fails closed and preserves the original command record. Coverage is added in two places: `tests/phase-2a2u-replay-unit.php` (a pure, WordPress-free and database-free unit proof of the shared helpers, executed in the implementation environment) and one corruption-replay probe per command family in `tests/phase-2a2u-corruption-runtime.php`, each proving the fail-closed replay and the converging replay after exact restoration — including the absent-result case, which deletes the recorded policy version row and restores it exactly. `tests/phase-2a2u-contract.php` now scans every service for the re-load and the owning re-proof, so the correction cannot silently regress. |
 
+## 0i. Implementation-candidate review correction round 4 — findings and corrections
+
+The independent review of the **implementation candidate** `5e0daf221918634a047c83e9b5034b9f833ea7d9`
+(tree `0968a4f6b96ea828848354b09a473c2f3001cac4`) returned **FAIL — CORRECTION REQUIRED** with two
+blocking findings, both on §15.3. They are corrected on a descendant of that commit (never rewritten,
+never amended, never rebased, never force-pushed), and §15.3 — which already required the re-verification
+and which this round makes exact about the *typed result shape* — is the operative section.
+
+| Finding | Correction |
+| --- | --- |
+| U-C10-BLOCK-001 — the correction replay never reconstituted and checked the recorded command payload, so a corrupted `result_correction_id` naming a *different* valid correction of the same Lesson, snapshot and reason converged on the substituted row | The correction command facts are now canonical and built in one place (`FinanceCorrectionService::correctionFacts()`, fed on the write path by `canonicalInt()`/`canonicalCurrency()`), and the replay reconstitutes exactly those facts from the **re-loaded correction row** and proves them against the recorded `command_payload_digest` with `FinanceSupport::assertReplayPayload()`, so a correction whose corrected rate row, version, corrected amount or currency differs is refused `command_replay_conflict` even though its own recorded derivation digest is self-consistent. The replay additionally cross-links the command's typed `result_snapshot_id` and its `correction_id` selector to the snapshot and correction row it re-loaded. A corruption probe that substitutes a second, valid correction of one snapshot is added, and the pure replay unit suite proves the payload proof's fail-closed answer. |
+| U-C10-BLOCK-002 — override replay verified the override reached through `evaluation->override_id` but returned the unverified `command.result_override_id`, and the same unverified-secondary-result pattern existed for the snapshot `capture`'s `result_correction_id` and the reconciliation `run`'s `result_exception_id` / `resolve_exception`'s `result_run_id` | §15.3 now **declares the exact typed result fields of every operation** (`FinanceRule::COMMAND_RESULT_COLUMNS` and `FinanceRule::COMMAND_OPERATION_RESULTS`) and re-proves them on every replay through the new shared `FinanceSupport::assertReplayResultShape()`: every required typed result of the operation must be present and every other typed result column of that same table must be `NULL`. `LessonPayabilityService::replay()` returns the **verified** `override_id` (the override row the re-loaded evaluation carries) and additionally requires the command's `result_override_id` and its `override_id` selector to name that row and its `evaluation_id` selector to name the override's own prior evaluation; `LessonFinanceSnapshotService::replay()` returns no secondary result and requires a `capture`'s selector and typed result to be the one snapshot; `FinanceReconciliationService::replay()` returns no secondary result and cross-links each operation's selector to the row it typed. Six corruption probes that substitute a real, valid secondary typed result (including the substituted correction id the review named) prove the fail-closed answer and the converged answer after exact restoration. |
+
+**Coverage added with the correction.** `tests/phase-2a2u-replay-unit.php` (executed, WordPress-free and
+database-free) now also proves the declared typed result columns and per-operation shapes, and proves that
+a command row carrying a substituted secondary typed result, an absent required typed result, or a
+secondary result its operation never records fails closed `command_replay_conflict`; it additionally
+proves the correction command facts' own canonical reconstitution — that the facts rebuilt from a recorded
+correction row reproduce the recorded `command_payload_digest` exactly, while a substituted corrected
+amount or corrected rate row does not.
+`tests/phase-2a2u-corruption-runtime.php` gains one substitution probe per command family (correction,
+capture, derivation, override, reconciliation run and exception resolution), each asserting the
+fail-closed replay and the converged replay after exact restoration, plus the report-shape assertions that
+a converged override replay reports the override its own evaluation carries and that a converged capture,
+run and resolution replay report no secondary result. `tests/phase-2a2u-contract.php` scans the two
+declarations, the shared helper, every family's shape re-proof, the absence of any replay that returns a
+recorded typed result without re-loading it, and the presence of every substitution probe, so the
+correction cannot silently regress.
+
 ## 1. Verified authoritative state
 
 | Fact | Verified value (this checkout) |
@@ -2171,6 +2200,32 @@ the one declared success state of the operation the row records
 the one declared refusal state `refused` with a `NULL` typed result and the exact `reason_code` (§15.8).
 A row that omits its state, or a refusal that keeps the attempt's success state, is not a recordable
 command outcome: the insert fails closed and the command rolls back (§0g, U-C8-BLOCK-001).
+
+**The typed result shape is declared per operation, never inferred from the row.** A replay may converge
+only on the *exact* typed result shape its own operation records, so one declaration names, per command
+table, the typed `result_*` columns that table carries (`FinanceRule::COMMAND_RESULT_COLUMNS`) and, per
+command table and operation, the typed results that operation must record
+(`FinanceRule::COMMAND_OPERATION_RESULTS`): `record`/`supersede`/`withdraw` a policy `result_policy_id`, a
+rate `record`/`close`/`withdraw` a `result_rate_id`, a snapshot `capture` a `result_snapshot_id`, a
+`correct_snapshot` a `result_snapshot_id` **and** a `result_correction_id`, an `evaluate` a
+`result_evaluation_id`, an `override` a `result_evaluation_id` **and** a `result_override_id`, every
+statement operation a `result_statement_id`, a reconciliation `run` a `result_run_id`, and a
+`resolve_exception` a `result_exception_id`. `FinanceSupport::assertReplayResultShape()` requires every
+declared typed result of the operation to be present and every other typed result column of that same
+table to be `NULL` — so a corrupted command row can never smuggle a second, unrelated typed result (a
+substituted override, correction, run or exception id) into a successful replay of an operation that
+never records it, and the replayed operation must also re-prove every **required cross-link** of the
+typed result it names (an override's own row must name the evaluation it produced and the prior
+evaluation the command recorded; a correction must name the snapshot the command recorded as its
+result; a run and an exception resolution must each name the row their own selector recorded). Where the
+operation's payload is a pure function of the typed result row's own facts — the snapshot `capture`, the
+correction `correct_snapshot`, the policy `record`, the rate `record`/`close`/`withdraw`, the payability
+`evaluate`/`override`, the statement `draft`/`issue`/`withdraw`/`supersede`, and the reconciliation
+`run`/`resolve_exception` — the re-loaded result must reproduce the recorded `command_payload_digest`
+exactly
+(`FinanceSupport::assertReplayPayload()`), so an id that names a different but self-consistent row of the
+same aggregate and reason fails closed `command_replay_conflict` instead of converging on the
+substitution (§0h–§0i).
 
 ### 15.4 Conditional supersession
 

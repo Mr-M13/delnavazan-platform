@@ -262,4 +262,69 @@ $replayProbe(
     'command_replay_conflict','exception resolution',$openException,'exception_id'
 );
 
-echo "phase-2a2u-corruption-runtime: OK (every corrupt shape fails closed through its owning validator, every command family's replay re-proves its recorded result, and exact restoration converges)\n";
+// ---- §15.3 typed-result shape: a substituted secondary result id can never converge. ----------------
+// Each probe below corrupts one *secondary* typed result (or selector) of a recorded command row to point
+// at a real, valid row of the same table the operation never records, proves the identical replay fails
+// closed instead of returning that unrelated id, restores the command row exactly and proves the identical
+// replay then converges on the recorded typed result. The correction probe is the exact substitution the
+// review named: a different, self-consistent correction of the same Lesson, snapshot and reason, which its
+// own derivation digest accepts, so only the recorded command payload can refuse it.
+$correctionReplayInput=array('corrected_rate_id'=>(int)$rate['rate_id'],'corrected_rate_version'=>(int)$rate['rate_version'],'corrected_rate_amount_minor'=>12000,'corrected_currency'=>'AUD','corrected_derived_amount_minor'=>12000,'reason_code'=>'operator_evidence_correction','evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-correction','evidence_at'=>gmdate('Y-m-d H:i:s'));
+$substituteCorrectionKey=$replayKey('correction-substituted');
+$substituteCorrection=$corrections->correctSnapshot((int)$replay['lesson_id'],array_merge($correctionReplayInput,array('corrected_derived_amount_minor'=>12001)),$substituteCorrectionKey);
+dzn_u_fix_assert((int)$substituteCorrection['correction_id']!==(int)$correctionReplay['correction_id'],'a second correction of one snapshot is a distinct, valid result row');
+$replayProbe(
+    static fn()=>$corrections->correctSnapshot((int)$replay['lesson_id'],$correctionReplayInput,$correctionReplayKey),
+    static fn()=>$wpdb->update($p.'finance_snapshot_commands',array('result_correction_id'=>(int)$substituteCorrection['correction_id']),array('id'=>(int)$correctionReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_snapshot_commands',array('result_correction_id'=>(int)$correctionReplay['correction_id']),array('id'=>(int)$correctionReplay['command_id'])),
+    'command_replay_conflict','correction substituted secondary result',(int)$correctionReplay['correction_id'],'correction_id'
+);
+// A capture records one typed result only: a valid correction id smuggled onto its command row is refused.
+$replayProbe(
+    static fn()=>$snapshots->capture((int)$replay['lesson_id'],$captureReplayKey),
+    static fn()=>$wpdb->update($p.'finance_snapshot_commands',array('result_correction_id'=>(int)$correctionReplay['correction_id']),array('id'=>(int)$captureReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_snapshot_commands',array('result_correction_id'=>null),array('id'=>(int)$captureReplay['command_id'])),
+    'command_replay_conflict','capture substituted secondary result',(int)$captureReplay['snapshot_id'],'snapshot_id'
+);
+// A derivation records one typed result only: a valid override id smuggled onto its command row is refused.
+$replayProbe(
+    static fn()=>$payability->evaluate((int)$replay['lesson_id'],$evaluateReplayKey),
+    static fn()=>$wpdb->update($p.'finance_payability_commands',array('result_override_id'=>(int)$overrideReplay['override_id']),array('id'=>(int)$evaluateReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_payability_commands',array('result_override_id'=>null),array('id'=>(int)$evaluateReplay['command_id'])),
+    'command_replay_conflict','evaluate substituted secondary result',(int)$evaluateReplay['evaluation_id'],'evaluation_id'
+);
+// An override's own override row is the verified cross-link: a *different* valid override id is refused.
+$substituteOverrideKey=$replayKey('override-substituted');
+$substituteOverride=$payability->override((int)$replay['lesson_id'],'payable','operator_decision',array('evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-override-substituted','evidence_at'=>gmdate('Y-m-d H:i:s')),$substituteOverrideKey);
+dzn_u_fix_assert((int)$substituteOverride['override_id']!==(int)$overrideReplay['override_id'],'a second override of one Lesson is a distinct, valid result row');
+$replayProbe(
+    static fn()=>$payability->override((int)$replay['lesson_id'],'non_payable','operator_decision',array('evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-override','evidence_at'=>gmdate('Y-m-d H:i:s')),$overrideReplayKey),
+    static fn()=>$wpdb->update($p.'finance_payability_commands',array('result_override_id'=>(int)$substituteOverride['override_id']),array('id'=>(int)$overrideReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_payability_commands',array('result_override_id'=>(int)$overrideReplay['override_id']),array('id'=>(int)$overrideReplay['command_id'])),
+    'command_replay_conflict','override substituted secondary result',(int)$overrideReplay['evaluation_id'],'evaluation_id'
+);
+// A reconciliation run records the run only: a valid exception id smuggled onto its command row is refused.
+$replayProbe(
+    static fn()=>$reconciliation->run($statementStart,$statementEnd,$teacherId,$runReplayKey),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_commands',array('result_exception_id'=>$openException),array('id'=>(int)$runReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_commands',array('result_exception_id'=>null),array('id'=>(int)$runReplay['command_id'])),
+    'command_replay_conflict','reconciliation run substituted secondary result',(int)$runReplay['run_id'],'run_id'
+);
+// A resolution records the exception only: a valid run id smuggled onto its command row is refused.
+$replayProbe(
+    static fn()=>$reconciliation->resolveException($openException,array('resolution_note'=>'replay corruption recorded and restored'),$resolveReplayKey),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_commands',array('result_run_id'=>(int)$runReplay['run_id']),array('id'=>(int)$resolveReplay['command_id'])),
+    static fn()=>$wpdb->update($p.'finance_reconciliation_commands',array('result_run_id'=>null),array('id'=>(int)$resolveReplay['command_id'])),
+    'command_replay_conflict','exception resolution substituted secondary result',$openException,'exception_id'
+);
+// A converged replay reports the *verified* secondary result — never a value read off the command row.
+$overrideConverged=$payability->override((int)$replay['lesson_id'],'non_payable','operator_decision',array('evidence_channel'=>'staff_record','evidence_reference'=>'u-replay-override','evidence_at'=>gmdate('Y-m-d H:i:s')),$overrideReplayKey);
+dzn_u_fix_assert((int)$overrideConverged['override_id']===(int)$overrideReplay['override_id'],'a converged override replay reports the override its own evaluation carries');
+$captureConverged=$snapshots->capture((int)$replay['lesson_id'],$captureReplayKey);
+dzn_u_fix_assert($captureConverged['correction_id']===null,'a converged capture replay reports no secondary correction result');
+$runConverged=$reconciliation->run($statementStart,$statementEnd,$teacherId,$runReplayKey);
+dzn_u_fix_assert($runConverged['exception_id']===null,'a converged run replay reports no secondary exception result');
+$resolveConverged=$reconciliation->resolveException($openException,array('resolution_note'=>'replay corruption recorded and restored'),$resolveReplayKey);
+dzn_u_fix_assert($resolveConverged['run_id']===null,'a converged resolution replay reports no secondary run result');
+
+echo "phase-2a2u-corruption-runtime: OK (every corrupt shape fails closed through its owning validator, every command family's replay re-proves its recorded result and its exact typed-result shape, and exact restoration converges)\n";

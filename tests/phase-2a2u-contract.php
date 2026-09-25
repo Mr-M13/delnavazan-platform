@@ -256,6 +256,37 @@ $replayFamilies = array(
 );
 foreach ( $replayFamilies as $family => $entry ) foreach ( $entry[1] as $needle )
 	if ( ! str_contains( $entry[0], $needle ) ) throw new RuntimeException( 'A command family replay must re-load and re-prove its recorded result (' . $family . '): ' . $needle );
+// §15.3: the exact typed result shape of every operation is declared, re-proved by every family, and
+// never bypassed by returning a recorded typed result without re-loading and re-verifying it.
+if ( ! str_contains( $rule, 'public const COMMAND_RESULT_COLUMNS=array(' ) ) throw new RuntimeException( 'The typed result columns of every command table must be one declaration' );
+if ( ! str_contains( $rule, 'public const COMMAND_OPERATION_RESULTS=array(' ) ) throw new RuntimeException( 'The exact typed result shape of every command operation must be one declaration' );
+foreach ( array(
+	'finance_policy_commands' => 'result_policy_id',
+	'finance_teacher_rate_commands' => 'result_rate_id',
+	'finance_snapshot_commands' => 'result_snapshot_id',
+	'finance_payability_commands' => 'result_evaluation_id',
+	'finance_statement_commands' => 'result_statement_id',
+	'finance_reconciliation_commands' => 'result_run_id',
+) as $commandTable => $typedColumn )
+	if ( ! str_contains( $rule, "'" . $commandTable . "'=>array('" . $typedColumn . "'" ) ) throw new RuntimeException( 'A command table must declare its own typed result columns: ' . $commandTable . '.' . $typedColumn );
+foreach ( array(
+	"'capture'=>array('result_snapshot_id')",
+	"'correct_snapshot'=>array('result_snapshot_id','result_correction_id')",
+	"'evaluate'=>array('result_evaluation_id')",
+	"'override'=>array('result_evaluation_id','result_override_id')",
+	"'run'=>array('result_run_id')",
+	"'resolve_exception'=>array('result_exception_id')",
+) as $shape ) if ( ! str_contains( $rule, $shape ) ) throw new RuntimeException( 'A command operation must declare its exact typed result shape: ' . $shape );
+if ( ! preg_match( '/COMMAND_OPERATION_RESULTS=array\((.*?)\n    \);/s', $rule, $operationResults ) ) throw new RuntimeException( 'FinanceRule::COMMAND_OPERATION_RESULTS must be declared literally' );
+foreach ( array( 'record','capture','correct_snapshot','evaluate','override','draft','resolve_exception','run','close','issue','supersede','withdraw' ) as $operation )
+	if ( ! str_contains( $operationResults[1], "'" . $operation . "'=>array(" ) ) throw new RuntimeException( 'Every declared mutating operation must declare its typed result shape: ' . $operation );
+if ( ! str_contains( $rule, 'public static function commandOperationResults(string $commandTable,string $operation):?array' ) ) throw new RuntimeException( 'The declared typed result shape of an operation must be one declared helper' );
+if ( ! str_contains( $support, 'public static function assertReplayResultShape(object $row,string $commandTable,string $operation):void' ) ) throw new RuntimeException( 'The shared §15.3 typed-result-shape helper is missing' );
+if ( ! str_contains( $support, "throw new FinanceRefusalException('command_replay_conflict','The recorded command row carries a '.\$column.' its own operation never records');" ) ) throw new RuntimeException( 'An unrelated typed result a corrupted command row carries must fail closed' );
+if ( ! str_contains( $support, "throw new FinanceRefusalException('command_replay_conflict','The recorded command row does not carry the '.\$column.' its own operation records');" ) ) throw new RuntimeException( 'An absent required typed result must fail closed' );
+foreach ( array( 'policy' => $policyService, 'rate' => $rateService, 'snapshot' => $snapshotService, 'payability' => $payabilityService, 'correction' => $correctionService, 'statement' => $statementService, 'reconciliation' => $reconciliationService ) as $family => $source )
+	if ( ! str_contains( $source, 'FinanceSupport::assertReplayResultShape(' ) ) throw new RuntimeException( 'A command family must re-prove its operation\'s declared typed result shape (' . $family . ')' );
+if ( preg_match( '/=>\s*\$row->result_[a-z_]+/', $policyService . $rateService . $snapshotService . $payabilityService . $correctionService . $statementService . $reconciliationService ) ) throw new RuntimeException( 'A replay may never return a recorded typed result without re-loading and re-verifying it' );
 foreach ( array( 'finance_policy_commands', 'finance_teacher_rate_commands', 'finance_snapshot_commands', 'finance_payability_commands', 'finance_statement_commands', 'finance_reconciliation_commands' ) as $commandTable )
 	if ( ! str_contains( $migration, $commandTable ) ) throw new RuntimeException( 'A declared command table is missing: ' . $commandTable );
 // The corruption suite carries one corruption-replay probe per command family, each asserting the
@@ -263,8 +294,22 @@ foreach ( array( 'finance_policy_commands', 'finance_teacher_rate_commands', 'fi
 $corruption = file_get_contents( $root . '/tests/phase-2a2u-corruption-runtime.php' );
 foreach ( array( "'policy'", "'rate'", "'snapshot'", "'payability'", "'correction'", "'statement'", "'reconciliation run'", "'payability override'", "'exception resolution'" ) as $family )
 	if ( ! str_contains( $corruption, $family ) ) throw new RuntimeException( 'The corruption suite must cover the replay of every command family: ' . $family );
-if ( substr_count( $corruption, '$replayProbe(' ) < 9 ) throw new RuntimeException( 'Every command family needs its own corruption-replay probe' );
+if ( substr_count( $corruption, '$replayProbe(' ) < 15 ) throw new RuntimeException( 'Every command family needs its own corruption-replay probe, plus one substituted secondary typed result per family' );
 if ( ! str_contains( $corruption, "identical replay converges on the recorded typed result after exact restoration" ) ) throw new RuntimeException( 'Every corruption-replay probe must prove convergence after exact restoration' );
+if ( substr_count( $corruption, "substituted secondary result" ) < 6 ) throw new RuntimeException( 'Every command family must prove that a substituted secondary typed result fails closed' );
+if ( ! str_contains( $corruption, 'correction substituted secondary result' ) ) throw new RuntimeException( 'The corruption suite must prove that a substituted valid correction id is refused' );
+if ( ! str_contains( $corruption, 'a converged override replay reports the override its own evaluation carries' ) ) throw new RuntimeException( 'The corruption suite must prove a converged replay reports the verified secondary result, never the recorded command value' );
+// The pure replay unit suite proves the shared behaviour *and* the correction command facts' own
+// canonical reconstitution, so the payload proof of a re-loaded correction cannot silently regress.
+$replayUnit = file_get_contents( $root . '/tests/phase-2a2u-replay-unit.php' );
+foreach ( array(
+	'FinanceSupport::assertReplayResultShape(',
+	"'correctionFacts'",
+	"'canonicalInt'",
+	"'canonicalCurrency'",
+	'the facts reconstituted from the recorded correction row reproduce the recorded command payload exactly',
+	'a substituted correction of the same Lesson, snapshot and reason fails the payload proof',
+) as $needle ) if ( ! str_contains( $replayUnit, $needle ) ) throw new RuntimeException( 'The §15.3 replay unit suite must prove the typed-result shape and the correction payload reconstitution: ' . $needle );
 
 // ---- The candidate must ship the contract it implements. ----------------------------------------
 if ( ! is_readable( $root . '/docs/PHASE-2A-2U-FINANCE-PAYABILITY-RATE-STATEMENT-AUTHORITY-CONTRACT.md' ) ) throw new RuntimeException( 'The implementation candidate must carry the contract it implements' );
