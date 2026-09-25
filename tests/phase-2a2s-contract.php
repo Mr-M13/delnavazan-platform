@@ -252,4 +252,39 @@ if(!str_contains($integrity,"if((int)\$attempt->attempt_sequence!==\$expected)th
 if(!str_contains($privacyService,'$this->repository->begin();'))throw new RuntimeException('Erasure must open its transaction');
 if(!str_contains(substr($privacyService,strpos($privacyService,'function eraseRecipient')),'$notification=$this->notifications->find($notificationId,true);'))throw new RuntimeException('Erasure must take the aggregate root lock inside its own transaction');
 if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-fixture.php'),'implements NotificationTransportPort'))throw new RuntimeException('The concurrency fixture must drive hand-off through the channel-neutral port only');
+
+// 14. The implementation review's five required corrections are guarded against the sources: the claim
+//     normalizes its evidence before it writes any history, no claim path skips the frozen
+//     eligibility/consent/suppression re-evaluation resolved through its own read sources, a hand-off cannot
+//     precede a successful re-evaluation, the claim set excludes an expired window and expires overdue work
+//     before any claim, observation resolves the approved template version and freezes its
+//     rendered-parameter snapshot, and the shared aggregate verification proves the persisted outbox mirror
+//     on every protected read and in the schema verifier.
+$outboxRepository=file_get_contents($root.'/src/Core/Infrastructure/Repository/NotificationOutboxRepository.php');
+$claim=substr($dispatch,strpos($dispatch,'public function claimLease'),4200);
+$claimEvidence=strpos($claim,'$evidence=NotificationSupport::evidence($input);');
+$claimExpiry=strpos($claim,'$this->expireOverdue($evidence,$now,$actor);');
+$claimSet=strpos($claim,'$this->outbox->claimable($now,1);');
+$claimHistory=strpos($claim,'$this->eventRow(');
+if($claimEvidence===false||$claimHistory===false||$claimEvidence>$claimHistory)throw new RuntimeException('The claim must normalize its evidence envelope before it writes history');
+if($claimExpiry===false||$claimSet===false||$claimExpiry>$claimSet)throw new RuntimeException('The claim must expire overdue queued work before it reads the claim set');
+if(!str_contains($claim,'$this->guardEligibility($notification,$version,$now)')||!str_contains($claim,'return $this->refuseClaim($notification,$locked,'))throw new RuntimeException('The claim must re-evaluate the frozen required set and close an ineligible notification without a lease');
+foreach(array('$this->subjects?->subject(','$this->recipients?->recipient(','$this->suppressions->active(') as $source)if(!str_contains($dispatch,$source))throw new RuntimeException('The guarded claim flow must resolve the required fact through its own read source: '.$source);
+$handOff=substr($dispatch,strpos($dispatch,'public function handOff'),1800);
+if(!str_contains($handOff,'$eligibility=$this->reEvaluateEligibility($attemptId,$authorisedCommand,$key.'))throw new RuntimeException('A hand-off must re-evaluate the frozen required set first');
+if(!str_contains($handOff,"if((\$eligibility['eligible']??false)!==true)return"))throw new RuntimeException('A hand-off must not continue past an unsuccessful re-evaluation');
+if(!str_contains($outboxRepository,"AND o.expires_at>%s")||!str_contains($outboxRepository,'public function overdue(string $now,int $limit=50):array{'))throw new RuntimeException('The claim set must exclude an expired window and expose the overdue sweep');
+if(!str_contains($notificationService,'$templateVersion=$this->resolveTemplateVersion($version);'))throw new RuntimeException('Observation must resolve the approved template version');
+if(!str_contains($notificationService,'private function resolveTemplateVersion(object $version):object{')||!str_contains($notificationService,"(string)\$templateVersion->state!=='active'"))throw new RuntimeException('Observation must resolve the exact active template version');
+if(!str_contains($notificationService,'$snapshotId=$this->freezeRenderedSnapshot(')||!str_contains($notificationService,'$this->repository->attachRenderedSnapshot($notificationId,$snapshotId);'))throw new RuntimeException('Observation must freeze and persist the immutable rendered-parameter snapshot');
+if(!str_contains($integrity,"if(\$row===null&&isset(\$notification->outbox_id)&&\$notification->outbox_id!==null)throw new \RuntimeException('schedule_derivation_divergence');"))throw new RuntimeException('A mirror-backed notification without its persisted mirror must be refused by the shared aggregate verification');
+if(str_contains($integrity,'the mirrored dispatch row')||str_contains($integrity,'when one is supplied'))throw new RuntimeException('The shared aggregate verification must not describe the mirror as an optional extra');
+$attemptRead=file_get_contents($root.'/src/Core/Application/NotificationAttemptReadService.php');
+if(!str_contains($attemptRead,'private ?NotificationOutboxRepository $outbox=null'))throw new RuntimeException('The attempt read seam must resolve the persisted outbox mirror');
+if(!str_contains($attemptRead,'$row=$this->outbox->forNotification($notificationId);'))throw new RuntimeException('The attempt read seam must read the persisted outbox mirror');
+if(!str_contains($attemptRead,'aggregateIntegrity($notification,$composition,$policy,$subjectInstant,$row,'))throw new RuntimeException('The attempt read seam must hand the persisted mirror to the shared aggregate verification');
+if(str_contains($attemptRead,'$subjectInstant,null,'))throw new RuntimeException('The attempt read seam must never skip the mirror proof by handing over null');
+if(!str_contains($migration,'$mirror = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$p}platform_outbox WHERE notification_id=%d", (int) $notification->id ) );'))throw new RuntimeException('The schema verifier must read each notification\'s persisted mirror row');
+if(!str_contains($migration,'aggregateIntegrity( $notification, $composition, $policy, $subjectInstant, $mirror, $attempts, (int) $version->version_number );'))throw new RuntimeException('The schema verifier must hand the persisted mirror to the shared aggregate verification');
+if(!str_contains($runtimeSuites,"'schedule_derivation_divergence','an outbox mirror that disagrees with the aggregate on the attempt read seam'"))throw new RuntimeException('The corruption suite must prove the mirror divergence on the attempt read seam');
 echo "Phase 2A.2-S contract static test passed\n";

@@ -119,9 +119,41 @@ name and build identity are unchanged, no schema object is added, and no merge o
   static contract suite asserts the complete matrix, the executable bit and the new lifecycle vocabulary
   and guards against the sources. Runtime coverage was added for the new rules (retry suite §11 — an
   acknowledgement refused from `leased`, a repeated hand-off replaying without a second port call, and a
-  `cancel` resolving a live lease to a clean protected read; corruption suite §5 — truncated chain,
-  unreachable state and terminal-beside-open-attempt each failing closed with `attempt_lifecycle_invalid`
-  and converging when restored).
+`cancel` resolving a live lease to a clean protected read; corruption suite §5 — truncated chain,
+unreachable state and terminal-beside-open-attempt each failing closed with `attempt_lifecycle_invalid`
+and converging when restored).
+
+### Implementation correction round 4 (targeted correction of the preserved candidate `3f67d3d`)
+
+A targeted, additive correction on top of the preserved candidate. Schema 27 /
+`027_notification_communications_authority`, the eighteen tables, the migration name and the build identity
+are unchanged, and no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- The five blocking findings of the candidate's first independent review (`a35d4f4`) are re-verified as
+  already corrected in this candidate and are left unchanged: the claim normalizes its evidence envelope on
+  entry and writes that array on every history row it appends; the claim and hand-off paths resolve the
+  complete frozen eligibility set — subject, recipient, consent, guardian authority and the active
+  suppression, each through its own read source — under the guard, record the bound-evidence digest, close a
+  no-longer-eligible notification terminally without a lease, and make a successful re-evaluation an
+  unavoidable prerequisite to hand-off; the claim set requires an open derived window and every claim pass
+  expires overdue queued work in one transaction per row; and observation resolves the version's active
+  template version, freezes the immutable rendered-parameter snapshot in the observation transaction and
+  persists both `template_version_id` and `rendered_snapshot_id`.
+- **The persisted outbox mirror is proved by the shared aggregate verification on every protected read and in
+  the schema verifier.** `NotificationIntegrity::aggregateIntegrity()` now treats the mirror as part of the
+  proof instead of an optional extra: a notification that carries an `outbox_id` and is handed over without
+  its persisted row is refused whole with `schedule_derivation_divergence`, so no read path can skip the
+  mirror check. `NotificationAttemptReadService` resolves the notification's persisted `platform_outbox` row
+  and hands it to the shared verification (it previously passed `null`, so the attempt seam validated no
+  mirror), and `Migrator::verify_notification_authority_data()` hands each notification's persisted mirror
+  row to the same shared call in addition to its row-by-row mirror loop. The mirrored triple and the
+  `available_at` contract are therefore proved by one rule on the aggregate read, the attempt read, the
+  dispatch claim and schema verification.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts the unconditional mirror requirement and that the
+  attempt read seam and the schema verifier hand the persisted mirror to the shared check (never `null`);
+  `tests/phase-2a2s-corruption-runtime.php` §6 diverges a mirrored `scheduled_for`, proves the attempt read
+  seam refuses it with `schedule_derivation_divergence` through both of its projections, and proves the read
+  converges once the mirror is restored.
 
 - `platform_outbox` gains the additive dispatch representation — `notification_id` (unique), `workflow_key`,
   `workflow_version`, `intent_key`, `audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`,

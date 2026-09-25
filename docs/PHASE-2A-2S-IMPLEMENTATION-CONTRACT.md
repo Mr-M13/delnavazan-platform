@@ -2488,6 +2488,16 @@ execution evidence and deferred product decisions but do not block this contract
 
 ## 19. Correction record
 
+Targeted correction round 4 (preserved candidate `3f67d3d`, tree `5d53556`) — a targeted correction on top
+of the preserved candidate that closes the one residual shortfall in the review's required corrections. This
+entry records the **product-code** correction only: no migration identity, table count, migration name,
+build identity or contract rule changes, no schema object is added, and no merge, deploy, provider
+activation, external send, Amelia or Theme change is involved.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| The first review's fourth finding requires the shared aggregate verification to validate the persisted schedule, the closure/retry integrity **and the outbox mirrors** before reads, dispatch and schema verification proceed. The dispatcher's claim and `NotificationReadService` did run the shared verification with the persisted mirror, but `NotificationAttemptReadService` invoked it with no mirror at all — so the attempt read seam returned authority without ever validating the mirrored row — and `Migrator::verify_notification_authority_data()` invoked it with no mirror as well, keeping the mirror proof outside the one shared rule. | The mirror is now part of the shared proof rather than an optional extra. `NotificationIntegrity::aggregateIntegrity()` refuses a mirror-backed notification whose persisted row was not handed over (`schedule_derivation_divergence`), so a caller can no longer skip the check by passing nothing; `NotificationAttemptReadService` injects `NotificationOutboxRepository`, resolves the notification's persisted row and hands it to the same shared verification as the aggregate seam; and `Migrator::verify_notification_authority_data()` reads each notification's persisted mirror row and hands it to the same shared call in addition to its row-by-row mirror loop. `tests/phase-2a2s-contract.php` §14 asserts the unconditional requirement and both call sites, and `tests/phase-2a2s-corruption-runtime.php` §6 proves a diverged mirror fails closed through the attempt read seam and converges once restored. | §6.5, §7.1, §7.3, §8.4, §9 |
+
 Implementation correction round 3 (failed candidate `902b060`, tree `65c7a37f`) — the independent review
 refused the candidate with three blocking findings. This entry records the **product-code** correction only:
 no migration identity, table count, migration name, build identity or contract rule changes, no schema

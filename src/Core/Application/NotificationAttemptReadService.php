@@ -2,6 +2,7 @@
 namespace Delnavazan\Platform\Core\Application;
 
 use Delnavazan\Platform\Core\Infrastructure\Repository\NotificationAttemptRepository;
+use Delnavazan\Platform\Core\Infrastructure\Repository\NotificationOutboxRepository;
 use Delnavazan\Platform\Core\Infrastructure\Repository\NotificationRepository;
 use Delnavazan\Platform\Core\Infrastructure\Repository\NotificationWorkflowRepository;
 
@@ -16,11 +17,13 @@ final class NotificationAttemptReadService {
     public function __construct(
         private ?NotificationAttemptRepository $repository=null,
         private ?NotificationRepository $notifications=null,
-        private ?NotificationWorkflowRepository $workflows=null
+        private ?NotificationWorkflowRepository $workflows=null,
+        private ?NotificationOutboxRepository $outbox=null
     ){
         $this->repository??=new NotificationAttemptRepository();
         $this->notifications??=new NotificationRepository();
         $this->workflows??=new NotificationWorkflowRepository();
+        $this->outbox??=new NotificationOutboxRepository();
     }
     public function attempts(int $notificationId):array{
         NotificationSupport::requireCapability(NotificationRule::READ_CAPABILITY);
@@ -68,10 +71,13 @@ final class NotificationAttemptReadService {
         $binding=NotificationRule::requiredBinding((string)$notification->intent_key);
         $subjectInstant=$tier==='F'?NotificationIntegrity::persistedInstant((string)$binding['aggregate'],(int)$notification->subject_aggregate_id,$binding['instant']):null;
         $workflow=$this->workflows->workflow((int)$version->workflow_id);
+        // §7.1/§8.4: the same persisted outbox mirror the aggregate read seam proves is supplied here, so a
+        // diverged or absent mirror refuses the attempt projection exactly as it refuses the aggregate one.
+        $row=$this->outbox->forNotification($notificationId);
         // §8.4/§7.3: the attempt read seam proves the same shared aggregate verification as the aggregate
         // read — the persisted derivation, every closed attempt's closure partition and every persisted
         // retry schedule — before it returns any attempt authority.
-        NotificationIntegrity::aggregateIntegrity($notification,$composition,$policy,$subjectInstant,null,$this->repository->attemptsFor($notificationId),(int)$version->version_number,array(
+        NotificationIntegrity::aggregateIntegrity($notification,$composition,$policy,$subjectInstant,$row,$this->repository->attemptsFor($notificationId),(int)$version->version_number,array(
             'workflow_key'=>$workflow?(string)$workflow->workflow_key:'','workflow_version'=>(int)$version->version_number,
             'intent_key'=>(string)$version->intent_key,'audience'=>(string)$version->audience,
         ));

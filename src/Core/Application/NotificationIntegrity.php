@@ -292,9 +292,13 @@ final class NotificationIntegrity {
 
     /**
      * §7.3/§8.4/§9 — the one shared aggregate verification every protected read, dispatch claim and schema
-     * verification runs before it proceeds: the persisted derivation reproduces, the mirrored dispatch row
-     * agrees with the aggregate (when one is supplied), and every closed attempt's closure partition and
-     * persisted retry schedule are proved against the frozen rules. Nothing here writes.
+     * verification runs before it proceeds: the persisted derivation reproduces, the persisted outbox mirror
+     * agrees with the aggregate, and every closed attempt's closure partition and persisted retry schedule
+     * are proved against the frozen rules. Nothing here writes.
+     *
+     * §6.5/§7.1: a notification and its outbox row are 1:1 in storage, so the mirror proof is unconditional
+     * for a mirror-backed notification — a caller that hands over no mirror for one is refused whole instead
+     * of skipping the check, so no read path can return authority from an unproved mirror.
      *
      * @throws \RuntimeException `schedule_derivation_divergence`, `eligibility_expired`,
      *         `tier_f_instant_unavailable`, `terminal_reason_invalid`, `retry_exhaustion_invalid`,
@@ -306,6 +310,9 @@ final class NotificationIntegrity {
         // state vocabulary, event chain, sequence or open/closed shape does not reproduce, or a terminal
         // notification that still holds an open attempt, refuses the read whole.
         self::attemptHistoryIntegrity($notification,$attempts);
+        // §6.5/§7.1/§8.4: the mirror is part of the same proof, never an optional extra — a mirror-backed
+        // notification whose row was not supplied is as unproved as one whose row disagrees.
+        if($row===null&&isset($notification->outbox_id)&&$notification->outbox_id!==null)throw new \RuntimeException('schedule_derivation_divergence');
         if($row!==null){
             $lastRearm=null;
             foreach($attempts as $attempt)if($attempt->next_available_at!==null)$lastRearm=(string)$attempt->next_available_at;

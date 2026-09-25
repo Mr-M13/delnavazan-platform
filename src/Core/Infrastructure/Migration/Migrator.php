@@ -926,8 +926,10 @@ final class Migrator {
 		}
 		// §7.3 — the aggregate half of the S verifier: every S-owned notification re-derives its persisted
 		// schedule from its frozen rules, resolves its tier-F instant from the persisted subject column, and
-		// proves each closed attempt's closure partition and persisted retry schedule. The outbox mirror
-		// itself is checked row-to-row just above, so nothing is re-derived from the outbox row alone.
+		// proves each closed attempt's closure partition and persisted retry schedule. The outbox mirror is
+		// checked row-to-row just above *and* handed to the same shared aggregate verification the protected
+		// reads and the dispatch claim run, so a mirrored row can never disagree with its aggregate — or go
+		// missing behind one — and still pass verification.
 		$notifications = $wpdb->get_results( "SELECT * FROM {$p}notifications" ) ?: array();
 		foreach ( $notifications as $notification ) {
 			try {
@@ -945,7 +947,8 @@ final class Migrator {
 				$policy = \Delnavazan\Platform\Core\Application\NotificationRetry::validatePolicy( array_values( array_filter( $rules, static fn(array $rule):bool => $rule['rule_kind'] === 'retry' ) ) );
 				$subjectInstant = $tier === 'F' ? \Delnavazan\Platform\Core\Application\NotificationIntegrity::persistedInstant( (string) $binding['aggregate'], (int) $notification->subject_aggregate_id, $binding['instant'] ) : null;
 				$attempts = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$p}notification_attempts WHERE notification_id=%d ORDER BY attempt_sequence", (int) $notification->id ) ) ?: array();
-				\Delnavazan\Platform\Core\Application\NotificationIntegrity::aggregateIntegrity( $notification, $composition, $policy, $subjectInstant, null, $attempts, (int) $version->version_number );
+				$mirror = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$p}platform_outbox WHERE notification_id=%d", (int) $notification->id ) );
+				\Delnavazan\Platform\Core\Application\NotificationIntegrity::aggregateIntegrity( $notification, $composition, $policy, $subjectInstant, $mirror, $attempts, (int) $version->version_number );
 			} catch ( \Throwable $error ) {
 				throw new \RuntimeException('Migration verification failed: notification aggregate: '.$error->getMessage());
 			}

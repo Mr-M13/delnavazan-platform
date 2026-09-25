@@ -11,6 +11,7 @@
 if(getenv('DZN_PHASE_2A2S_RUNTIME_TEST')!=='corruption'||!defined('WP_CLI')||!WP_CLI||!in_array(wp_get_environment_type(),array('local','development'),true)){fwrite(STDERR,"Phase 2A.2-S corruption runtime refused.\n");exit(1);}
 require __DIR__.'/phase-2a2s-fixture.php';
 use Delnavazan\Platform\Core\Application\NotificationReadService;
+use Delnavazan\Platform\Core\Application\NotificationAttemptReadService;
 use Delnavazan\Platform\Core\Application\NotificationSupport;
 use Delnavazan\Platform\Core\Application\NotificationWorkflowReadService;
 use Delnavazan\Platform\Core\Application\NotificationIntegrity;
@@ -116,4 +117,26 @@ $wpdb->update($p.'notifications',array('state'=>'failed','failure_reason_code'=>
 dzn_s_fix_rejected(fn()=>$read->one($attemptNotificationId),'attempt_lifecycle_invalid','a terminal notification that still holds an open attempt');
 $wpdb->update($p.'notifications',array('state'=>'dispatching','failure_reason_code'=>null),array('id'=>$attemptNotificationId));
 dzn_s_fix_assert($read->one($attemptNotificationId)['state']==='dispatching','restoring the closed/open shape must restore the read');
+
+// 6. The persisted outbox mirror is proved by the shared aggregate verification on every protected read, not
+//    only the aggregate one: a mirrored row that disagrees with its aggregate refuses the attempt read seam
+//    with the same code as the aggregate read, and restoring it converges.
+$mirrorReady=dzn_s_fix_ready('TERM_LAPSED','corrupt-mirror');
+$mirrorCycle=dzn_s_fix_cycle(null,null,'corrupt-mirror');
+dzn_s_fix_cycle_transition($mirrorCycle,'lapsed','lapsed','corrupt-mirror');
+$mirrorIntent=dzn_s_fix_intent('renewal_cycle',$mirrorCycle,'TERM_LAPSED','corrupt-mirror');
+$mirrorObserved=$mirrorReady['service']->observeIntent($mirrorIntent,array_merge(dzn_s_fix_evidence('corrupt-mirror'),array('observed_at'=>gmdate('Y-m-d H:i:s'))),dzn_s_fix_key('obs-corrupt-mirror'));
+$mirrorNotificationId=(int)$mirrorObserved['notification_id'];
+$mirrorReady['service']->enqueue($mirrorNotificationId,dzn_s_fix_evidence('corrupt-mirror-enqueue'),dzn_s_fix_key('enq-corrupt-mirror'));
+$mirrorDispatch=dzn_s_fix_dispatch($mirrorReady,new DznSConcurrencyTransport());
+$mirrorClaim=$mirrorDispatch->claimLease(dzn_s_fix_evidence('corrupt-mirror-claim'),dzn_s_fix_key('claim-corrupt-mirror'));
+dzn_s_fix_assert($mirrorClaim['claimed']===true,'the mirror fixture must acquire its lease');
+$attemptRead=new NotificationAttemptReadService();
+dzn_s_fix_assert(count($attemptRead->attempts($mirrorNotificationId))===1,'the intact attempt read must return the open attempt');
+$mirrorRow=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}notifications WHERE id=%d",$mirrorNotificationId));
+$wpdb->update($p.'platform_outbox',array('scheduled_for'=>NotificationSupport::addSeconds((string)$mirrorRow->scheduled_for,60)),array('notification_id'=>$mirrorNotificationId));
+dzn_s_fix_rejected(fn()=>$attemptRead->attempts($mirrorNotificationId),'schedule_derivation_divergence','an outbox mirror that disagrees with the aggregate on the attempt read seam');
+dzn_s_fix_rejected(fn()=>$attemptRead->one((int)$mirrorClaim['attempt_id']),'schedule_derivation_divergence','an outbox mirror that disagrees with the aggregate on one attempt projection');
+$wpdb->update($p.'platform_outbox',array('scheduled_for'=>$mirrorRow->scheduled_for),array('notification_id'=>$mirrorNotificationId));
+dzn_s_fix_assert(count($attemptRead->attempts($mirrorNotificationId))===1,'restoring the mirror must restore the attempt read');
 echo "Phase 2A.2-S corruption runtime passed\n";
