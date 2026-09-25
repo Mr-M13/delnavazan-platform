@@ -16,6 +16,11 @@ Record decisions that constrain product behaviour. Implementation history does n
 - Privacy, idempotency and audit evidence are first-class requirements.
 - Production deployment is a separate explicit decision/gate.
 
+## Accepted Payment implementation boundary
+- Phase T implements the existing provider-neutral payment, privacy, credential-isolation and fail-closed decisions; it introduces no new product or business-rule decision.
+- Live provider provisioning/execution remains disabled. Selecting credentials, enabling a provider or production rollout requires explicit Hamed authorisation.
+- Outstanding host runtime evidence is an acceptance requirement, not a product-policy choice.
+
 ## Decisions still requiring Hamed when encountered
 Any new choice that changes:
 - user-visible workflow/business rules;

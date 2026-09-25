@@ -4,12 +4,13 @@
 Describe how canonical schema evolves safely. Historical phase-by-phase migration narratives are archived.
 
 ## Current accepted line
-- Accepted baseline: Schema 27 / Phase V on Platform `main` at `1cb9d16b0beb5bec293b41a065b63ffa5f1318f6`.
-- Schema 25 introduced commercial purchase/funding/current-Term capacity authority.
-- Schema 26 extended this with renewal/recurring enrolment, collection-intent, recovery, protection and refund/reversal-review authority.
-- Schema 27 added the provider-neutral Google Calendar/Meet integration migration and verifier; it is accepted because the reviewed candidate was merged to `main`.
-- The completed Notifications candidate on `recovery/platform-s-notifications-3f67d3d` remains unmerged and still declares Schema 27 from the pre-Phase-V baseline. It must be reconciled and renumbered against current `main` before it can enter an acceptance gate.
-- Schema 28 Payment execution is in-flight only; its current candidate is not accepted until implementation, independent review and merge gates pass.
+- Accepted baseline: Schema 29 / Phase T on Platform `main` at `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279`.
+- Schema 25 introduced commercial purchase/funding/current-Term capacity authority; Schema 26 added renewal/recurring, collection-intent, recovery, protection and refund/reversal-review authority.
+- Schema 27 added the accepted provider-neutral Google Calendar/Meet integration migration and verifier.
+- Migration 028 adds 15 payment-execution tables without backfill, external calls or changes to existing commercial/R1/R2 tables.
+- Migration 029 adds one provider-event decision-claim table for retry-safe lease/generation/token fencing.
+- The reviewed Payment candidate is merged, but host runtime acceptance remains outstanding; it must pass fresh-install/upgrade, webhook, secret, corruption/failure and concurrency evidence before operational activation.
+- The Notifications candidate remains unmerged and must be reconciled and renumbered against current `main`.
 
 ## Migration rules
 - Migrations are sequential, additive and repeat-safe.

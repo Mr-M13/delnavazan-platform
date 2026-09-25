@@ -4,15 +4,17 @@
 This is the short re-entry document for the Platform repository. It records accepted state only. In-flight tasks, blockers and candidate commits belong in the local `CD-LIVE-STATE.md`.
 
 ## Accepted baseline
-- Repository baseline: `559b1736621c9ed32e41dd2b785dd0f040dcb647`.
-- Phase 2A.2-R2 / Schema 26 is the accepted architectural baseline for this documentation pass.
-- Earlier accepted authority includes identity, teacher availability, booking/intake, coordination, proposal/acceptance, enrolment, term, lesson, scheduling, delivery/attendance, continuation/reservation, commercial purchase/funding/current-Term capacity and renewal/recurring/recovery/refund-review authority.
-- Provider-specific transport, production deployment and presentation remain outside canonical Platform authority unless explicitly added by an accepted contract.
+- Repository baseline: `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279`.
+- Phase V / Schema 27 and Phase T / Schema 29 are accepted on Platform `main`.
+- Accepted authority includes identity, teaching, commercial/renewal, provider-neutral Google integration, and a provider-neutral payment-execution seam with a reviewed Stripe adapter.
+- Payment execution records commands, attempts, results, dispatch claims, provider events/decisions and encrypted adapter-scoped secrets without making provider state canonical business truth.
+- Production deployment and live provider activation remain outside this accepted documentation state.
 
 ## Current in-flight boundary
-- Phase S notifications work is not considered accepted merely because a candidate exists.
-- The local Control Plane currently owns exact task/blocker/candidate truth.
-- Architecture/data docs are updated only after an implementation has passed review and become the accepted baseline.
+- Runtime acceptance for the Payment execution migration, webhook, secret-handling, failure and concurrency suites remains outstanding until a host with PHP and disposable WordPress/MariaDB is available.
+- Live execution/provisioning provider allowlists are empty; no provider credential or live-charge path is enabled.
+- Finance contract preflight is active in the local Control Plane. The Notifications candidate remains unmerged and must be reconciled and renumbered against current `main`.
+- The local Control Plane owns exact task, blocker, candidate and worker truth.
 
 ## Non-negotiable boundaries
 - Platform owns business authority and canonical records.
@@ -25,7 +27,7 @@ This is the short re-entry document for the Platform repository. It records acce
 - Idempotency, auditability, privacy erasure boundaries and fail-closed validation are required.
 
 ## Roadmap orientation
-The current queue after R2 proceeds through Notifications (S), Payment Execution (T), Finance/Reporting (U), Google integration (V), Portals (W), then functional-completeness audit. Exact sequencing and status are authoritative only in `state/project-queue.json` / `CD-LIVE-STATE.md`.
+Google integration (V) and Payment Execution (T) are accepted. Finance/Reporting (U) contract preflight is active; Notifications (S) remains parked and unmerged pending reconciliation. Exact sequencing and status are authoritative only in `state/project-queue.json` / `CD-LIVE-STATE.md`.
 
 ## Recovery orientation
 When resuming after a gap:

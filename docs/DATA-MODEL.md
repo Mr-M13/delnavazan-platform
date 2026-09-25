@@ -4,10 +4,11 @@
 Provide a usable conceptual map. Exact columns, indexes and migration verification are authoritative in `src/Core/Infrastructure/Migration/Migrator.php` and runtime tests.
 
 ## Accepted schema
-- Accepted baseline: Schema 27 / Phase V on Platform `main` at `1cb9d16b0beb5bec293b41a065b63ffa5f1318f6`.
-- Schema 27 adds provider-neutral Google Calendar/Meet integration authority: versioned Teacher/provider connections, encrypted credential records, one-time OAuth authorisations, provider identity/event mappings, append-only ingest outcomes/conflicts and digest-only command evidence.
-- The completed Notifications candidate on `recovery/platform-s-notifications-3f67d3d` is not accepted or merged. It was built from the pre-Phase-V baseline and also declares Schema 27, so it must be reconciled and renumbered against current `main` before any future integration.
-- Schema 28 Payment execution is an active candidate only and is not listed as accepted until its implementation, independent review and merge gates complete.
+- Accepted baseline: Schema 29 / Phase T on Platform `main` at `b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279`; Schema 27 / Phase V remains part of that accepted line.
+- Migration 028 adds 15 additive provider-neutral payment-execution tables covering provider accounts/object mappings, encrypted secrets, commands, attempts, results, dispatch claims, provider-event receipts/events and initial decisions.
+- Migration 029 adds the provider-event decision-claim table and fencing authority required for retry-safe decision processing.
+- The completed Notifications candidate on `recovery/platform-s-notifications-3f67d3d` remains unmerged and declares Schema 27 from an older baseline; it must be reconciled and renumbered before future integration.
+- Runtime acceptance for fresh install/upgrade, webhook, secret, failure and concurrency suites remains outstanding until the required PHP and disposable WordPress/MariaDB host is available.
 
 ## Canonical domain groups
 1. **Identity and access** — teachers, students, WordPress/principal links, invitations, capability/authority evidence.
@@ -20,7 +21,8 @@ Provide a usable conceptual map. Exact columns, indexes and migration verificati
 8. **Commercial authority** — products, prices, promotions, offers, purchases, entitlements, obligations, payment evidence/facts and Term funding.
 9. **Recurring/renewal authority** — recurring enrolments/patterns, renewal cycles, collection intents, recovery cases, protections and refund/reversal review.
 10. **Provider integration authority** — provider-neutral connections, encrypted credentials, OAuth authorisations, identity/event mappings, provider ingest evidence/outcomes/conflicts and digest-only commands; provider state never replaces Core identity or Lesson authority.
-11. **Cross-cutting evidence** — audit events, command/idempotency records, exception registries and outbox/intents.
+11. **Payment execution authority** — provider-neutral account/object registries, encrypted adapter secrets, commands, attempts, results, dispatch claims, provider-event receipts/events/decisions and fenced decision claims; provider events do not directly create commercial truth.
+12. **Cross-cutting evidence** — audit events, command/idempotency records, exception registries and outbox/intents.
 
 ## Data invariants
 - Canonical IDs are stable; public/reference IDs are separate from internal numeric IDs.

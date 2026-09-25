@@ -22,8 +22,9 @@ Platform owns:
 - Post-intro continuation and slot reservation authority.
 - Commercial product/price/offer/purchase/funding/capacity authority.
 - Renewal/recurring enrolment, collection intent, recovery and refund-review authority.
+- Provider-neutral payment accounts/object mappings, execution commands/attempts/results, dispatch claims, provider-event evidence/decisions and decision claims.
 
-Provider adapters may execute an authorised intent but must not create domain truth independently.
+Provider adapters may execute an authorised intent but must not create domain truth independently. The accepted Stripe adapter owns only Stripe protocol, signature and transport concerns; Core owns the provider-neutral contract and reconciliation authority.
 
 ## Internal workflow pattern
 - Commands are idempotent and explicitly authorised.
@@ -31,6 +32,8 @@ Provider adapters may execute an authorised intent but must not create domain tr
 - Evidence/events/commands that are intended to be immutable remain append-only.
 - External work is emitted via outbox/intents, then executed by adapters.
 - Provider responses are ingested as evidence/facts and reconciled back into Platform state.
+- Payment dispatch and provider-event decisions use durable, lease/fencing-aware claims so retries cannot silently duplicate authority.
+- Provider secrets remain encrypted and adapter-scoped; live execution/provisioning requires an explicit allowlist and is currently disabled.
 
 ## Module boundaries
 Cross-domain writes must go through the owning application service. Direct table coupling that bypasses authority is prohibited. Shared identifiers do not grant write ownership.

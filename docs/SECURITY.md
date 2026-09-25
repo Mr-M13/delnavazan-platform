@@ -25,6 +25,13 @@ Record enduring security boundaries. Detailed test cases belong in automated tes
 ## External side effects
 No provider action should occur merely because a domain row exists. Platform emits an authorised intent/outbox item; an adapter performs the side effect and records outcome evidence.
 
+## Accepted Payment execution controls
+- Stripe webhook authentication uses the exact raw request body and supported `v1` signatures; malformed, unsupported or unverifiable callbacks fail closed.
+- Proxy-reported HTTPS is trusted only through explicit allowlisted configuration, never from an arbitrary client header.
+- Receipt, normalised event and initial decision persistence is atomic/recoverable; dispatch and decision retries use durable lease/generation/token fencing.
+- Provider secrets use authenticated encryption, remain adapter-scoped and are never stored in canonical commercial rows.
+- Live execution and provisioning provider allowlists are empty until explicitly authorised.
+
 ## Operational safety
 - Never log raw credentials, tokens or unnecessary personal data.
 - Diagnostic output must be safe to expose to an authorised operator.
