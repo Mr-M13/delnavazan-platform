@@ -154,26 +154,42 @@ final class PaymentProviderRepository {
         return $wpdb->get_results("SELECT * FROM {$this->p}payment_provider_event_decision_claims ORDER BY id ASC")?:array();
     }
     /**
-     * [C9-2]/[C12-1] Fenced `claimed → settled`: one affected row is the proof this generation still owns
-     * the event *inside an open window*.
+     * [C9-2]/[C12-1]/[C14-1] Fenced `claimed → settled`: one affected row is the proof this generation still
+     * owns the event *inside an open window*.
      *
-     * It is the first statement of the transaction that appends the decision, so the claim row's lock
-     * serialises the next `decision_sequence` allocation a losing or replaced owner might otherwise
-     * derive at the same time.
+     * It is the first call of the transaction that appends the decision — [C14-1] and the locking read it
+     * starts with is that transaction's first statement — so the claim row's lock serialises the next
+     * `decision_sequence` allocation a losing or replaced owner might otherwise derive at the same time.
      *
      * [C12-1] The append is bounded by the same window that bounded the work: the transition requires the
      * worker's own live generation, its live slot and token **and** an unexpired `lease_expires_at`, and it
-     * takes that verdict at the instant the statement itself runs rather than at any instant a caller read
-     * before the append seam. One database-time expression — `UTC_TIMESTAMP()` — both fences the predicate
-     * and stamps the settlement, so a hook callback, or any other delay between the seam and this statement
-     * acquiring its row lock, can never settle a claim whose window closed in the meantime: a decision
-     * operation that outlives its 120-second lease settles nothing and appends nothing here, exactly like a
-     * replaced generation, even when the caller captured its own clock before the delay. The caller releases
-     * the claim it appended nothing to (fenced by its own generation and token) and converges, so an
-     * expired-but-not-yet-taken-over claim never strands the event.
+     * takes that verdict from one database-time expression — `UTC_TIMESTAMP()` — which also stamps the
+     * settlement, so a hook callback, or any other delay between the seam and this transition, can never
+     * settle a claim whose window closed in the meantime: a decision operation that outlives its 120-second
+     * lease settles nothing and appends nothing here, exactly like a replaced generation, even when the
+     * caller captured its own clock before the delay. The caller releases the claim it appended nothing to
+     * (fenced by its own generation and token) and converges, so an expired-but-not-yet-taken-over claim
+     * never strands the event.
+     *
+     * [C14-1] A database-time expression is evaluated **once, when its statement starts** — not when the
+     * statement reaches the row it is judging. A single conditional update that had to wait for another
+     * transaction's lock on the claim row would therefore still judge the window with the instant it began
+     * waiting, and could settle a claim whose lease lapsed during that wait. The transition is therefore two
+     * statements: a fenced locking read that first acquires the claim row's lock — waiting for any other
+     * holder there, where waiting is harmless because it decides nothing — and only then the conditional
+     * update, which can no longer wait for that row and so takes its own database-time verdict after the
+     * wait rather than before it. The locking read can only ever *refuse* a claim the update would also
+     * refuse (a row it cannot see is not this generation's live claim); it is never the proof of ownership.
+     * The update's affected-row count remains the only proof, so a window that lapsed while the append was
+     * queued behind the lock settles nothing, stamps nothing and publishes nothing.
      */
     public function settleDecisionClaim(int $claimId,int $expectedGeneration,string $tokenDigest):int{
         global $wpdb;
+        $live=$wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$this->p}payment_provider_event_decision_claims WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=UTC_TIMESTAMP() FOR UPDATE",
+            $claimId,$expectedGeneration,$tokenDigest
+        ));
+        if($live===null||$live==='')return 0;
         return (int)$wpdb->query($wpdb->prepare(
             "UPDATE {$this->p}payment_provider_event_decision_claims SET claim_state='settled',active_claim_slot=NULL,lease_expires_at=NULL,settled_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=%d AND claim_state='claimed' AND claim_generation=%d AND claim_token_digest=%s AND active_claim_slot=1 AND lease_expires_at IS NOT NULL AND lease_expires_at>=UTC_TIMESTAMP()",
             $claimId,$expectedGeneration,$tokenDigest

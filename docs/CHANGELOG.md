@@ -7,10 +7,47 @@ Platform phase numbers are independent of Hamnavaz phase numbers.
 
 Schema 29 / migrations `028_payment_execution_seam_provider_adapter` and
 `029_payment_event_decision_claim_authority` / build
-`phase2a2t-payment-execution-seam-stripe-adapter-20260925.13`, additive on top of the Phase-V candidate
+`phase2a2t-payment-execution-seam-stripe-adapter-20260925.14`, additive on top of the Phase-V candidate
 (Schema 27). Implements the RFC-style contract in
-`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 13, SHA-256
-`079e0967042852e1b92dcdba230a1d218ad78b48092ea8f6e38f444b86f48113`).
+`docs/PHASE-2A-2T-PAYMENT-EXECUTION-SEAM-STRIPE-ADAPTER-CONTRACT.md` (correction round 14, SHA-256
+`bdd88f8f0a1a0d8ac16ffa82fc081d938c683d1f359ce515c1cb7c8158aa16ad`).
+
+**Correction round 14** (build `…20260925.14`) applies the independent review of the candidate
+`057acaeea06bf8d0c2eef2f3039c66295988a3d9` / tree `1c5545c585e49b46b2f7608d89965f07bf3dd3a5` additively,
+without rewriting that history. One blocking finding is closed:
+
+- **The append's window is judged only once the claim row is held.** Round 13 took the append's verdict from
+  one database-time expression *inside* the conditional statement — `lease_expires_at >= UTC_TIMESTAMP()`,
+  with the settlement stamped from that same expression — but MySQL evaluates `UTC_TIMESTAMP()` **once, when
+  the statement starts**, not when it reaches the row it judges. An append `UPDATE` that began while the
+  lease was live, blocked on another transaction's lock of the claim row until after expiry, and acquired
+  the row only afterwards therefore still satisfied the predicate with the instant it began waiting, settled
+  the live claim and appended a decision after the decision window had closed — so a delay before the append
+  statement acquired its row lock did not change the verdict. `settleDecisionClaim()` now takes the claim
+  row's lock **first**, with its own fenced `SELECT … FOR UPDATE` (the owner's own `claim_state = 'claimed'`,
+  `claim_generation`, `claim_token_digest`, `active_claim_slot = 1` and the same non-null `lease_expires_at >=
+  UTC_TIMESTAMP()` predicate), and runs the conditional `claimed → settled` update only after that read: the
+  wait for the row lands on the locking read, which decides nothing, and the update — which can no longer
+  wait for that row — takes its database-time verdict after the wait rather than before it. The read can only
+  refuse a claim the update would also refuse; the affected-row count remains the only proof of ownership, so
+  a window that lapsed while the append was queued settles nothing, stamps nothing and publishes nothing.
+
+`tests/phase-2a2t-contract.php` asserts the corrected source contract (the locking read's fence, `FOR UPDATE`
+ahead of the conditional update, and every round-12/13 append property unchanged);
+`tests/phase-2a2t-concurrency-runner.sh` adds `append_blocked_on_claim_row` (twenty-four modes): a separate
+transaction holds the owner's claim row under `SELECT … FOR UPDATE` in its own transaction until the live
+window the owner's append was granted has lapsed, while the owner holds at the append seam and then enters
+the append transaction — whose first statement is now that fenced locking read, so the append is queued
+behind that lock *inside* its window. The blocker attributes the queued wait to exactly that claim row
+(`performance_schema.data_lock_waits` joined to `data_locks` on the claim table's `PRIMARY` index with the
+lock data equal to the claim id, and InnoDB's `LOCK WAIT` state where the runtime does not expose those
+tables) and releases the row only after the window had lapsed in real elapsed time. The verifier proves the
+queued append **settled no claim and appended no decision** — the states an update judging the window with
+the instant it began waiting would have turned into one settled claim and one published decision — that the
+owner's own generation-1 claim ends `released` with no live slot and no lease and no generation above 1
+exists, that the owner reports the event as still owing its decision, and that the next delivery completes
+the event with its single decision, while the work the owner committed inside its window stands exactly once
+(one R1 evidence, one R1 settlement, one confirmed collection intent, one collected renewal cycle).
 
 **Correction round 13** (build `…20260925.13`) applies the independent review of the candidate
 `e92a62747b82f8a37838f886a1034eb770f65e37` / tree `0f4ab9b6ab8de3021e0aa7b7e1e0f48f079c34df`
@@ -273,7 +310,7 @@ commit was rewritten.
   over by exactly one fenced generation and reconciled before any re-issue.
 - **Evidence posture:** `git diff --check`, shell syntax, Git object integrity and source scans pass. The
   §17 PHP/runtime suites (contract, migration, runtime, webhook, secret, corruption, failure and the
-  twenty-three-mode concurrency matrix) are written and wired but **could not be executed in this environment
+  twenty-four-mode concurrency matrix) are written and wired but **could not be executed in this environment
   because PHP and the disposable WordPress + MariaDB runtime are unavailable**. Executing them is a
   mandatory acceptance gate and remains outstanding.
 - **Candidates and merge:** single coherent candidate, no merge, no deployment.

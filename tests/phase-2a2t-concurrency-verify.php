@@ -131,6 +131,77 @@ if($mode==='stale_owner_at_decision_append'){
     dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the next delivery must be the generation that completes the event');
 }
 
+// [C14-1] The queued-append race: the claim row decides when the append's window verdict is taken. A
+// database-time expression is evaluated once, when its statement starts, so the transition takes that row
+// with its own fenced locking read *before* it judges the window, and the conditional update can no longer
+// be the statement that waits. Here a separate transaction holds the claim row until the owner's live window
+// has lapsed while the owner's append is queued behind that lock: the queued append must settle no claim and
+// append no decision — the exact state a transition that judged the window with the instant it began waiting
+// would have turned into a settlement and a published decision.
+if($mode==='append_blocked_on_claim_row'){
+    dzn_tcv_assert(isset($fixture['webhook']['obligation_id'],$fixture['webhook']['intent_id'],$fixture['webhook']['cycle_id'],$fixture['prepared_event_id']),'the queued-append race fixture must exist');
+    $webhook=$fixture['webhook'];
+    $prepared=(int)$fixture['prepared_event_id'];
+    foreach(array('w1.work','w1.at_append','w1.json','w2.locked','w2.queued','w2.expired','w2.released','w2.pre.json') as $marker)
+        dzn_tcv_assert(is_file($gate.'/'.$marker),'the queued-append race must record '.$marker);
+    $locked=json_decode((string)file_get_contents($gate.'/w2.locked'),true);
+    $queued=json_decode((string)file_get_contents($gate.'/w2.queued'),true);
+    $lapsed=json_decode((string)file_get_contents($gate.'/w2.expired'),true);
+    $released=json_decode((string)file_get_contents($gate.'/w2.released'),true);
+    dzn_tcv_assert(is_array($locked)&&isset($locked['claim_id'],$locked['lease_expires_at'],$locked['connection_id']),'the blocker must record the claim row and the live window it holds');
+    dzn_tcv_assert(is_array($queued)&&in_array((string)($queued['mechanism']??''),array('performance_schema','information_schema_innodb_trx'),true),'the queued append must be attributed to the claim row lock');
+    dzn_tcv_assert(is_array($lapsed)&&is_array($released),'the blocker must record the window lapse and the release');
+    $leaseAt=strtotime((string)$locked['lease_expires_at'].' UTC');
+    dzn_tcv_assert($leaseAt!==false&&strtotime((string)$locked['db_time'].' UTC')!==false,'the blocker must record the window and a database instant');
+    dzn_tcv_assert(strtotime((string)$queued['db_time'].' UTC')!==false&&strtotime((string)$queued['db_time'].' UTC')<=$leaseAt,'the append must be queued behind the lock while the window it was granted was still open: the queue must never be observed only once that window had already lapsed');
+    dzn_tcv_assert(strtotime((string)$lapsed['db_time'].' UTC')>$leaseAt,'the blocker must hold the claim row until the window the queued append was granted had genuinely lapsed');
+    dzn_tcv_assert(strtotime((string)$released['db_time'].' UTC')>$leaseAt,'the lock must be released only after that window had lapsed');
+    if((string)$queued['mechanism']==='performance_schema'){
+        dzn_tcv_assert((string)$queued['table']===$p.'payment_provider_event_decision_claims'&&(string)$queued['index']==='PRIMARY','the queued append must wait on the claim row\'s primary key');
+        dzn_tcv_assert((string)$queued['lock_data']===(string)$locked['claim_id'],'the queued append must wait on the owner\'s own claim row, never another row');
+        dzn_tcv_assert((int)$queued['blocking_thread_id']!==(int)$queued['requesting_thread_id'],'the waiting transaction must be another connection\'s, never the holder\'s own');
+    }else{
+        dzn_tcv_assert((int)$queued['requesting_connection_id']!==(int)$locked['connection_id'],'the waiting transaction must be another connection\'s, never the holder\'s own');
+        dzn_tcv_assert((string)$queued['state']==='LOCK WAIT','the queued append must be observed in the row-lock wait state');
+        dzn_tcv_assert(($queued['query_available']??false)===false||($queued['query_matches_claim_table']??false)===true,'the statement observed waiting on that row must be the append against the claim table');
+    }
+    // The owner's own refusal, and the state it left behind, observed before the next delivery completes the
+    // event: nothing was settled and nothing was appended by the queued append.
+    dzn_tcv_assert(($records['w1']['error']??null)===null,'the queued append must stop as a controlled closed window, never as a failure');
+    dzn_tcv_assert(isset($records['w1']['outcome']['events'][0])&&$records['w1']['outcome']['events'][0]['created']===false&&!empty($records['w1']['outcome']['events'][0]['pending']),'the queued append must append nothing and report the event as still owing its decision');
+    dzn_tcv_assert(filemtime($gate.'/w1.json')>=filemtime($gate.'/w2.released'),'the queued append must return only after the claim row lock was released, so its refusal and the release that follows it land strictly after the lapsed window');
+    $observed=json_decode((string)file_get_contents($gate.'/w2.pre.json'),true);
+    dzn_tcv_assert(is_array($observed)&&is_array($observed['observation']??null),'the blocker must observe what the queued append left behind before it delivers');
+    $observation=$observed['observation'];
+    dzn_tcv_assert((int)$observation['settled_claims']===0,'the queued append must settle no claim: the window it was granted had lapsed before the statement that judges it could run');
+    dzn_tcv_assert((int)$observation['decisions']===0,'the queued append must append no decision: a window that closed publishes nothing, exactly like a replaced generation');
+    dzn_tcv_assert((int)$observation['claims']===1&&(string)$observation['owner_claim_state']==='released','the owner\'s own claim must end released, never settled, with no live slot and no lease');
+    dzn_tcv_assert((int)$observation['live_claims']===0,'the owner must release the live claim it appended nothing to, so the event is not stranded behind a lease nobody is working inside');
+    dzn_tcv_assert((int)$observation['evidence']===1&&(int)$observation['settlements']===1,'the R1 evidence and settlement the owner committed inside its window must stand exactly once');
+    dzn_tcv_assert((string)$observation['intent']==='confirmed'&&(string)$observation['cycle']==='collected','the R2 confirmation and collection the owner committed inside its window must stand exactly once');
+    // The completed event, after the delivery that follows the release.
+    $claimRows=$wpdb->get_results($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d ORDER BY id ASC",$prepared))?:array();
+    $releasedClaims=0;$settledClaims=0;$successors=0;$releasedRow=null;
+    foreach($claimRows as $claimRow){
+        if((string)$claimRow->claim_state==='released'){$releasedClaims++;$releasedRow=$claimRow;}
+        if((string)$claimRow->claim_state==='settled')$settledClaims++;
+        if((int)$claimRow->claim_generation>1)$successors++;
+    }
+    dzn_tcv_assert($releasedClaims===1&&$settledClaims===1,'the queued append must leave the claim it appended nothing to released and the next delivery\'s claim settled');
+    dzn_tcv_assert($releasedRow!==null&&$releasedRow->lease_expires_at===null,'the released claim must carry no lease any more');
+    dzn_tcv_assert($successors===0,'no successor generation may have replaced the owner: the lapsed window, never a take-over, must be what refused the queued append');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",$prepared))===0,'no live claim may survive the completed decision');
+    dzn_tcv_assert(!$wpdb->get_results("SELECT provider_event_id,COUNT(*) AS total FROM {$p}payment_provider_event_decision_claims WHERE active_claim_slot=1 GROUP BY provider_event_id HAVING total>1"),'two live decision claims must never share one event');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared))===1,'the event must end with exactly one decision');
+    $decision=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$prepared));
+    dzn_tcv_assert($decision!==null&&(string)$decision->decision_state==='ignored'&&(string)$decision->reason_code==='stale_provider_event','the one decision must be the next generation\'s controlled stale refusal: the obligation the queued append\'s owner settled inside its window may never be settled twice');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 evidence the owner committed inside its window must stand exactly once');
+    dzn_tcv_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id']))===1,'the R1 settlement the owner committed inside its window must stand exactly once');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id']))==='confirmed','the collection intent the owner confirmed inside its window must stay confirmed exactly once');
+    dzn_tcv_assert((string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id']))==='collected','the renewal cycle the owner collected inside its window must stay collected exactly once');
+    dzn_tcv_assert(isset($records['w2']['outcome']['events'][0])&&$records['w2']['outcome']['events'][0]['created']===true,'the delivery that follows the release must be the one that completes the event');
+}
+
 // [C10-2] The stale-owner race: the first worker takes the event's decision claim and then lets its own
 // bounded window expire while it still owns it; the second worker takes the claim over and completes the
 // decision. When the first worker resumes, its closed window must stop it before any R1/R2 work unit — its

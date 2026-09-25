@@ -634,12 +634,17 @@ final class PaymentEventIntakeService {
      *
      * [C12-1] The append is the last step the claim's bounded window covers, so the transition requires the
      * worker's own live slot and an unexpired lease as well as its generation and token — and it requires
-     * them of the window as it stands at the instant the statement runs, never as the worker last read it. A
-     * window that lapsed after the final R1/R2 work unit but before this transaction — because the seam
-     * between them held for longer than the lease, whether a hook callback delayed it or the statement simply
-     * reached its row lock late — therefore appends nothing here; the owner releases the live claim it
-     * appended nothing to and converges, so the event is completed by the next delivery instead of being held
-     * behind a lease nobody is working inside.
+     * them of the window as it stands at the instant the statement runs, never as the worker last read it.
+     * [C14-1] That instant is only honest because this transaction takes the claim row's lock *before* the
+     * transition it fences: the repository's transition acquires the row with its own fenced locking read,
+     * where a wait is harmless because it decides nothing, and runs the conditional `claimed → settled`
+     * update only once the row is held — so an append that had to wait for that lock is judged after the
+     * wait, never with the database instant the waiting statement started with. A window that lapsed after
+     * the final R1/R2 work unit but before this transaction — because the seam between them held for longer
+     * than the lease, whether a hook callback delayed it or the append was queued behind another
+     * transaction's lock on the claim row — therefore appends nothing here; the owner releases the live
+     * claim it appended nothing to and converges, so the event is completed by the next delivery instead of
+     * being held behind a lease nobody is working inside.
      */
     private function appendDecisionUnderClaim(object $event,array $decision,array $claim,string $context):array{
         // [C12-1] Observable seam of the contract's last bounded step: every R1/R2 work unit has finished and

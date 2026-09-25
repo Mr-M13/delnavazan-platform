@@ -2,7 +2,7 @@
 
 **Status:** implementation contract (preflight). Planning/audit only.
 **Schema:** 029 (`028_payment_execution_seam_provider_adapter`, plus — since correction round 10 — the decision-claim aggregate `029_payment_event_decision_claim_authority`)
-**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.13` (proposed; correction round 13)
+**Build:** `phase2a2t-payment-execution-seam-stripe-adapter-20260925.14` (proposed; correction round 14)
 **Correction round 2:** independent review of commit `adbd78795f6e11ee7731c985975a7276f8351659`
 (tree `f96569c8e70254d436b8571db64be0d057583fef`) returned FAIL on six blocking findings. §0 records
 each finding and its correction, and every corrected clause carries a `[C2]` marker so a reviewer can
@@ -103,6 +103,16 @@ statement itself runs, from one database-time expression that fences the predica
 alike, so no instant read before the seam can settle a lapsed window. §0K records the finding and its
 correction, and every corrected clause carries a `[C13-1]` marker so a reviewer can locate the change
 without re-reading the document.
+**Correction round 14:** independent review of commit `057acaeea06bf8d0c2eef2f3039c66295988a3d9`
+(tree `1c5545c585e49b46b2f7608d89965f07bf3dd3a5`) returned FAIL on one blocking finding — the append
+transition took its database-time window verdict from the same statement that waited for the claim row's
+lock, and MySQL evaluates `UTC_TIMESTAMP()` once at statement start, so an append that blocked on another
+transaction's lock of that row until after the lease had lapsed still settled the claim and published its
+decision using the instant it began waiting. The transition now takes the claim row's lock first, with its
+own fenced locking read — where a wait decides nothing — and runs the conditional `claimed → settled`
+update only once the row is held, so its verdict is taken after any wait for it. §0L records the finding
+and its correction, and every corrected clause carries a `[C14-1]` marker so a reviewer can locate the
+change without re-reading the document.
 **Base:** `main` with Phase 2A.2-R2 merged (Schema 26). R1 is already authoritative on `main`;
 R2 / Schema 26 is the active candidate and is a hard dependency of the R2-collection half of this
 contract (§6.2, §19).
@@ -304,6 +314,24 @@ capability, policy or provider call is added.
 | # | Blocking finding (review of `e92a627`) | Correction made in this round |
 | --- | --- | --- |
 | C13-1 | §9.5 C10-2/§12.1/§14 (`PaymentEventIntakeService.php:642-649`): `appendDecisionUnderClaim()` captured `$now` **before** firing the append seam and passed that captured instant into `settleDecisionClaim()` as the value the lease predicate and the settlement stamps were judged against. A seam callback that delays the append past the claim's lease — a decision operation simply outliving its 120-second window at its last bounded step — therefore still found `lease_expires_at >= $now` true, settled the live claim and appended the decision after the window had closed, because the comparison used the instant read before the seam rather than the instant the statement ran. | The conditional transition now takes its verdict **at statement execution**, and takes it from one database-time expression: `settleDecisionClaim()` requires, in its single conditional statement, the owner's own `claim_state = 'claimed'`, its `claim_generation`, its `claim_token_digest`, its `active_claim_slot = 1` **and** a non-null `lease_expires_at >= UTC_TIMESTAMP()`, and stamps `settled_at`/`updated_at` with that same `UTC_TIMESTAMP()` — the settlement and the window verdict can no longer be derived from two different instants. The transition takes no instant parameter at all, so no caller can supply one; `PaymentEventIntakeService::appendDecisionUnderClaim()` now reads the instants it records on the appended row only *after* the append seam. A seam callback, or any delay before the statement acquires the claim row's lock, therefore changes the verdict itself: an append that runs after the lease has lapsed affects zero rows and publishes nothing — exactly as a replaced generation publishes nothing — and the owner releases the live claim it appended nothing to and converges, so the event is completed by the next delivery instead of being stranded behind a lease nobody was working inside. §9.5, §12.1, §13, §14 and §17 are updated; the contract suite pins the database-time fence and the missing instant parameter in source; the failure suite proves behaviourally that a *real* delay past the claim's live window settles nothing and leaves the claim live; and the concurrency matrix's `stale_owner_at_decision_append` now lets the owner's own window lapse **in real elapsed time**, with the claim row never written, and its verifier proves the lapse was a real one — the instant the owner read from its own live claim at the seam is its structural 120-second window forward of the instant the claim was taken, and the release that follows the refused append lands strictly after it. |
+
+## 0L. Correction round 14 (independent review of `057acae` / tree `1c5545c5`)
+
+The reviewed candidate returned FAIL on one blocking finding: the round-13 append fence took its verdict from
+one database-time expression *inside* its own conditional statement (`lease_expires_at >= UTC_TIMESTAMP()`,
+with `settled_at`/`updated_at` stamped from that same expression), but MySQL evaluates such a function **once,
+when the statement starts** — not when the statement reaches the row it is judging. An append `UPDATE` that
+had to wait for another transaction's lock of the claim row — a statement that starts while the lease is live,
+blocks, and acquires the row only after the lease has expired — therefore still satisfied
+`lease_expires_at >= UTC_TIMESTAMP()` with the instant it began waiting, settled the live claim and appended
+the decision after the window had closed. That violates C10-2, which makes the lease the bounded window the
+*whole* decision operation, the append included, runs inside and requires that a delay before the append
+acquires its row lock change the verdict. The finding is resolved below. No clause outside it is changed by
+this round, and no authority, table, capability, policy or provider call is added.
+
+| # | Blocking finding (review of `057acae`) | Correction made in this round |
+| --- | --- | --- |
+| C14-1 | §9.5 C10-2/§12.1/§14 (`PaymentProviderRepository.php:178`): the round-13 `claimed → settled` transition judged the lease with `UTC_TIMESTAMP()` in the same statement that settled the claim, so the verdict was taken at that statement's *start*. A row lock the statement had to wait for was therefore invisible to the verdict: an append that began while the lease was live, blocked on another transaction's lock of the claim row until after expiry, and acquired the row only afterwards still settled the live claim and appended its decision, because the comparison used the instant read before the wait. | The transition now takes the claim row's lock **first** and retains it for the rest of the append transaction. `settleDecisionClaim()` issues a fenced `SELECT … FOR UPDATE` that carries the owner's own `claim_state = 'claimed'`, its `claim_generation`, its `claim_token_digest`, its `active_claim_slot = 1` and the same non-null `lease_expires_at >= UTC_TIMESTAMP()` predicate, and only then runs the conditional `claimed → settled` update — whose lease predicate and settlement stamps may still share one `UTC_TIMESTAMP()` expression, because the update can no longer wait for that row. The wait for the row therefore lands on the locking read, where it decides nothing, and the update takes its database-time verdict *after* the wait rather than before it. The locking read can only ever refuse a claim the update would also refuse (a row it cannot see is not this generation's live claim); the update's affected-row count remains the only proof of ownership, so a window that lapsed while the append was queued settles nothing, stamps nothing and publishes nothing. §9.5, §12.1, §13, §14 and §17 are updated; the contract suite pins the lock-then-update order and the locking read's fence in source; and the concurrency matrix adds `append_blocked_on_claim_row`, which holds the claim row in a **separate transaction** until the owner's live window has lapsed, queues the owner's append behind that lock (attributed to that exact row with `performance_schema.data_lock_waits`/`data_locks` where the runtime exposes them, and otherwise through InnoDB's `LOCK WAIT` state), proves the queue was observed while the window was still open and that the lock outlived it, and proves the queued append settled no claim and appended no decision before the lock was released — the state an update that judged the window with the instant it began waiting would have turned into a settlement and a published decision. |
 
 ## 1. Verified authoritative state
 
@@ -1652,6 +1680,13 @@ unauthenticated and is never impersonated as a human principal.
   instant parameter at all, so a hook callback on the append seam, or any other delay before the statement
   acquires the claim row's lock, changes the verdict itself instead of being compared against an instant
   read before the seam.
+  [C14-1] "Judged after the append acquires its row lock" is enforced as well, because a database-time
+  expression is evaluated **once, when its statement starts**: a single conditional update that had to wait
+  for another transaction's lock of the claim row would judge the window with the instant it began waiting.
+  The transition therefore takes that row's lock with its own fenced `SELECT … FOR UPDATE` — where a wait
+  decides nothing — and runs the conditional update only once the row is held, so an append that was queued
+  behind another transaction's lock is judged *after* that wait, never with the instant the waiting statement
+  began with.
 - [C11-1] **Ownership also covers the duration of every work unit, not only its entry.** The window is
   proved — and, outside a transaction, renewed first — *inside the unit's own transaction*, at the
   connection's statement boundary (`DECISION_UNIT_FENCE_FILTER`), before every statement that transaction
@@ -2280,6 +2315,11 @@ can never settle a window that has closed in the meantime. A window that lapsed 
 settles nothing and appends nothing, exactly like a replaced generation, and the
 owner then releases the live claim it appended nothing to before it converges — so the row ends `released`
 (no live slot, no lease) rather than a terminal `settled` row for a decision that was never published.
+[C14-1] The transition takes the claim row's lock **before** the statement that judges the window, with one
+fenced `SELECT … FOR UPDATE` of that row — the wait for the row therefore happens where it decides nothing —
+so the conditional update that follows can no longer wait for it, and its one database-time verdict is taken
+after any such wait: an append queued behind another transaction's lock of the claim row is refused by the
+lapsed window, not settled by the instant it began waiting.
 
 ### 12.2 Append-only evidence
 
@@ -2627,7 +2667,10 @@ capability it mints is never stored, so the dispatch repository's mutation surfa
 [C9-1]/[C9-2] The provider-event repository exposes the decision claim's conditional statements — the
 live-slot insert, the fenced `claimed → settled` transition, the fenced `claimed → released` release and
 the conditional expired-lease take-over that bumps the generation and re-issues the token — each a single
-statement whose affected-row count is the outcome, plus the read of an event's live claim and the
+statement whose affected-row count is the outcome, [C14-1] except the `claimed → settled` transition, which
+takes the claim row's lock with its own fenced locking read before that conditional statement (the wait for
+the row must not be the statement that judges the window) and whose affected-row count is still the only
+outcome of the transition, plus the read of an event's live claim and the
 append-only decision/event/receipt reads. [C12-1] The `claimed → settled` transition is bounded by the
 claim's window exactly as the work units are: besides the owner's own `claim_generation` and
 `claim_token_digest` it requires `active_claim_slot = 1` **and** a non-null, unexpired `lease_expires_at`.
@@ -2636,7 +2679,11 @@ one **database-time** expression inside the statement — `lease_expires_at >= U
 `settled_at`/`updated_at` with the same expression, and it takes no instant parameter at all: a seam
 callback delay, or any delay before the statement's row lock, therefore changes the verdict itself rather
 than being compared against an instant the caller read earlier, so an append that runs after the lease has
-lapsed affects no row and publishes nothing. [C10-2] It also exposes exactly one bounded-window renewal: a
+lapsed affects no row and publishes nothing. [C14-1] The row lock is taken **before** that judgement, by the
+transition's own fenced locking read of the claim row: a database-time expression is evaluated once, when its
+statement starts, so the statement that judges the window must not be the statement that waits for the row —
+the conditional update runs only once the row is held, and therefore after any wait for it, while the locking
+read that did the waiting decided nothing. [C10-2] It also exposes exactly one bounded-window renewal: a
 conditional statement that requires the caller's own live generation (`claim_state = 'claimed'`, its
 `claim_generation` and `claim_token_digest`, `active_claim_slot = 1`) **and** an unexpired
 `lease_expires_at`, and only then extends the window — so the work-unit gate can never renew a window that
@@ -2711,7 +2758,13 @@ payload, secret, raw reference, raw signature, source address or provider status
   after the final work unit settles nothing there either — the append publishes nothing, the owner releases the live
   claim it appended nothing to (fenced by its own generation and token) and converges, and the next
   delivery completes the event. §17's `stale_owner_at_decision_append` proves that refusal is the lapsed
-  lease itself and never a take-over.
+  lease itself and never a take-over. [C14-1] Because a database-time expression is evaluated once, when its
+  statement starts, that verdict is only honest if the transition already holds the row it is judging: the
+  transition takes the claim row's lock with its own fenced `SELECT … FOR UPDATE` — where the wait decides
+  nothing — before the conditional update, so an append that was queued behind another transaction's lock of
+  that row is judged *after* the wait. §17's `append_blocked_on_claim_row` proves it: a separate transaction
+  holds the claim row until the owner's live window has lapsed while the owner's append is queued behind it,
+  and the queued append settles no claim and appends no decision.
 - [C11-1] Ownership covers the *duration* of every work unit, not merely its entry. The window is proved
   — and, outside a transaction, renewed — from inside the unit's own transaction, before every statement
   that transaction runs (§9.5, `DECISION_UNIT_FENCE_FILTER`). The claim row is therefore held for the
@@ -3093,6 +3146,32 @@ Correction round 13 adds these required proofs, each inside the suite whose row 
   beside the existing proof that no successor generation replaced the stale one, that the stale generation
   appended nothing, and that the next delivery completes the event exactly once.
 
+Correction round 14 adds this required proof, inside the suite whose row already owns the subject:
+
+- [C14-1] The append's window is judged only once the claim row is held, because a database-time expression
+  is evaluated once, when its statement starts. `tests/phase-2a2t-contract.php` proves it in source: the
+  repository's `claimed → settled` transition takes the claim row's lock with its own fenced `SELECT … FOR
+  UPDATE` — which carries the same claim identity, live slot and unexpired `lease_expires_at >=
+  UTC_TIMESTAMP()` predicate as the update — and runs the conditional `SET claim_state='settled'` only after
+  that locking read, so the statement that waits for another transaction's lock of the row is never the
+  statement that judges the window. `tests/phase-2a2t-concurrency-runner.sh` adds
+  `append_blocked_on_claim_row` (twenty-four modes): a separate transaction — the second worker — holds the
+  owner's claim row under `SELECT … FOR UPDATE` until the live window the owner's append was granted has
+  lapsed, while the owner holds at the append seam and then enters the append transaction, whose first
+  statement is that fenced locking read, so the append is queued behind that lock *inside* the window it was
+  granted. The verifier proves the queued wait was attributed to exactly that claim row — through
+  `performance_schema.data_lock_waits` joined to `data_locks` on the claim table's `PRIMARY` index with the
+  lock data equal to the claim id, or, where the runtime does not expose those tables, through InnoDB's
+  `LOCK WAIT` state with the waiting statement naming the claim table — that the queue was observed before
+  the window lapsed while the lock was released only after it had, and that the queued append settled **no**
+  claim and appended **no** decision: the states that a transition judging the window with the instant it
+  began waiting would have turned into one settled claim and one published decision. The owner's own
+  generation-1 claim ends `released` with no live slot and no lease, no generation above 1 exists, the owner
+  reports the event as still owing its decision, and the delivery that follows the release completes the
+  event with exactly one decision — the controlled `stale_provider_event` refusal of the obligation the
+  owner's in-window R1 settlement already covers — while exactly one R1 evidence/settlement, one confirmed
+  intent and one collected cycle stand from the work that owner did inside its window.
+
 Fresh-install, 26 → 29 upgrade, idempotency, webhook and representative runtime tests are mandatory
 acceptance gates. Every suite must run on the disposable WordPress + MariaDB runtime used by R1/R2,
 with no network access: the fake adapter and the constant-gated test vault are the only providers the
@@ -3107,7 +3186,7 @@ tests may use.
 | Base | `main` with Phase 2A.2-R2 merged (Schema 26); R1 is already authoritative |
 | Dependency | PLATFORM-LOCAL-TEST-RUNTIME green (fresh + runtime + webhook + concurrency) |
 | Schema | 029 / `028_payment_execution_seam_provider_adapter` plus `029_payment_event_decision_claim_authority` |
-| Build | `phase2a2t-payment-execution-seam-stripe-adapter-20260925.13` (correction round 13) |
+| Build | `phase2a2t-payment-execution-seam-stripe-adapter-20260925.14` (correction round 14) |
 | Review posture | single coherent candidate, dual-owner independent review, additive-only descendants |
 
 ## 19. Pre-implementation prerequisites

@@ -335,6 +335,21 @@ if(strpos($appendBody,'before_provider_event_decision_append')>strpos($appendBod
 $appendRelease=strpos($appendBody,'abandonDecisionClaim($claim)');
 if($appendRelease===false||$appendRelease<strpos($appendBody,'settleDecisionClaim(')||$appendRelease>strpos($appendBody,'convergeOnOwner'))throw new RuntimeException('[C12-1] a refused append must release the claim it appended nothing to and then converge');
 
+// [C14-1] A database-time expression is evaluated once, when its statement starts — not when the statement
+// reaches the row it judges — so the append's window verdict is only honest if it is taken *after* the claim
+// row is held. The transition therefore takes that row with its own fenced locking read, where a wait decides
+// nothing, and runs the conditional `claimed → settled` update only once the row is held: the update can no
+// longer be the statement that waits, so a window that lapsed while the append was queued behind another
+// transaction's lock on that row can never be settled with the database instant the waiting statement began
+// with. The locking read can only ever refuse a claim the update would also refuse — the update's
+// affected-row count remains the only proof of ownership.
+if(strpos($settleBody,"SET claim_state='settled'")===false)throw new RuntimeException('[C14-1] the conditional settlement must stay in the append transition');
+$settleLock=substr($settleBody,0,strpos($settleBody,"SET claim_state='settled'"));
+if(!str_contains($settleLock,'SELECT id FROM')||!str_contains($settleLock,'FOR UPDATE'))throw new RuntimeException('[C14-1] the append must take the claim row lock with its own fenced locking read before the conditional update');
+if(strpos($settleBody,'FOR UPDATE')>strpos($settleBody,"SET claim_state='settled'"))throw new RuntimeException('[C14-1] the claim row lock must be taken before the conditional update that fences the append');
+foreach(array("claim_state='claimed'",'claim_generation=%d','claim_token_digest=%s','active_claim_slot=1','lease_expires_at IS NOT NULL AND lease_expires_at>=UTC_TIMESTAMP()') as $needle)
+    if(!str_contains($settleLock,$needle))throw new RuntimeException('[C14-1] the locking read must fence the same claim identity, live slot and unexpired lease: '.$needle);
+
 // [C9-3] The §9.2 transport rule is configured, allowlisted and never satisfied by a client's own header.
 if(!str_contains($rule,'public static function trustedProxyHeaders('))throw new RuntimeException('[C9-3] the configured proxy-header gate is missing');
 if(!str_contains($rule,'public static function proxyHeaderIndicatesHttps('))throw new RuntimeException('[C9-3] the allowlisted proxy-header verdict is missing');
@@ -423,7 +438,7 @@ foreach(array(
     'fenced_settlement_lost','initial_dispatch_descriptor_failure','post_preflight_capability_failure',
     'conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery',
     'stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit',
-    'stale_owner_at_decision_append',
+    'stale_owner_at_decision_append','append_blocked_on_claim_row',
 ) as $mode)if(!str_contains($concurrency,$mode))throw new RuntimeException('The concurrency runner must cover: '.$mode);
 if(!str_contains($concurrency,'webhook_delivery'))throw new RuntimeException('[C8-3] the duplicate-webhook race must actually deliver a provider event');
 if(!str_contains($concurrency,'body_changed'))throw new RuntimeException('[C8-3] the conflicting duplicate must re-deliver one event identity with different facts');
@@ -445,6 +460,15 @@ if(!str_contains($concurrency,'the append race must let the owner window lapse b
 if(!str_contains($concurrency,'the stale generation must have reached the R1/R2 work boundaries'))throw new RuntimeException('[C12-1] the append race must prove the stale generation reached the work units');
 if(!str_contains($concurrency,'no successor generation may have replaced the stale generation'))throw new RuntimeException('[C12-1] the append race must prove no successor generation replaced the stale one');
 if(!str_contains($concurrency,'must append nothing and report the event as still owing its decision'))throw new RuntimeException('[C12-1] the append race must prove the stale generation appended nothing');
+// [C14-1] The queued-append race must hold the claim row in a *separate* transaction until the owner's live
+// window has lapsed, attribute the owner's queued append to that exact row lock, and prove the queued append
+// settled no claim and appended no decision.
+if(!str_contains($concurrency,"SELECT id,claim_generation,lease_expires_at FROM {\$p}payment_provider_event_decision_claims WHERE id=%d FOR UPDATE"))throw new RuntimeException('[C14-1] the queued-append race must hold the claim row in the blocker\'s own transaction');
+if(!str_contains($concurrency,'the append must be queued behind the claim row lock before it is released'))throw new RuntimeException('[C14-1] the queued-append race must prove the append is queued behind that lock');
+if(!str_contains($concurrency,'performance_schema')||!str_contains($concurrency,'information_schema.INNODB_TRX'))throw new RuntimeException('[C14-1] the queued append must be attributed to the claim row lock');
+if(!str_contains($concurrency,'the queued append must settle no claim: the window it was granted had lapsed before the statement that judges it could run'))throw new RuntimeException('[C14-1] the queued-append race must prove the queued append settled no claim');
+if(!str_contains($concurrency,'the queued append must append no decision: a window that closed publishes nothing, exactly like a replaced generation'))throw new RuntimeException('[C14-1] the queued-append race must prove the queued append appended no decision');
+if(!str_contains($concurrency,"strtotime((string)\$lapsed['db_time'].' UTC')>\$leaseAt"))throw new RuntimeException('[C14-1] the queued-append race must prove the lock outlived the live window it closed');
 foreach(array('retained','repeat','fresh','active_slot','descriptor_ciphertext','claim_generation','decision_claim','completed-028','029') as $needle)
     if(!str_contains($migrationRuntime,$needle))throw new RuntimeException('The migration-runtime suite is incomplete: '.$needle);
 foreach(array('redrive','reconcile','dispatch_descriptor_unavailable','provider_credentials_unconfigured','live_execution_not_authorised','dispatch_in_flight') as $needle)

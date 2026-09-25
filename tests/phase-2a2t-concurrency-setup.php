@@ -55,7 +55,7 @@ foreach($fixtures as $index=>$row){
 }
 PaymentProviderRegistry::registerExecutionPort(new ContractPaymentAdapter());
 $fixturePayload=array('mode'=>$mode,'account_id'=>$accountId,'rows'=>$fixtures);
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append','append_blocked_on_claim_row'),true)){
     // [C8-3] The duplicate-delivery race needs the two disposable intake inputs the execution fixtures do
     // not use: a worker principal holding exactly the §9.7 capability set, and a synthetic signing secret
     // held by the constant-gated disposable test vault. The event body is fixed here, so both workers
@@ -80,7 +80,10 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
     // unambiguous ordering for the mirror-image reason: its stale generation commits its whole R1/R2 work
     // inside its window before the append refuses it, so the successor must re-decide an event the recorded
     // settlement already authoritatively covers. Every other mode keeps the event at the delivery instant.
-    $occurredAt=in_array($mode,array('stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)?time()-3600:time();
+    // [C14-1] The queued-append race needs it for the same reason: its owner also commits its whole R1/R2
+    // work inside its window before the append is refused, so the successor must re-decide an event the
+    // recorded settlement already authoritatively covers.
+    $occurredAt=in_array($mode,array('stale_owner_inside_r2_unit','stale_owner_at_decision_append','append_blocked_on_claim_row'),true)?time()-3600:time();
     $webhookBody=static function(int $occurredAt)use($eventReference,$row):string{
         return (string)wp_json_encode(array('id'=>$eventReference,'type'=>'payment_intent.succeeded','created'=>$occurredAt,'data'=>array('object'=>array('id'=>$row['references']['obligation'],'amount'=>$row['amount_minor'],'currency'=>strtolower((string)$row['currency']),'metadata'=>array('obligation_reference'=>$row['obligation_reference'])))));
     };
@@ -89,7 +92,7 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
         'obligation_id'=>(int)$row['obligation_id'],'intent_id'=>(int)$row['intent_id'],'cycle_id'=>(int)$row['cycle_id'],
         'body'=>$webhookBody($occurredAt),'body_changed'=>$webhookBody($occurredAt-1),
     );
-    if(in_array($mode,array('pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)){
+    if(in_array($mode,array('pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append','append_blocked_on_claim_row'),true)){
         // The prepared pre-state of the decision race. The first delivery is made here with the §9.7
         // worker principal deliberately unset, so the event is durable and its decision is deferred; the
         // recovery mode then removes the decision row entirely, which is exactly the crash window between
@@ -109,7 +112,8 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
         // the first has let its own bounded window expire. [C12-1] The append race starts from it too:
         // nothing else about the pre-state differs, because the finding is about the window of the claim
         // the owner already holds, not about how that claim came to exist.
-        if(in_array($mode,array('undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)){
+        // [C14-1] The queued-append race starts from the same owed-decision state for the same reason.
+        if(in_array($mode,array('undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append','append_blocked_on_claim_row'),true)){
             $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$preparedEvent));
             $wpdb->query($wpdb->prepare("DELETE FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d",$preparedEvent));
             dzn_tcs_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",$preparedEvent))===0,'the recovery race must start with an event that owes its first decision');

@@ -13,7 +13,7 @@ case $mode in
   fenced_settlement_lost|initial_dispatch_descriptor_failure|post_preflight_capability_failure|\
   conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|\
   stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit|\
-  stale_owner_at_decision_append) ;;
+  stale_owner_at_decision_append|append_blocked_on_claim_row) ;;
   *) echo "Unknown Phase T concurrency mode: $mode" >&2; exit 2;;
 esac
 # The gate directory must be visible to the worker containers at the same absolute path, so it lives
@@ -41,7 +41,7 @@ waitfor "$gate/w1.started" || { echo "holder worker never gated"; cat "$gate/w1.
 wprun "$gate" w2 "$repo/tests/phase-2a2t-concurrency-worker.php" >"$gate/w2.out" 2>&1 &
 w2=$!
 case $mode in
-  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit|stale_owner_at_decision_append)
+  duplicate_webhook|conflicting_duplicate_webhook|pending_decision_retry|undecided_event_recovery|stale_owner_after_lease_expiry|stale_owner_inside_r1_unit|stale_owner_inside_r2_unit|stale_owner_at_decision_append|append_blocked_on_claim_row)
     # [C8-3] Both deliveries must be in flight together, so neither worker holds a lock: each announces
     # itself in the gate directory and waits for its sibling before submitting the same provider event
     # identity, and the unique `provider_event` index arbitrates the race. [C9-1] The decision-claim
@@ -62,6 +62,12 @@ case $mode in
     # delivery is what completes the event. The claim row is never written for this mode: the window lapses in
     # real elapsed time, so this one mode runs for the structural 120-second decision-claim lease before the
     # second worker is released.
+    # [C14-1] `append_blocked_on_claim_row` also runs for a real window, but the window is held open by the
+    # *second* worker: it takes its own transaction on the owner's claim row and holds that row until the
+    # owner's live window has lapsed, while the owner's append — whose first statement is the transition's
+    # own fenced locking read, never the conditional update — is queued behind that lock. The queued append is
+    # refused the moment the lock is released, so the release, not a take-over, is what lets it through; the
+    # second worker then delivers and completes the event.
     waitfor "$gate/w2.started" || { echo "webhook contender never started"; cat "$gate/w2.out"; exit 1; }
     ;;
   unrelated_students)

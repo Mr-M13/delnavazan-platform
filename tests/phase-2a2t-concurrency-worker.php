@@ -36,13 +36,42 @@ use Delnavazan\Platform\Integrations\Payment\ContractPaymentAdapter;
 use Delnavazan\Platform\Integrations\Payment\Stripe\{StripeEventTranslator,StripeSignatureVerifier};
 global $wpdb;$p=$wpdb->prefix.'dzn_';
 function dzn_tcw_assert(bool $ok,string $message):void{if(!$ok)throw new RuntimeException($message);}
+/**
+ * [C14-1] Attribute the append that is queued behind this worker's own claim-row lock.
+ *
+ * The waiting transaction must be *someone else's* — this worker's own transaction is the one holding the
+ * row — and it must be waiting on exactly this claim row, so the observation is the append this race queued
+ * and not unrelated contention. MySQL exposes the pair through Performance Schema (the blocking thread is
+ * this worker's own, and the requested lock names the claim row's primary key); MariaDB reports the same
+ * wait through InnoDB's transaction state, where the waiting statement itself is recorded. Returns null
+ * while no such wait is visible, so the caller keeps polling inside the owner's live window.
+ */
+function dzn_tcw_append_wait_probe(string $table,int $claimId):?array{
+    global $wpdb;
+    $own=(int)$wpdb->get_var('SELECT CONNECTION_ID()');
+    $db=(string)$wpdb->get_var('SELECT DATABASE()');
+    $has=$wpdb->get_col("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='performance_schema' AND TABLE_NAME IN ('data_lock_waits','data_locks','threads')")?:array();
+    if(count($has)===3){
+        $thread=(int)$wpdb->get_var($wpdb->prepare("SELECT THREAD_ID FROM performance_schema.threads WHERE PROCESSLIST_ID=%d",$own));
+        if($thread>0){
+            $wait=$wpdb->get_row($wpdb->prepare("SELECT w.REQUESTING_THREAD_ID,w.BLOCKING_THREAD_ID,l.OBJECT_SCHEMA,l.OBJECT_NAME,l.INDEX_NAME,l.LOCK_TYPE,l.LOCK_MODE,l.LOCK_DATA FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID WHERE w.BLOCKING_THREAD_ID=%d AND l.OBJECT_SCHEMA=%s AND l.OBJECT_NAME=%s AND l.INDEX_NAME='PRIMARY' AND l.LOCK_DATA=%s LIMIT 1",$thread,$db,$table,(string)$claimId));
+            if($wait)return array('mechanism'=>'performance_schema','at'=>gmdate('Y-m-d H:i:s'),'db_time'=>(string)$wpdb->get_var('SELECT UTC_TIMESTAMP()'),'claim_id'=>$claimId,'own_connection_id'=>$own,'blocking_thread_id'=>(int)$wait->BLOCKING_THREAD_ID,'requesting_thread_id'=>(int)$wait->REQUESTING_THREAD_ID,'table'=>(string)$wait->OBJECT_NAME,'index'=>(string)$wait->INDEX_NAME,'lock_type'=>(string)$wait->LOCK_TYPE,'lock_mode'=>(string)$wait->LOCK_MODE,'lock_data'=>(string)$wait->LOCK_DATA);
+        }
+    }
+    $waiting=$wpdb->get_results($wpdb->prepare("SELECT trx_id,trx_mysql_thread_id,trx_state,trx_query FROM information_schema.INNODB_TRX WHERE trx_state='LOCK WAIT' AND trx_mysql_thread_id<>%d",$own))?:array();
+    if(count($waiting)===1){
+        $row=$waiting[0];
+        return array('mechanism'=>'information_schema_innodb_trx','at'=>gmdate('Y-m-d H:i:s'),'db_time'=>(string)$wpdb->get_var('SELECT UTC_TIMESTAMP()'),'claim_id'=>$claimId,'own_connection_id'=>$own,'trx_id'=>(string)$row->trx_id,'requesting_connection_id'=>(int)$row->trx_mysql_thread_id,'state'=>(string)$row->trx_state,'table'=>$table,'query_available'=>$row->trx_query!==null,'query_matches_claim_table'=>str_contains((string)($row->trx_query??''),'payment_provider_event_decision_claims'));
+    }
+    return null;
+}
 $gate=(string)getenv('DZN_PHASE_2A2T_GATE_DIR');
 $worker=(string)getenv('DZN_PHASE_2A2T_WORKER');
 $fixture=get_option('dzn_phase_2a2t_concurrency_fixture');
 dzn_tcw_assert(is_array($fixture)&&count($fixture['rows']??array())>=2,'the concurrency fixture must exist');
 wp_set_current_user(1);
 $mode=(string)$fixture['mode'];
-if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append'),true)){
+if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pending_decision_retry','undecided_event_recovery','stale_owner_after_lease_expiry','stale_owner_inside_r1_unit','stale_owner_inside_r2_unit','stale_owner_at_decision_append','append_blocked_on_claim_row'),true)){
     if(!defined('DZN_PLATFORM_PAYMENT_TEST_VAULT'))define('DZN_PLATFORM_PAYMENT_TEST_VAULT',true);
     PaymentProviderRegistry::registerTranslator(new StripeEventTranslator(new StripeSignatureVerifier()));
     dzn_tcw_assert(isset($fixture['webhook']['selector'],$fixture['webhook']['body'],$fixture['webhook']['body_changed']),'the duplicate-webhook race fixture must exist');
@@ -94,6 +123,34 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
             }
         };
         add_action('dzn_phase_2a2t_before_provider_event_decision_append',$expire,10,2);
+    }
+    // [C14-1] The queued-append race: a *separate transaction* — the second worker — holds the claim row the
+    // owner is about to append through until the live window the owner holds has lapsed, and the owner's
+    // append is queued behind that lock while the window is still open. A database-time expression is
+    // evaluated once, when its statement starts, so a transition whose *own* statement waited for that lock
+    // would settle the claim with the instant it began waiting. The owner therefore holds at the append seam
+    // until the blocker really holds the row: the fenced locking read the append takes first — never the
+    // conditional update — is then the statement that waits, and the update that judges the window runs only
+    // once the row is held.
+    if($mode==='append_blocked_on_claim_row'&&$gate!==''&&is_dir($gate)){
+        $mark=function(...$arguments)use($gate,$worker):void{file_put_contents($gate.'/'.$worker.'.work','1',FILE_APPEND);};
+        add_action('dzn_phase_2a2r1_after_evidence_insert',$mark,10,1);
+        add_action('dzn_phase_2a2r1_after_settlement',$mark,10,1);
+        add_action('dzn_phase_2a2r2_after_collection_intent_event_insert',$mark,10,2);
+        add_action('dzn_phase_2a2r2_after_cycle_event_insert',$mark,10,2);
+        $queue=function(int $eventId,int $generation)use($gate,$worker,$wpdb):void{
+            if($worker!=='w1')return;
+            // The window this owner holds is still live; it is about to append under it. Allow this
+            // connection to wait for that row for the rest of the structural window — the server's default
+            // row-lock timeout is 50 s, shorter than the 120-second lease — so the wait that must not decide
+            // the window is not aborted by the server instead. Then announce the append and hold until the
+            // blocker's own transaction really holds the claim row.
+            $wpdb->query('SET SESSION innodb_lock_wait_timeout=600');
+            file_put_contents($gate.'/w1.at_append',(string)$eventId.':'.(string)$generation);
+            $waited=0;
+            while(!file_exists($gate.'/w2.locked')&&$waited<3600){usleep(100000);$waited++;}
+        };
+        add_action('dzn_phase_2a2t_before_provider_event_decision_append',$queue,10,2);
     }
     // [C11-1] The in-unit fence race: the first worker stalls *inside* the R1 (or R2) mutation it is
     // running, with the bounded window that unit is running inside aged past expiry. The fence of the
@@ -179,6 +236,74 @@ if(in_array($mode,array('duplicate_webhook','conflicting_duplicate_webhook','pen
             'live_claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",(int)$fixture['prepared_event_id'])),
         );
         if($gate!=='')file_put_contents($gate.'/w2.pre.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'stale_state_observation','probe_outcome'=>$probe['outcome'],'observation'=>$observation,'at'=>gmdate('Y-m-d H:i:s'))));
+        $second=$deliver($raceBody);
+        if($gate!=='')file_put_contents($gate.'/w2.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'webhook_delivery','outcome'=>$second['outcome'],'error'=>$second['error'],'at'=>gmdate('Y-m-d H:i:s'))));
+        if($second['error']!==null)throw new RuntimeException($second['error']);
+        echo "phase-2a2t-concurrency-worker w2 done\n";
+        return;
+    }
+    // [C14-1] The queued-append race itself: the second worker is the *blocker*. It holds the owner's claim
+    // row in its own transaction until the owner's live window has lapsed, while the owner's append — whose
+    // first statement is the fenced locking read, not the conditional update — is queued behind that lock.
+    // It only delivers after the owner has returned from the refused append, so what it observes first is
+    // exactly what the queued append left behind: no settled claim and no appended decision.
+    if($mode==='append_blocked_on_claim_row'){
+        $deliver=function(string $body)use($webhook):array{
+            $signature='t='.time().',v1='.hash_hmac('sha256',time().'.'.$body,(string)$webhook['secret']);
+            try{
+                return array('outcome'=>(new PaymentEventIntakeService())->receive('stripe',(string)$webhook['selector'],$body,array('stripe-signature'=>$signature)),'error'=>null);
+            }catch(Throwable$e){
+                return array('outcome'=>null,'error'=>$e->getMessage());
+            }
+        };
+        $raceBody=(string)$webhook['body'];
+        if($worker==='w1'){
+            $result=$deliver($raceBody);
+            if($gate!=='')file_put_contents($gate.'/w1.json',(string)wp_json_encode(array('worker'=>'w1','operation'=>'webhook_delivery','outcome'=>$result['outcome'],'error'=>$result['error'],'at'=>gmdate('Y-m-d H:i:s'))));
+            if($result['error']!==null)throw new RuntimeException('a queued append must stop as a controlled closed window, never as a failure: '.$result['error']);
+            echo "phase-2a2t-concurrency-worker w1 done\n";
+            return;
+        }
+        $waited=0;
+        while(!file_exists($gate.'/w1.at_append')&&$waited<3600){usleep(100000);$waited++;}
+        dzn_tcw_assert(file_exists($gate.'/w1.at_append'),'the owner never reached the append seam');
+        $claimId=(int)$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1 ORDER BY id ASC LIMIT 1",(int)$fixture['prepared_event_id']));
+        dzn_tcw_assert($claimId>0,'the owner\'s live decision claim must exist before this worker locks it');
+        // Hold the claim row — this worker's own transaction, for the whole remaining window.
+        $wpdb->query('START TRANSACTION');
+        $locked=$wpdb->get_row($wpdb->prepare("SELECT id,claim_generation,lease_expires_at FROM {$p}payment_provider_event_decision_claims WHERE id=%d FOR UPDATE",$claimId));
+        dzn_tcw_assert($locked!==null,'the blocker must hold the claim row the owner appends through');
+        $lease=(string)$locked->lease_expires_at;
+        if($gate!=='')file_put_contents($gate.'/w2.locked',(string)wp_json_encode(array('worker'=>'w2','operation'=>'claim_row_lock','claim_id'=>$claimId,'claim_generation'=>(int)$locked->claim_generation,'connection_id'=>(int)$wpdb->get_var('SELECT CONNECTION_ID()'),'lease_expires_at'=>$lease,'db_time'=>(string)$wpdb->get_var('SELECT UTC_TIMESTAMP()'),'at'=>gmdate('Y-m-d H:i:s'))));
+        // Prove the append is queued behind this lock *inside* the owner's live window, attributed to this
+        // exact claim-row lock, before the lock is released.
+        $queued=null;
+        for($i=0;$i<600&&$queued===null;$i++){$queued=dzn_tcw_append_wait_probe($p.'payment_provider_event_decision_claims',$claimId);if($queued===null)usleep(100000);}
+        dzn_tcw_assert(is_array($queued),'the append must be queued behind the claim row lock before it is released');
+        if($gate!=='')file_put_contents($gate.'/w2.queued',(string)wp_json_encode($queued));
+        // Hold until the window the queued append was granted has genuinely lapsed, then release the row.
+        $until=strtotime($lease.' UTC')+1;
+        while(time()<$until)sleep(1);
+        if($gate!=='')file_put_contents($gate.'/w2.expired',(string)wp_json_encode(array('worker'=>'w2','operation'=>'window_lapsed','lease_expires_at'=>$lease,'db_time'=>(string)$wpdb->get_var('SELECT UTC_TIMESTAMP()'),'at'=>gmdate('Y-m-d H:i:s'))));
+        if($gate!=='')file_put_contents($gate.'/w2.released',(string)wp_json_encode(array('worker'=>'w2','operation'=>'claim_row_release','db_time'=>(string)$wpdb->get_var('SELECT UTC_TIMESTAMP()'),'at'=>gmdate('Y-m-d H:i:s'))));
+        $wpdb->query('COMMIT');
+        $waited=0;
+        while(!file_exists($gate.'/w1.json')&&$waited<3600){usleep(100000);$waited++;}
+        dzn_tcw_assert(file_exists($gate.'/w1.json'),'the queued owner never returned from its append');
+        // What the refused, queued append left behind — observed after it returned and *before* this delivery
+        // completes the event: the queued append settled no claim and appended no decision of its own.
+        $observation=array(
+            'claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d",(int)$fixture['prepared_event_id'])),
+            'settled_claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND claim_state='settled'",(int)$fixture['prepared_event_id'])),
+            'live_claims'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decision_claims WHERE provider_event_id=%d AND active_claim_slot=1",(int)$fixture['prepared_event_id'])),
+            'decisions'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}payment_provider_event_decisions WHERE provider_event_id=%d",(int)$fixture['prepared_event_id'])),
+            'owner_claim_state'=>(string)$wpdb->get_var($wpdb->prepare("SELECT claim_state FROM {$p}payment_provider_event_decision_claims WHERE id=%d",$claimId)),
+            'evidence'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_payment_evidence WHERE obligation_id=%d",(int)$webhook['obligation_id'])),
+            'settlements'=>(int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}commercial_obligation_settlements WHERE obligation_id=%d",(int)$webhook['obligation_id'])),
+            'intent'=>(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}collection_intents WHERE id=%d",(int)$webhook['intent_id'])),
+            'cycle'=>(string)$wpdb->get_var($wpdb->prepare("SELECT state FROM {$p}renewal_cycles WHERE id=%d",(int)$webhook['cycle_id'])),
+        );
+        if($gate!=='')file_put_contents($gate.'/w2.pre.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'queued_append_observation','observation'=>$observation,'at'=>gmdate('Y-m-d H:i:s'))));
         $second=$deliver($raceBody);
         if($gate!=='')file_put_contents($gate.'/w2.json',(string)wp_json_encode(array('worker'=>'w2','operation'=>'webhook_delivery','outcome'=>$second['outcome'],'error'=>$second['error'],'at'=>gmdate('Y-m-d H:i:s'))));
         if($second['error']!==null)throw new RuntimeException($second['error']);
