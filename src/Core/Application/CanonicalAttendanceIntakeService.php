@@ -192,14 +192,15 @@ final class CanonicalAttendanceIntakeService {
             if($winner=$this->repository->command($digest)){$replay=$this->replayCommand($winner,$payload,'submit_capability_claim');$this->repository->commit();return array_merge($replay,array('lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>$redemptionDigest));}
             $studentLink=$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND revoked_at IS NULL LIMIT 1",$subject->studentId));
             if(!$studentLink)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
-            [$case,$lesson,$version,$created]=$this->lockOccurrence($subject->lessonId,$subject->scheduleVersionId,self::PUBLIC_CAPABILITY_AUDIT_ACTOR);
+            $capabilityAudit=array('capability_id'=>(int)$cap->id,'generation'=>(int)$cap->generation,'redemption_reference_digest'=>$redemptionDigest,'evidence_reference_digest'=>CanonicalAttendanceIdempotency::evidence($redemptionReference),'attribution'=>'public_capability_on_behalf');
+            [$case,$lesson,$version,$created]=$this->lockOccurrence($subject->lessonId,$subject->scheduleVersionId,self::PUBLIC_CAPABILITY_AUDIT_ACTOR,$capabilityAudit);
             if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
             if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
             if(gmdate('Y-m-d H:i:s')>=(string)$case->window_end_utc)throw new \InvalidArgumentException('portal_absence_window_closed');
             if($this->isAfterTermClosure((int)$case->term_id))throw new \InvalidArgumentException('portal_absence_late_evidence');
             $intent=array('source_kind'=>'student','evidence_kind'=>'advance_absence_claim','provider_code'=>null,'provider_account_digest'=>null,'provider_session_digest'=>null,'provider_event_key_digest'=>null,'provider_payload_digest'=>null,'participant_role'=>null,'participant_identity_state'=>null,'resolved_student_id'=>null,'resolved_teacher_id'=>null,'verification_state'=>'unverified','join_at_utc'=>null,'leave_at_utc'=>null,'observed_at'=>gmdate('Y-m-d H:i:s'),'provenance_digest'=>null,'reason_code'=>'public_capability_absence','evidence_reference_digest'=>CanonicalAttendanceIdempotency::evidence($redemptionReference),'attribution'=>'public_capability_on_behalf');
             $evidenceId=$this->insertEvidence($case,$lesson,$intent,gmdate('Y-m-d H:i:s'),self::PUBLIC_CAPABILITY_AUDIT_ACTOR);
-            if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+            if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true,$capabilityAudit))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
             $this->insertCommand($digest,$payload,'submit_capability_claim',array('lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId),$case,$evidenceId,'submitted',null,gmdate('Y-m-d H:i:s'),self::PUBLIC_CAPABILITY_AUDIT_ACTOR);
             $this->repository->commit();
             return array('case_id'=>(int)$case->id,'evidence_id'=>$evidenceId,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference),'state'=>'submitted');
@@ -291,7 +292,7 @@ final class CanonicalAttendanceIntakeService {
     // ---------------------------------------------------------------------
 
     /** @return array{0:object,1:object,2:object,3:bool} */
-    private function lockOccurrence(int $lessonId,int $scheduleVersionId,?int $auditActor=null):array{
+    private function lockOccurrence(int $lessonId,int $scheduleVersionId,?int $auditActor=null,?array $capabilityAudit=null):array{
         $hint=$this->lessons->lesson($lessonId);
         if(!$hint||(string)($hint->record_model??'')!=='canonical_term_lesson_v1')throw new \InvalidArgumentException('canonical_lesson_required');
         $enrolmentHint=$this->lessons->enrolment((int)$hint->enrolment_id);
@@ -332,7 +333,7 @@ final class CanonicalAttendanceIntakeService {
             do_action('dzn_phase_2a2p_after_case_insert',$lessonId,$scheduleVersionId);
         }
         do_action('dzn_phase_2a2p_occurrence_locks_held',$lessonId,$scheduleVersionId);
-        if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+        if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true,$capabilityAudit))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
         return array($case,$lesson,$version,$created);
     }
 

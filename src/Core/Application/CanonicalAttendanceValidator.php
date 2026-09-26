@@ -34,7 +34,7 @@ final class CanonicalAttendanceValidator {
     );
 
     /** Hydrate and validate one intake aggregate against its canonical Lesson occurrence. */
-    public static function validForCase(int $caseId,?CanonicalAttendanceRepository $repository=null,?CanonicalLessonAuthorityRepository $lessons=null,?CanonicalLessonScheduleRepository $schedules=null,bool $lock=false):bool{
+    public static function validForCase(int $caseId,?CanonicalAttendanceRepository $repository=null,?CanonicalLessonAuthorityRepository $lessons=null,?CanonicalLessonScheduleRepository $schedules=null,bool $lock=false,?array $capabilityAudit=null):bool{
         $repository??=new CanonicalAttendanceRepository();
         $lessons??=new CanonicalLessonAuthorityRepository();
         $schedules??=new CanonicalLessonScheduleRepository();
@@ -60,7 +60,8 @@ final class CanonicalAttendanceValidator {
             $version,
             $assignment,
             $mappings,
-            $policy
+            $policy,
+            $capabilityAudit
         );        if(!$ok)return false;
         // Any recorded Phase-O result link must resolve to an outcome of this exact Lesson.
         $outcomeIds=array();
@@ -73,7 +74,7 @@ final class CanonicalAttendanceValidator {
     }
 
     /** Pure aggregate validation over hydrated rows. */
-    public static function valid(object $case,array $evidence,array $decisions,array $anomalies,?object $lesson,?object $version,?object $assignment,array $mappings=array(),?object $policy=null):bool{
+    public static function valid(object $case,array $evidence,array $decisions,array $anomalies,?object $lesson,?object $version,?object $assignment,array $mappings=array(),?object $policy=null,?array $capabilityAudit=null):bool{
         $caseId=(int)($case->id??0);
         if($caseId<1||(string)($case->uid??'')==='')return false;
         foreach(array('lesson_id','schedule_version_id','enrolment_id','term_id','student_id','teacher_id','teacher_assignment_id')as$field)if((int)($case->{$field}??0)<1)return false;
@@ -83,7 +84,9 @@ final class CanonicalAttendanceValidator {
         if((int)strtotime($windowEnd.' UTC')!==(int)strtotime($end.' UTC')+CanonicalAttendanceRule::POST_GRACE_SECONDS)return false;
         if(!in_array((string)($case->state??''),self::STATES,true))return false;
         if((int)($case->case_version??0)<1)return false;
-        if(!self::utc($case->created_at??null)||(int)($case->created_by??0)<1)return false;
+        if(!self::utc($case->created_at??null))return false;
+        $publicCapabilityAudit=self::validPublicCapabilityAudit($case,$evidence,$capabilityAudit);
+        if((int)($case->created_by??0)<1&&((int)($case->created_by??0)!==0||!$publicCapabilityAudit))return false;
         // Locked rule identity: a case may never claim a rule version the platform does not recognise.
         if((string)($case->rule_version??'')!==CanonicalAttendanceRule::RULE_VERSION)return false;
         // Exact prospective-cutover-policy binding frozen at admission.
@@ -112,7 +115,7 @@ final class CanonicalAttendanceValidator {
             if(!in_array((string)($row->evidence_kind??''),self::EVIDENCE_KINDS,true))return false;
             if(!in_array((string)($row->source_kind??''),self::SOURCE_KINDS,true))return false;
             if(!self::utc($row->received_at??null)||!self::utc($row->observed_at??null))return false;
-            if((int)($row->created_by??0)<1)return false;
+            if((int)($row->created_by??0)<1&&((int)($row->created_by??0)!==0||!$publicCapabilityAudit||(string)($row->attribution??'')!=='public_capability_on_behalf'||(string)($row->reason_code??'')!=='public_capability_absence'))return false;
             if((string)($row->evidence_reference_digest??'')==='')return false;
             if(!preg_match('/^[a-f0-9]{64}$/D',(string)$row->evidence_reference_digest))return false;
             $eventKey=(string)($row->provider_event_key_digest??'');
@@ -211,6 +214,21 @@ final class CanonicalAttendanceValidator {
             $registry[$key][]=$mapping;
         }
         return $registry;
+    }
+
+    /**
+     * A zero audit actor is valid only while the validator can re-prove the exact consumed,
+     * confirmation-backed absence capability that caused the handoff. The caller-supplied context
+     * is merely a lookup key; the capability and action rows remain the authority.
+     */
+    private static function validPublicCapabilityAudit(object $case,array $evidence,?array $audit):bool{
+        if(!$audit||($audit['attribution']??'')!=='public_capability_on_behalf')return false;
+        global $wpdb;
+        $p=$wpdb->prefix.'dzn_';
+        $row=$wpdb->get_row($wpdb->prepare("SELECT c.id,c.lesson_id,c.schedule_version_id,c.subject_student_id,c.generation,c.purpose,c.state,c.consumed_action_event_id,a.action_state,a.confirmation_digest FROM {$p}portal_public_capabilities c INNER JOIN {$p}portal_public_action_events a ON a.id=c.consumed_action_event_id WHERE c.id=%d AND c.lesson_id=%d AND c.schedule_version_id=%d AND c.subject_student_id=%d AND c.generation=%d AND c.purpose='lesson_absence' AND c.state='consumed' AND a.action_state='confirmed_submitting' AND a.confirmation_digest=%s FOR UPDATE",(int)($audit['capability_id']??0),(int)($case->lesson_id),(int)($case->schedule_version_id),(int)($case->student_id),(int)($audit['generation']??0),(string)($audit['redemption_reference_digest']??'')));
+        if(!$row)return false;
+        foreach($evidence as$claim)if((int)($claim->created_by??0)===0&&((string)($claim->attribution??'')!=='public_capability_on_behalf'||(string)($claim->reason_code??'')!=='public_capability_absence'||(string)($claim->source_kind??'')!=='student'||(string)($claim->evidence_kind??'')!=='advance_absence_claim'||(string)($claim->evidence_reference_digest??'')!==(string)($audit['evidence_reference_digest']??'')))return false;
+        return true;
     }
 
     public static function digest(mixed $value):bool{return (bool)preg_match('/^[a-f0-9]{64}$/D',(string)($value??''));}
