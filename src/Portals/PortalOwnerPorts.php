@@ -11,7 +11,7 @@ interface TeacherAssignmentPortalReadPort { public function forSubject(Authentic
 interface CanonicalLessonSchedulePortalReadPort { public function forSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId):array; public function pageForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,?string $cursor,int $limit):array; }
 interface CanonicalLessonDeliveryPortalReadPort { public function summaryForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId):array; }
 interface CanonicalAttendancePortalReadPort { public function summaryForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId,int $scheduleVersionId):array; public function assertCapabilityClaimAdmissible(PublicCapabilityReadSubject $subject):void; public function submitCapabilityClaim(PublicCapabilityReadSubject $subject,string $redemptionReference):array; }
-interface PortalCapabilityOwnerPort { public function binding(int $lessonId,int $scheduleVersionId,string $purpose,?int $studentId):array; }
+interface PortalCapabilityOwnerPort { public function binding(int $lessonId,int $scheduleVersionId,string $purpose,?int $studentId,bool $requirePrincipal=true):array; }
 
 final class PortalOwnerPorts {
     private static ?PortalCapabilityOwnerPort $capability=null;

@@ -30,6 +30,11 @@ final class PortalCapabilityService {
         if(!hash_equals((string)$row->token_digest,$this->digest($token)))throw new \InvalidArgumentException('portal_capability_signature_invalid');
         if($row->purpose!==$purpose)throw new \InvalidArgumentException('portal_capability_purpose_mismatch');
         if((string)$row->state!=='consumed')throw new \InvalidArgumentException('portal_capability_consumed');
+        // A consumed receipt may replay after its principal link changes, but its immutable
+        // Lesson/schedule/student binding must still reproduce the signed proof exactly.
+        $owner=$this->owner((int)$row->lesson_id,(int)$row->schedule_version_id,(string)$row->purpose,$row->subject_student_id===null?null:(int)$row->subject_student_id,false);
+        $expected=hash_hmac('sha256',$this->bind($owner,$row->purpose,(int)$row->generation,$row->expires_at),wp_salt('dzn_portal_capability_public'));
+        if(!hash_equals(substr($token,-64),$expected))throw new \InvalidArgumentException('portal_capability_signature_invalid');
         return $row;
     }
     public function verify(string $handle,string $token,?string $purpose=null):object { $this->enabled();if(!preg_match('/^[a-f0-9]{64}$/',$handle)||strlen($token)<64)throw new \InvalidArgumentException('portal_capability_handle_malformed');global $wpdb;$row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table('portal_public_capabilities')} WHERE handle_digest=%s LIMIT 1",$this->digest($handle)));if(!$row)throw new \InvalidArgumentException('portal_capability_unknown');return$this->check($row,$token,$purpose); }

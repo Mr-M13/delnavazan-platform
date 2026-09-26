@@ -227,7 +227,20 @@ final class CanonicalAttendanceIntakeService {
         if((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND revoked_at IS NULL AND active_slot=1",$subject->studentId))!==1)throw new \InvalidArgumentException('portal_principal_required');
         // An existing case is read only; absence is valid and must not be materialised here.
         $case=$this->repository->caseFor($subject->lessonId,$subject->scheduleVersionId,false);
-        if(!$case)return;
+        if(!$case){
+            // No case exists yet, so derive the owner occurrence directly. This is deliberately
+            // read-only: Phase W must prove the mutable gates before it consumes the capability.
+            $lesson=$this->lessons->lesson($subject->lessonId);
+            $version=$this->schedules->version($subject->scheduleVersionId);
+            $versions=$this->schedules->versionsForLesson($subject->lessonId);
+            $latest=$versions?$versions[count($versions)-1]:null;
+            if(!$lesson||!$version||!$latest||(int)$version->lesson_id!==$subject->lessonId||(int)$latest->id!==$subject->scheduleVersionId)throw new \InvalidArgumentException('schedule_version_conflict');
+            if((int)$lesson->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+            $window=CanonicalAttendanceRule::window((string)$version->starts_at_utc,(string)$version->ends_at_utc);
+            if(gmdate('Y-m-d H:i:s')>=(string)$window['window_end_utc'])throw new \InvalidArgumentException('portal_absence_window_closed');
+            if($this->isAfterTermClosure((int)$lesson->term_id))throw new \InvalidArgumentException('portal_absence_late_evidence');
+            return;
+        }
         if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
         if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
         if(gmdate('Y-m-d H:i:s')>=(string)$case->window_end_utc)throw new \InvalidArgumentException('portal_absence_window_closed');
