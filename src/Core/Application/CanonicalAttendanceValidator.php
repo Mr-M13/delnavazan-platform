@@ -217,18 +217,34 @@ final class CanonicalAttendanceValidator {
     }
 
     /**
-     * A zero audit actor is valid only while the validator can re-prove the exact consumed,
-     * confirmation-backed absence capability that caused the handoff. The caller-supplied context
-     * is merely a lookup key; the capability and action rows remain the authority.
+     * Re-prove a zero-actor absence from durable portal evidence. The admission call occurs before
+     * the portal can append its final submitted handoff receipt, so request-local audit is only an
+     * admission-time fallback; later reads and consequences derive the binding from stored rows.
      */
     private static function validPublicCapabilityAudit(object $case,array $evidence,?array $audit):bool{
-        if(!$audit||($audit['attribution']??'')!=='public_capability_on_behalf')return false;
         global $wpdb;
         $p=$wpdb->prefix.'dzn_';
-        $row=$wpdb->get_row($wpdb->prepare("SELECT c.id,c.lesson_id,c.schedule_version_id,c.subject_student_id,c.generation,c.purpose,c.state,c.consumed_action_event_id,a.action_state,a.confirmation_digest FROM {$p}portal_public_capabilities c INNER JOIN {$p}portal_public_action_events a ON a.id=c.consumed_action_event_id WHERE c.id=%d AND c.lesson_id=%d AND c.schedule_version_id=%d AND c.subject_student_id=%d AND c.generation=%d AND c.purpose='lesson_absence' AND c.state='consumed' AND a.action_state='confirmed_submitting' AND a.confirmation_digest=%s FOR UPDATE",(int)($audit['capability_id']??0),(int)($case->lesson_id),(int)($case->schedule_version_id),(int)($case->student_id),(int)($audit['generation']??0),(string)($audit['redemption_reference_digest']??'')));
-        if(!$row)return false;
-        foreach($evidence as$claim)if((int)($claim->created_by??0)===0&&((string)($claim->attribution??'')!=='public_capability_on_behalf'||(string)($claim->reason_code??'')!=='public_capability_absence'||(string)($claim->source_kind??'')!=='student'||(string)($claim->evidence_kind??'')!=='advance_absence_claim'||(string)($claim->evidence_reference_digest??'')!==(string)($audit['evidence_reference_digest']??'')))return false;
-        return true;
+        $claims=array();
+        foreach($evidence as$claim){
+            if((int)($claim->created_by??0)!==0)continue;
+            if((string)($claim->attribution??'')!=='public_capability_on_behalf'||(string)($claim->reason_code??'')!=='public_capability_absence'||(string)($claim->source_kind??'')!=='student'||(string)($claim->evidence_kind??'')!=='advance_absence_claim')return false;
+            $claims[]=$claim;
+        }
+        if(count($claims)>1)return false;
+
+        // Durable post-handoff proof: evidence -> submitted action -> consumed capability ->
+        // confirmation action. This path deliberately ignores the request-local audit argument.
+        if(count($claims)===1){
+            $claim=$claims[0];
+            $row=$wpdb->get_row($wpdb->prepare("SELECT c.id FROM {$p}portal_public_action_events submitted INNER JOIN {$p}portal_public_capabilities c ON c.id=submitted.capability_id INNER JOIN {$p}portal_public_action_events confirmed ON confirmed.id=c.consumed_action_event_id AND confirmed.capability_id=c.id AND confirmed.action_state='confirmed_submitting' AND confirmed.confirmation_digest=submitted.confirmation_digest WHERE submitted.action_state='submitted' AND submitted.handoff_target='canonical_attendance_evidence' AND submitted.handoff_reference_id=%d AND submitted.lesson_id=%d AND c.lesson_id=%d AND c.schedule_version_id=%d AND c.subject_student_id=%d AND c.purpose='lesson_absence' AND c.state='consumed' FOR UPDATE",(int)$claim->id,(int)$case->lesson_id,(int)$case->lesson_id,(int)$case->schedule_version_id,(int)$case->student_id));
+            if($row)return true;
+        }
+
+        // Admission-time only: PortalPublicActionService appends the submitted receipt after this
+        // validation returns. The durable capability and confirmation remain authoritative here.
+        if(!$audit||($audit['attribution']??'')!=='public_capability_on_behalf')return false;
+        $row=$wpdb->get_row($wpdb->prepare("SELECT c.id FROM {$p}portal_public_capabilities c INNER JOIN {$p}portal_public_action_events a ON a.id=c.consumed_action_event_id AND a.capability_id=c.id WHERE c.id=%d AND c.lesson_id=%d AND c.schedule_version_id=%d AND c.subject_student_id=%d AND c.generation=%d AND c.purpose='lesson_absence' AND c.state='consumed' AND a.action_state='confirmed_submitting' AND a.confirmation_digest=%s FOR UPDATE",(int)($audit['capability_id']??0),(int)$case->lesson_id,(int)$case->schedule_version_id,(int)$case->student_id,(int)($audit['generation']??0),(string)($audit['redemption_reference_digest']??'')));
+        return (bool)$row&&(count($claims)===0||hash_equals((string)$claims[0]->evidence_reference_digest,(string)($audit['evidence_reference_digest']??'')));
     }
 
     public static function digest(mixed $value):bool{return (bool)preg_match('/^[a-f0-9]{64}$/D',(string)($value??''));}
