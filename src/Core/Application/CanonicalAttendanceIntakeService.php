@@ -173,6 +173,16 @@ final class CanonicalAttendanceIntakeService {
         }
     }
 
+    /** Phase-W handoff: capability proof is re-bound to the exact occurrence before intake. */
+    public function submitCapabilityClaim(\Delnavazan\Platform\Portals\PublicCapabilityReadSubject $subject,string $redemptionReference):array{
+        if($subject->purpose!=='lesson_absence'||$subject->studentId===null)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+        $case=$this->repository->caseFor($subject->lessonId,$subject->scheduleVersionId);
+        if(!$case)throw new \InvalidArgumentException('portal_absence_window_closed');
+        if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+        if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
+        return array('case_id'=>(int)$case->id,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference),'state'=>'submitted');
+    }
+
     /** Administrative adjudication: the only Phase-P path allowed to change effective canonical truth. */
     public function adjudicate(int $caseId,array $input,string $key):array{
         $this->requireCapability(self::REVIEW_CAPABILITY);

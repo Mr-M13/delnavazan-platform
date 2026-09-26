@@ -38,6 +38,8 @@ add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Admin\Controller\FinanceReconciliationController::register();
 	Delnavazan\Platform\Admin\Controller\PortalCapabilityController::register();
 	Delnavazan\Platform\Portals\PortalOwnerPorts::configureCapability(new Delnavazan\Platform\Core\Application\CanonicalLessonPortalCapabilityOwner());
+	require_once DZN_PLATFORM_DIR . 'src/Core/Application/PortalOwnerReadPorts.php';
+	Delnavazan\Platform\Portals\PortalOwnerPorts::configureReadPorts(new Delnavazan\Platform\Core\Application\CanonicalTeacherAssignmentPortalReadPort(),new Delnavazan\Platform\Core\Application\CanonicalLessonSchedulePortalReadPortImpl(),new Delnavazan\Platform\Core\Application\CanonicalLessonDeliveryPortalReadPortImpl(),new Delnavazan\Platform\Core\Application\CanonicalAttendancePortalReadPortImpl());
 } );
 add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Public\\BookingRequestRestController', 'register' ) );
 add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Integrations\\Payment\\Stripe\\StripeWebhookController', 'register' ) );

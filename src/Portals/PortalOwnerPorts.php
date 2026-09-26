@@ -1,16 +1,29 @@
 <?php
 namespace Delnavazan\Platform\Portals;
 
-interface TeacherAssignmentPortalReadPort { public function forTeacher(int $teacherId,int $assignmentId):array; }
-interface CanonicalLessonSchedulePortalReadPort { public function forLesson(int $lessonId,int $studentId,int $teacherId):array; }
-interface CanonicalLessonDeliveryPortalReadPort { public function forLesson(int $lessonId,int $studentId,int $teacherId):array; }
-interface CanonicalAttendancePortalReadPort { public function forLesson(int $lessonId,int $studentId,int $teacherId):array; }
+final class AuthenticatedPortalReadSubject {
+    public function __construct(public readonly string $surface,public readonly int $wordpressUserId,public readonly string $kind,public readonly int $principalId) { if($wordpressUserId<1||$principalId<1) throw new \InvalidArgumentException('portal_principal_unresolved'); }
+}
+final class PublicCapabilityReadSubject {
+    public function __construct(public readonly int $capabilityId,public readonly string $purpose,public readonly int $lessonId,public readonly int $scheduleVersionId,public readonly int $generation,public readonly ?int $studentId,public readonly string $expiresAt) { if($capabilityId<1||$lessonId<1||$scheduleVersionId<1||$generation<1) throw new \InvalidArgumentException('portal_capability_binding_mismatch'); }
+}
+interface TeacherAssignmentPortalReadPort { public function forSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $enrolmentId):array; public function pageForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,?string $cursor,int $limit):array; }
+interface CanonicalLessonSchedulePortalReadPort { public function forSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId):array; public function pageForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,?string $cursor,int $limit):array; }
+interface CanonicalLessonDeliveryPortalReadPort { public function summaryForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId):array; }
+interface CanonicalAttendancePortalReadPort { public function summaryForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId,int $scheduleVersionId):array; public function submitCapabilityClaim(PublicCapabilityReadSubject $subject,string $redemptionReference):array; }
 interface PortalCapabilityOwnerPort { public function binding(int $lessonId,int $scheduleVersionId,string $purpose,?int $studentId):array; }
 
 final class PortalOwnerPorts {
     private static ?PortalCapabilityOwnerPort $capability=null;
+    private static array $reads=[];
     public static function configureCapability(PortalCapabilityOwnerPort $port):void { self::$capability=$port; }
     public static function capability():PortalCapabilityOwnerPort { if(!self::$capability) throw new \InvalidArgumentException('portal_parent_not_live'); return self::$capability; }
+    public static function configureReadPorts(TeacherAssignmentPortalReadPort $assignment,CanonicalLessonSchedulePortalReadPort $schedule,CanonicalLessonDeliveryPortalReadPort $delivery,CanonicalAttendancePortalReadPort $attendance):void { self::$reads=compact('assignment','schedule','delivery','attendance'); }
+    public static function assignment():TeacherAssignmentPortalReadPort { return self::port('assignment'); }
+    public static function schedule():CanonicalLessonSchedulePortalReadPort { return self::port('schedule'); }
+    public static function delivery():CanonicalLessonDeliveryPortalReadPort { return self::port('delivery'); }
+    public static function attendance():CanonicalAttendancePortalReadPort { return self::port('attendance'); }
+    private static function port(string $name):object { if(!isset(self::$reads[$name])) throw new \InvalidArgumentException('portal_parent_not_live'); return self::$reads[$name]; }
 }
 
 final class PortalAccessPolicy {
