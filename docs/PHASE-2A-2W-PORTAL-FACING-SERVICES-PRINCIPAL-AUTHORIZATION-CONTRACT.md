@@ -60,8 +60,9 @@ Read-only inspection of this checkout, 2026-09-26. No file was written by this i
 | Migration ledger | 001–030 declared in `Migrator::maybe_upgrade()`, `verify_current_schema()` and the required list; latest `030_finance_payability_rate_statement_authority`; **no `031_*` identifier exists** |
 | Capability markers today | base `dzn_platform_capability_version` = `2a2n`, plus `_2a2o`, `_2a2p`, `_2a2q`, `_2a2r`, `_2a2v`, `_2a2t`, `_2a2u` (there is no `_2a2w` marker) |
 | Principal identity storage | `dzn_teacher_principal_links` and `dzn_student_principal_links` (both with `status`, `active_slot`, supersession columns and `UNIQUE teacher_id` / `wordpress_user_id` families), `dzn_student_acceptance_authority_grants` (acceptance and guardian authority), `dzn_student_account_invitations` and `dzn_account_claim_attempts` (account claim) |
-| Canonical facts a portal may read | Phase-M `dzn_lessons`; Phase-N `dzn_canonical_lesson_schedule_versions`; Phase-O `dzn_canonical_lesson_delivery_outcomes`; Phase-P `dzn_canonical_attendance_cases`, `_evidence`, `_decisions`; Phase-J `dzn_teacher_assignments` (through `TeacherAssignmentReadService`); Phase-M0 `dzn_enrolments`; Phase-L `dzn_terms` |
-| Owning-module seams this phase delegates to | `CanonicalAttendanceIntakeService::submitClaim()` (claim kinds `advance_absence_claim`, `attendance_claim`, `delivery_claim`, `review_request`; capabilities `dzn_submit_own_attendance_claim` and `dzn_submit_own_delivery_claim`; attribution members today `own_principal` and `administrator_on_behalf`); `CanonicalLessonScheduleReadService`; `CanonicalLessonDeliveryReadService`; `CanonicalAttendanceReadService`; `ProviderIntegrationReadService` |
+| Canonical facts a portal may read | The PII-minimised §8 projection of Phase-M Lesson, Phase-N applicable schedule, Phase-O effective delivery, Phase-P attendance summary, Phase-J current Assignment, Phase-M0 Enrolment and Phase-L Term facts, only through §10.0's owner-implemented ports; no Phase-W class reads those tables directly |
+| Existing owning-module seams inspected | `CanonicalLessonScheduleReadService` requires `dzn_manage_canonical_lesson_schedules`; `CanonicalLessonDeliveryReadService` requires `dzn_manage_canonical_lesson_delivery`; `CanonicalAttendanceReadService` requires `dzn_view_canonical_attendance_review`; and `TeacherAssignmentReadService` requires `dzn_manage_teacher_assignments`. Those administrator/reviewer seams are **not callable by a Student or Teacher portal** and are not widened by Phase W. `CanonicalAttendanceIntakeService::submitClaim()` also requires a session-backed claimant today; §10.1 records its separately bounded public-capability extension. |
+| Narrow owning-module seams Phase W requires | The four read-only, owner-implemented ports of §10.0 — `TeacherAssignmentPortalReadPort`, `CanonicalLessonSchedulePortalReadPort`, `CanonicalLessonDeliveryPortalReadPort` and `CanonicalAttendancePortalReadPort` — plus §10.1's Phase-P capability-attributed absence intake. No port grants a WordPress capability or permits a portal to read an owning table directly. |
 | Existing public surface | exactly two `register_rest_route()` calls: `delnavazan-platform/v1/booking-requests` (`src/Public/BookingRequestRestController.php`, with `src/Public/BookingRequestRateLimiter.php`) and the Stripe webhook (`src/Integrations/Payment/Stripe/StripeWebhookController.php`) |
 | Portal storage today | **none** — no `portal_*` table, class, constant, capability, option or route exists anywhere under `src/` |
 | `src/Portals/` today | **does not exist**; `src/` holds `Admin/`, `Core/`, `Integrations/`, `Public/` |
@@ -76,8 +77,8 @@ Five consequences are structural, not incidental:
    surface in the Platform: it grants exactly one declared action on exactly one declared Lesson and
    never a business decision (§7, §9, §22).
 2. Phase W **owns no business authority**. Every portal command delegates to the owning module's own
-   application service, and every portal read hydrates through the owning module's own read service
-   and validator (§2, §10).
+   application service, and every portal read hydrates through the subject-scoped owner ports and
+   validators of §10.0 (§2, §10).
 3. Phase W **adds no column to any existing table**, including `platform_audit_events` and
    `platform_outbox`, which it never creates, alters or touches (§13).
 4. Phase W **writes no `platform_outbox` row at all**, makes **no provider call**, holds **no
@@ -94,11 +95,11 @@ Five consequences are structural, not incidental:
    session to exactly one Core principal (`administrator`, `teacher`, `student`, `guardian`), failing
    closed on zero or ambiguous authority and using only the Platform's own identity facts (§6).
 2. **Object-level authorization** — one declared, per-call check that the exact Core record a portal
-   surface names belongs to the resolved principal, proved through the owning module's read service
-   and never from a request parameter, an email, a display name, a reference code or a provider
-   mapping (§7).
+   surface names belongs to the resolved principal, proved through the narrow owning-module portal
+   ports of §10.0 and never from a request parameter, an email, a display name, a reference code or a
+   provider mapping (§7).
 3. **Stable read models** — versioned, PII-minimised, fail-closed projections for the Student and
-   Teacher portals, hydrated from owning-module read services, with a declared field set and a
+   Teacher portals, hydrated from the scoped owner ports of §10.0, with a declared field set and a
    declared stability rule (§8).
 4. **Purpose-bound signed public Join/Absence capabilities** — the capability registry, its sealing,
    verification, rotation, revocation, redemption evidence and safe non-enumerating responses, for
@@ -168,15 +169,15 @@ Phase W is additive and must not weaken a single existing invariant. In particul
 - **The live academy is not disturbed.** No live page, Theme option, menu, notification, provider
   connection or Amelia record is read or written by this phase.
 
-## 4. Locked Phase W decisions (W-D1 … W-D24)
+## 4. Locked Phase W decisions (W-D1 … W-D25)
 
 | Decision | Locked meaning |
 | --- | --- |
 | **W-D1 no business authority** | No Phase-W code path may create, update, delete, complete, cancel, reschedule, archive, settle or price any Lesson, schedule version, delivery outcome, attendance case, evidence or decision, academy obligation, Enrolment, Term, Teacher Assignment, provider mapping, commercial, recurring, payment or finance row, or notification record. Every portal command is a delegation to the owning module's own application service, which performs its own authorization, transaction, idempotency and validation. Portal storage holds access artefacts only. |
 | **W-D2 the principal is resolved, never asserted** | Every authenticated portal call begins from the current WordPress session (a user id) and resolves to exactly one Core principal through `PortalPrincipalResolver`. No request parameter, body field, header, cookie, local storage, referrer or client-supplied claim participates. Zero authority refuses `portal_principal_unresolved`; more than one candidate for the **surface's own** required kind refuses `portal_principal_ambiguous`; a kind the surface does not accept refuses `portal_principal_kind_not_permitted`. |
 | **W-D3 resolution writes nothing** | `PortalPrincipalResolver` is read-only and holds no durable cache. It issues no SQL write, sets no option, stores no transient as authority, and cannot be the source of a later decision. Its answer is used only inside the call that asked for it. |
-| **W-D4 object-level authorization is per call and server-side** | Every portal read and every portal command proves, inside the request, that the exact record it names belongs to the resolved principal, through the owning module's read service. A capability, a role, a menu page, a hidden control, a browser flag or a previously successful call never substitutes for the check. |
-| **W-D5 read models are versioned projections, not new truth** | A portal read model carries a declared version (`portal_lesson_v1`, `portal_enrolment_v1`, `portal_principal_v1`), is produced by a named read class, hydrates only through owning-module read services and validators, and fails closed with `portal_upstream_aggregate_invalid` rather than degrading to partial, stale or defaulted data. Within a version, fields may only be added; changing or removing a field requires a new version constant. |
+| **W-D4 object-level authorization is per call and server-side** | Every portal read and every portal command proves, inside the request, that the exact record it names belongs to the resolved principal. For Assignment, Schedule, Delivery and Attendance that proof is performed by the narrow owning-module portal-read ports of §10.0, not by calling the existing administrator-only read services, trusting a Phase-W assertion or querying an owning table. A capability, a role, a menu page, a hidden control, a browser flag or a previously successful call never substitutes for the check. |
+| **W-D5 read models are versioned projections, not new truth** | A portal read model carries a declared version (`portal_lesson_v1`, `portal_enrolment_v1`, `portal_principal_v1`), is produced by a named read class, hydrates only through the owning-module portal-read ports and validators declared in §10.0, and fails closed with `portal_upstream_aggregate_invalid` rather than degrading to partial, stale or defaulted data. Within a version, fields may only be added; changing or removing a field requires a new version constant. |
 | **W-D6 PII minimisation is a correctness rule, not a preference** | No portal read model or response may carry an email address, phone number, postal address, national or tax identifier, bank, IBAN or card detail, provider subject, reference or mapping id, provider credential, secret, sealed value, raw command key, raw evidence payload, another person's data, a teacher's contact details to a student, or any finance amount. `email`, `phone`, `provider_*`, `secret`, `ciphertext`, `nonce`, `iban` and `card` must not appear as a portal read-model field name. |
 | **W-D7 the capability is access authority only** | A verified capability authorizes exactly one declared purpose on exactly one declared Lesson. It is not identity, not attendance, not completion, not entitlement, not a commercial instrument and not a reusable session. It never establishes a WordPress user, never creates a principal link, never grants a Platform capability and never survives a rotation. |
 | **W-D8 the capability is one-way stored and keyed-verified** | The public handle is high-entropy random material whose **keyed digest** is the only stored lookup key; the presented token's keyed digest is recomputed and compared with `hash_equals()` against the recorded digest. No plaintext handle and no plaintext token is ever written to storage, logged, exported or echoed. |
@@ -196,6 +197,7 @@ Phase W is additive and must not weaken a single existing invariant. In particul
 | **W-D22 least privilege, and no student role** | Two administrator-only capabilities and one administrator plus Teacher capability exist (§14.2). No WordPress role is created by this phase. Student portal authority derives from an **active principal link** plus the object-level check, never from a WordPress capability, because no student role exists and none may be granted finance, review, delivery, admission or scheduling authority. |
 | **W-D23 the operator sees the blockers** | Capability state, generation, expiry, rotation reason, redemption outcomes and every refusal code are visible to `dzn_view_portal_capabilities` through the read surface and the §12 diagnostics. A refusal that cannot be seen cannot be operated, so there is no silent failure mode. |
 | **W-D24 additive, repeat-safe and reversible** | Schema 031 is additive and repeat-safe from Schema 30; it backfills nothing, infers no capability, mints nothing at migration time and writes no option other than its own capability marker. Every write path is a declared command on `portal_*` tables plus insert-only digest-only `platform_audit_events` evidence. Removing the phase leaves the canonical Platform untouched. |
+| **W-D25 owner-gated portal reads, not capability widening** | The existing Schedule, Delivery, Attendance and Assignment read services remain protected by their administrator/reviewer capabilities. Their owners add only the four internal, read-only portal ports of §10.0. Each port accepts a typed request-local subject issued by the resolver or capability verifier, re-proves the exact subject-to-object relationship from owner-approved facts, runs the owning validator and returns only the §8 field subset. The ports expose no unrestricted lookup, recent/list-all operation, history, raw evidence, Teacher-only note or review data; they write nothing and cannot be invoked merely because the caller holds `dzn_view_own_portal_schedule`. |
 
 ## 5. Module layout and locked vocabulary
 
@@ -210,6 +212,7 @@ Integration and no Theme surface:
 | `src/Portals/PortalRule.php` | Locked constants and vocabularies: `PURPOSES`, `CAPABILITY_STATES`, `CAPABILITY_EVENT_TYPES`, `ACTION_STATES`, `HANDOFF_TARGETS`, `SURFACES`, `PRINCIPAL_KINDS`, `READ_MODEL_VERSIONS`, `REASON_CODES`, `EXCEPTION_REASON_CODES`, `OPERATOR_REASON_CODES`, `SAFE_JOIN_HOSTS`, `PUBLIC_ACTION_OPTION`, `CAPABILITY_BINDING_VERSION`, `HANDLE_ENTROPY_BYTES`, `MAX_CAPABILITY_TTL_SECONDS`, `JOIN_ACTION_MODE`, `ABSENCE_ACTION_MODE` |
 | `src/Portals/Application/` | `PortalPrincipalResolver`, `PortalAccessPolicy`, `PortalCapabilityService` (mint, rotate, revoke), `PortalCapabilityVerifier`, `PortalPublicActionService` (join and absence redemption), `PortalHandoffService` (the §10 delegation) |
 | `src/Portals/Application/Read/` | `PortalStudentLessonReadModel`, `PortalStudentEnrolmentReadModel`, `PortalTeacherLessonReadModel`, `PortalTeacherAssignmentReadModel`, `PortalPrincipalReadModel` — one class per declared read-model version |
+| owning Core application modules | The four internal read-only ports of §10.0. They live beside the authority and validator they protect; they are not Phase-W repositories, controllers or alternate sources of truth. |
 | `src/Portals/Integrity/` | `PortalCapabilityIntegrity`, `PortalActionIntegrity`, `PortalReadModelIntegrity` — pure, non-mutating, repository-hydrated validators |
 | `src/Core/Infrastructure/Repository/Portal*Repository.php` | `PortalCapabilityRootRepository`, `PortalCapabilityRepository`, `PortalActionRepository`, `PortalAccessDenialRepository` — each with the established `begin()` / `commit()` / `rollback()` wrapper, named-index duplicate arbitration and insert-only methods for append-only tables |
 | `src/Public/PortalPublicActionController.php` | The three registered public routes (§9.6, §9.7) — verification, safe responses, and nothing else |
@@ -318,7 +321,7 @@ succeed.
 | Surface | Required kind | Object-level check |
 | --- | --- | --- |
 | `portal_student_lesson`, `portal_student_enrolment` | `student`, or `guardian` with an in-force grant for that exact Student | the Lesson's Enrolment must be the principal's own (§7.1) |
-| `portal_teacher_lesson`, `portal_teacher_assignment` | `teacher` | the Lesson's current Teacher Assignment must be the principal's own, proved through `TeacherAssignmentReadService` |
+| `portal_teacher_lesson`, `portal_teacher_assignment` | `teacher` | the Lesson's current Teacher Assignment must be the principal's own, proved by `TeacherAssignmentPortalReadPort`; the administrator-only `TeacherAssignmentReadService` is not called |
 | `portal_principal` | the kind the surface declares | the principal may only read **its own** principal record |
 | `portal_capability_admin` | `administrator` | capability administration is Lesson-scoped; the administrator's authority is the capability, not ownership |
 | `portal_public_join`, `portal_public_absence` | none (anonymous) | the verified capability is the only authority; object-level ownership is proved by the capability's own binding (§7.2) |
@@ -341,13 +344,13 @@ here.
 is the only object-level check, and it is called inside every portal read and every portal command
 after principal resolution. Its rule is fixed:
 
-1. hydrate the exact target through the **owning module's read service**;
+1. hydrate the exact target through the **narrow owning-module portal-read port** declared in §10.0;
 2. require the owning module's own validator to accept the aggregate, or refuse
    `portal_upstream_aggregate_invalid`;
 3. prove ownership against the principal's own link, grant or assignment facts — never against a
    request value and never against the target's own claim about itself;
 4. refuse `portal_object_not_owned` when the record exists but is not the principal's, and
-   `portal_object_not_found` when the owning read service has no such record **only** where the
+   `portal_object_not_found` when the owning port has no such record **only** where the
    surface is not public; a public surface always answers non-enumerating (§9.9).
 
 A target that is not declared portal-visible for that surface (for example an archived Lesson on a
@@ -358,7 +361,7 @@ Portal-visibility is a declared rule of the surface, never a filter applied afte
 
 A public surface has no principal. Its object-level authority is the capability's own binding: the
 capability names the exact `lesson_id`, `schedule_version_id`, `purpose` and `generation`, and Phase W
-additionally re-proves, from the owning modules, that
+additionally re-proves, through the §10.0 owner ports using a `PublicCapabilityReadSubject`, that
 
 - the named schedule version is still the Lesson's applicable version, or the request refuses
   `portal_capability_stale_schedule`;
@@ -388,7 +391,7 @@ A read model is a **declared projection with a version**, not an ad-hoc query re
 - every field documented with its owning source and its rule, as in §8.2 to §8.4;
 - additive-only within a version; a removed or re-typed field requires a new `READ_MODEL_VERSIONS`
   member and a new class;
-- hydrated through owning read services and re-checked by that owner's validator; a corrupt or
+- hydrated through the §10.0 owning-module portal-read ports and re-checked by that owner's validator; a corrupt or
   contradictory aggregate refuses `portal_upstream_aggregate_invalid` and returns **nothing**, never a
   partial list;
 - deterministic ordering (start instant, then Lesson id) and bounded pagination for any list;
@@ -401,25 +404,27 @@ A read model is a **declared projection with a version**, not an ad-hoc query re
 
 | Field | Source | Rule |
 | --- | --- | --- |
-| `lesson_uid`, `reference_code` | Phase-M `lessons` | identifier only; never an authorization input |
-| `lesson_kind` | Phase-M `lessons` | declared kind member |
-| `lifecycle_state` | Phase-M `lessons` | declared member; a cancelled Lesson is reported as cancelled, never hidden |
-| `enrolment_uid`, `course_reference`, `term_reference` | Phase-M0 and Phase-L | the Student's own Enrolment, Course and Term |
-| `starts_at_utc`, `ends_at_utc`, `schedule_timezone` | Phase-N applicable schedule version | UTC instants plus the recorded IANA zone; wall-clock rendering belongs to presentation |
-| `schedule_version_uid` | Phase-N applicable schedule version | the exact version a capability would bind |
-| `delivery_state_summary`, `attendance_state_summary` | Phase-O effective delivery outcome and the Phase-P read service | declared summary members only; never an adjudication, a Teacher-only note, an academy obligation or a finance consequence |
+| `lesson_uid`, `reference_code` | Phase-M facts projected by `CanonicalLessonSchedulePortalReadPort` | identifier only; never an authorization input |
+| `lesson_kind` | Phase-M fact projected by `CanonicalLessonSchedulePortalReadPort` | declared kind member |
+| `lifecycle_state` | Phase-M fact projected by `CanonicalLessonSchedulePortalReadPort` | declared member; a cancelled Lesson is reported as cancelled, never hidden |
+| `enrolment_uid`, `course_reference`, `term_reference` | Phase-M0/L facts projected by `CanonicalLessonSchedulePortalReadPort` | the Student's own Enrolment, Course and Term |
+| `starts_at_utc`, `ends_at_utc`, `schedule_timezone` | `CanonicalLessonSchedulePortalReadPort` | UTC instants plus the recorded IANA zone; wall-clock rendering belongs to presentation |
+| `schedule_version_uid` | `CanonicalLessonSchedulePortalReadPort` | the exact applicable version a capability would bind |
+| `delivery_state_summary`, `attendance_state_summary` | `CanonicalLessonDeliveryPortalReadPort` and `CanonicalAttendancePortalReadPort` | declared summary members only; never an adjudication, a Teacher-only note, an academy obligation or a finance consequence |
 | `join_available` (bool), `join_refusal_reason` | Phase-W capability state for that Lesson | whether *this Student* currently has a usable Join capability; the reason is a §5.2.1 member. The handle, token and target are never included. |
-| `absence_available` (bool), `absence_refusal_reason` | Phase-W capability state and the owner's window | same rule |
+| `absence_available` (bool), `absence_refusal_reason` | Phase-W capability state plus `CanonicalAttendancePortalReadPort`'s window/finality answer | same rule |
 
 `portal_enrolment_v1` — one entry per Enrolment the Student owns: `enrolment_uid`, `reference_code`,
 `course_reference`, `term_reference`, `lifecycle_state`, `assigned_teacher_display_reference` (the
 Teacher's platform display reference only — no contact detail, no email, no phone) and
-`schedule_summary` (declared frequency and timezone, never another Student's data).
+`schedule_summary` (declared frequency and timezone, never another Student's data). The schedule and
+Enrolment fields come from `CanonicalLessonSchedulePortalReadPort`; the current Teacher display
+reference comes from `TeacherAssignmentPortalReadPort` after the Student relationship is re-proved.
 
 ### 8.3 Declared Teacher read models
 
 `portal_lesson_v1` (Teacher side) — one entry per Lesson whose **current Teacher Assignment** is the
-Teacher's, proved through `TeacherAssignmentReadService`: the same fields as §8.2 plus
+Teacher's, proved through `TeacherAssignmentPortalReadPort`: the same fields as §8.2 plus
 `assignment_state` and `student_display_reference` (the Student's platform display reference only). It
 never includes a Student contact detail, another Teacher's Lesson, a capacity or commercial fact, a
 statement or a payability figure.
@@ -610,6 +615,57 @@ separately authorised delivery slice, and enabling it is §21 open decision 1.
 
 ## 10. Delegation: the owning-module seams this phase uses
 
+### 10.0 Narrow owner-module portal-read ports
+
+The existing protected read services are administrator/reviewer surfaces. Phase W must **not** call
+them under a fabricated administrator, remove their capability checks, grant their capabilities to a
+Teacher or Student, or copy their repository queries. Instead the implementation candidate requires
+these four additive, internal application ports, each implemented and tested beside its owning
+authority:
+
+| Owning authority | Required internal port | Bounded operations and result |
+| --- | --- | --- |
+| Phase J Teacher Assignment | `TeacherAssignmentPortalReadPort` | `forSubject(subject, enrolmentId)` and bounded `pageForSubject(subject, cursor, limit)`; re-proves the current Assignment and returns only the §8 Assignment fields and the identifiers needed to bind the exact Enrolment/Lesson relationship |
+| Phase N canonical schedule | `CanonicalLessonSchedulePortalReadPort` | `forSubject(subject, lessonId)` and bounded `pageForSubject(subject, cursor, limit)`; validates the canonical Lesson and schedule aggregate and returns only the applicable schedule version plus the §8 Lesson/Enrolment/Course/Term identifiers and display references |
+| Phase O canonical delivery | `CanonicalLessonDeliveryPortalReadPort` | `summaryForSubject(subject, lessonId)`; validates the delivery aggregate and returns only `delivery_state_summary`, never outcome history, academy-obligation detail or a Teacher-only note |
+| Phase P canonical attendance | `CanonicalAttendancePortalReadPort` | `summaryForSubject(subject, lessonId, scheduleVersionId)`; validates the occurrence aggregate and returns only `attendance_state_summary`, absence-window availability/finality and a declared refusal code, never evidence, intervals, claims, provider facts, decisions, anomaly detail or review data |
+
+`subject` is one of two typed, request-local values. `AuthenticatedPortalReadSubject` is constructed
+only by `PortalPrincipalResolver` from the current WordPress user and contains the surface,
+WordPress-user id, principal kind and resolved Core id. `PublicCapabilityReadSubject` is constructed
+only by `PortalCapabilityVerifier` after successful cryptographic and state verification and contains
+the capability id, purpose, Lesson, schedule version, generation and bound Student where applicable.
+Neither value is accepted from a controller parameter, array payload, cookie, header or persisted
+cache, and neither is reusable outside the request.
+
+Every port independently enforces all of the following:
+
+1. It re-proves the supplied subject against authoritative facts. For a Teacher this includes the
+   active principal link and the exact current Assignment; for a Student it includes the active
+   principal link and the exact Lesson → Term → Enrolment → Student chain; for a guardian it includes
+   the exact in-force grant and Student; for a public capability it includes the exact canonical
+   Lesson, applicable schedule version and bound Student named by the verified binding.
+2. It obtains any cross-authority fact through that authority's application read seam or a typed
+   result from another port in this table. Phase-W code never supplies a claimed `teacher_id`,
+   `student_id`, `enrolment_id` or `schedule_version_id` as proof and never reads an owner repository.
+3. It runs the owner's existing integrity validator before returning. Missing, stale, ambiguous or
+   corrupt facts fail closed using the §5.2.1 mapping; no partial projection is returned.
+4. It is read-only: no database write, option, transient, cache-as-authority, lock or audit side
+   effect. Its result contains only the declared fields above and cannot expose the broader result of
+   `CanonicalLessonScheduleReadService`, `CanonicalLessonDeliveryReadService`,
+   `CanonicalAttendanceReadService` or `TeacherAssignmentReadService`.
+5. It has no unrestricted `find`, `recent`, list-all, history or arbitrary-principal operation. A
+   bounded page is scoped by the re-proved subject before rows are returned, with deterministic
+   ordering and a maximum page size declared by the owner.
+
+`dzn_view_own_portal_schedule` gates entry to a Teacher Phase-W surface only. It is not accepted by an
+owner port as proof of ownership. Students continue to need no WordPress capability, and none of
+`dzn_manage_canonical_lesson_schedules`, `dzn_manage_canonical_lesson_delivery`,
+`dzn_view_canonical_attendance_review` or `dzn_manage_teacher_assignments` is granted or implied.
+Until all four ports exist and their owner-specific authorization tests pass, every authenticated
+Student/Teacher read surface remains unregistered; Phase W may not fall back to an administrator
+service or a direct table read.
+
 ### 10.1 Absence to the owning attendance authority
 
 Phase P owns attendance intake, evidence, assessment, review and adjudication, and it already declares
@@ -786,6 +842,9 @@ declared parent:
   `student_principal_links`, `student_acceptance_authority_grants`.
 
 The legacy `lesson_schedule_versions` table is **not** a parent anywhere in this phase.
+“Read-only parent” declares referential provenance for Schema 031; it does not authorise a Phase-W
+repository or read model to query that parent's table. Assignment, schedule, delivery and attendance
+facts reach Phase W only through §10.0.
 
 ### 13.4 Verifier rules
 
@@ -843,12 +902,13 @@ and creates only the six tables above with their declared keys. It:
 | Surface | Capability | Notes |
 | --- | --- | --- |
 | `PortalPrincipalResolver::resolve` | none (read-only) | §6; writes nothing, caches nothing, always refuses rather than widening |
-| `PortalAccessPolicy::assertObject` | none (read-only, called by others) | §7; hydrates through owning read services; appends one denial row on refusal |
+| `PortalAccessPolicy::assertObject` | none (read-only, called by others) | §7; dispatches to the scoped §10.0 owner port and appends one denial row on refusal |
 | `PortalCapabilityService::mint`, `rotate`, `revoke` | `dzn_manage_portal_capabilities` | §9.4, §9.8; each takes the per-Lesson root exclusively, appends one typed `portal_public_capability_commands` row and one capability event, and returns the plaintext link only from `mint` |
 | `PortalCapabilityVerifier::verify` | none (public path) | §9.5; read-only; never mutates a capability row |
 | `PortalPublicActionService::join`, `renderAbsenceConfirmation`, `confirmAbsence` | none (public path; the verified capability is the authority) | §9.6, §9.7; two-phase redemption under the Lesson root; delegates only through §10 |
 | `PortalHandoffService::submitAbsenceClaim` | none (delegated) | §10.1; the only place a portal calls an owning module's intake, and only after its own claim has committed |
-| `PortalStudentLessonReadModel`, `PortalStudentEnrolmentReadModel`, `PortalTeacherLessonReadModel`, `PortalTeacherAssignmentReadModel`, `PortalPrincipalReadModel` | `dzn_view_own_portal_schedule` for the Teacher surfaces; principal-link-derived authority for the Student surfaces | §8; PII-minimised, versioned, fail closed |
+| `TeacherAssignmentPortalReadPort`, `CanonicalLessonSchedulePortalReadPort`, `CanonicalLessonDeliveryPortalReadPort`, `CanonicalAttendancePortalReadPort` | none; internal owner ports, with the typed subject and owner re-proof as authority | §10.0; read-only, subject-scoped and field-bounded; no administrator capability is inherited, bypassed or granted |
+| `PortalStudentLessonReadModel`, `PortalStudentEnrolmentReadModel`, `PortalTeacherLessonReadModel`, `PortalTeacherAssignmentReadModel`, `PortalPrincipalReadModel` | `dzn_view_own_portal_schedule` gates the Teacher surface; principal-link-derived authority gates the Student surface; §10.0 still re-proves the exact object | §8; PII-minimised, versioned, fail closed |
 
 ### 14.2 Capabilities
 
@@ -872,8 +932,9 @@ Exactly three new capabilities:
 
 ### 14.3 Diagnostics
 
-As §12. Diagnostics read only portal tables and owning read services; they never query another module's
-table and never expose a raw value.
+As §12. Diagnostics read only portal tables and the scoped §10.0 owner ports; they never query another
+module's table, call an administrator-only owner read service as a portal principal or expose a raw
+value.
 
 ## 15. Concurrency, idempotency and serialisation
 
@@ -967,23 +1028,31 @@ replay, by the administrator surface, or by a later, explicitly authorised worke
 | Upstream authority | Fact Phase W consumes (read-only) | Fact Phase W adds | Invariant |
 | --- | --- | --- | --- |
 | Phase M Lesson | Lesson identity, kind, lifecycle, Enrolment and Term links | none on the Lesson | Phase W never creates, edits, completes, cancels or archives a Lesson |
-| Phase N schedule | the applicable schedule version and its anchors | the exact `schedule_version_id` the capability binds | Phase W never reschedules and never materialises an occurrence |
-| Phase O delivery | effective outcome state for the declared summary | none | Phase W never records or reinterprets a delivery outcome |
-| Phase P attendance | claim kinds, the visible state, and the outcome state that closes an absence window | the capability-attributed claim of §10.1, recorded by Phase P in **Phase-P** storage | Phase W never adjudicates, never settles and never writes a Phase-P row itself |
-| Phase J Assignment | the current Teacher Assignment | none | Phase W never replaces or reassigns a Teacher |
+| Phase N schedule | the applicable schedule version and its anchors, through `CanonicalLessonSchedulePortalReadPort` | the exact `schedule_version_id` the capability binds | Phase W never reschedules and never materialises an occurrence |
+| Phase O delivery | effective outcome state for the declared summary, through `CanonicalLessonDeliveryPortalReadPort` | none | Phase W never records or reinterprets a delivery outcome |
+| Phase P attendance | the portal-safe visible summary and absence finality/window answer, through `CanonicalAttendancePortalReadPort` | the capability-attributed claim of §10.1, recorded by Phase P in **Phase-P** storage | Phase W never reads review evidence, adjudicates, settles or writes a Phase-P row itself |
+| Phase J Assignment | the current subject-scoped Teacher Assignment, through `TeacherAssignmentPortalReadPort` | none | Phase W never replaces or reassigns a Teacher |
 | Phase M0 and L | Enrolment, Term and Student identity | none | Phase W never changes an Enrolment's or Term's lifecycle |
 | Phase B and C identity | `teacher_principal_links`, `student_principal_links`, account claim | none | Phase W never links, relinks, revokes or claims an identity |
 | Phase F authority | acceptance and guardian grants | none | Phase W never grants, revokes or supersedes an authority |
 | Phase V provider integration | mapping metadata only, never a join URI | the sealed portal join target of §10.2, in **Phase-W** storage | Phase W makes no provider call, holds no credential and decrypts no provider secret |
 | Phase U finance | nothing at all | nothing | no portal surface exposes a finance fact |
 
-### 16.2 The one declared upstream extension
+### 16.2 The declared upstream seam extensions
 
-The single change this phase requires of an existing owner is §10.1's capability-attributed attendance
-intake path with the declared `public_capability_on_behalf` attribution member. It is an extension of
-**Phase P's own authority**, it is prerequisite 2 of §20, and this contract authorises nothing about
-it. Until it exists, `lesson_absence` minting refuses `portal_parent_not_live` and the Join purpose is
-unaffected.
+Phase W requires exactly two categories of additive owner extension, neither of which transfers
+business authority to Phase W:
+
+1. The four read-only, subject-scoped owner ports of §10.0. They preserve the existing administrator
+   services unchanged and provide only the fields needed by §8 after the owner re-proves object
+   authority. Until all four exist and their owner-specific authorization tests pass, authenticated
+   Student/Teacher read surfaces remain unregistered.
+2. §10.1's capability-attributed attendance intake path with the declared
+   `public_capability_on_behalf` attribution member. It extends **Phase P's own authority**. Until it
+   exists, `lesson_absence` minting refuses `portal_parent_not_live`; the Join purpose is unaffected.
+
+These are prerequisite 2 of §20. This contract records their required shape but authorises no runtime
+implementation in this preflight correction.
 
 ### 16.3 Legacy compatibility
 
@@ -1023,10 +1092,10 @@ V and `schema-contract.php`) must stay green.
 
 | Suite | Proves | Status in this environment |
 | --- | --- | --- |
-| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written, **not executed** (no PHP) |
+| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, all four §10.0 owner ports, no portal call to the four administrator-only read services, no portal repository read of their tables, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written, **not executed** (no PHP) |
 | `tests/phase-2a2w-migration-runtime.php` | Schema 30 to 31 additive and repeat-safe, no existing row or column changed, no option seeded but the marker, and `dzn_platform_portal_actions` absent | written, **not executed** |
 | `tests/phase-2a2w-principal-runtime.php` | resolution for each principal kind; zero, ambiguous and kind-mismatch refusals; a multi-role user resolving per surface; and that no parameter, cookie, header, email or meta changes the answer | written, **not executed** |
-| `tests/phase-2a2w-authorization-runtime.php` | object-level authorization for every Student and Teacher surface, including another Student's Lesson, another Teacher's Assignment, an archived Lesson, a corrupt upstream aggregate, and the durable denial row for each refusal | written, **not executed** |
+| `tests/phase-2a2w-authorization-runtime.php` | every §10.0 port re-proves the typed subject and object relationship for Student, guardian, Teacher and verified capability reads; another Student's Lesson, another Teacher's Assignment, a forged/mismatched subject, a capability-only or role-only attempt, an archived Lesson and a corrupt upstream aggregate all fail closed, with the Phase-W caller recording the durable denial | written, **not executed** |
 | `tests/phase-2a2w-capability-runtime.php` | mint for both purposes and every refusal, binding, expiry, generation, rotation, revocation, suspected leak, one-way storage (no plaintext handle or token retrievable), sealed join target decrypted once, and the replayed-command convergence | written, **not executed** |
 | `tests/phase-2a2w-public-action-runtime.php` | the three routes, the disabled-route refusal, the identical non-enumerating answer for every failure mode, the join redirect and its allowlist, and the absence two-step flow with the one-time confirmation, the `consumed` transition, the delegated claim carrying `public_capability_on_behalf`, and the outcome recorded after the owner's decision | written, **not executed** |
 | `tests/phase-2a2w-concurrency-runner.sh` (plus setup, worker and verify) | `mint_vs_mint` (one winner per pair), `rotate_vs_redeem`, `revoke_vs_redeem`, `two_redemptions_one_confirmation`, `replay_during_delegation`, `stale_schedule_vs_rotate`, and `two_lessons_disjoint` (no contention) | written, **not executed** |
@@ -1057,11 +1126,13 @@ These gate execution, not the writing of this contract.
    checkout's highest declared migration is 030 and no `031_*` identifier exists (§0, §1). Confirm
    `031_portal_facing_services_principal_authorization`, or explicitly re-scope the ledger. Nothing
    may be implemented on an ambiguous number.
-2. **Settle the base and the owning-authority seam.** Record the exact base (a tree that contains
-   Schema 30) and either confirm the §10.1 capability-attributed attendance intake path and its
-   `public_capability_on_behalf` attribution member, or declare the `lesson_absence` purpose deferred
-   for the first candidate. Phase W may not be reviewed against a base that lacks the tables its own
-   verifier inspects, and the absence action may not be enabled before the owning authority admits it.
+2. **Settle the base and the owning-authority seams.** Record the exact base (a tree that contains
+   Schema 30); confirm the four narrow owner read ports of §10.0 and their typed subject contract; and
+   either confirm the §10.1 capability-attributed attendance intake path with its
+   `public_capability_on_behalf` attribution member or declare `lesson_absence` deferred for the first
+   candidate. Phase W may not register authenticated Student/Teacher reads until all four owner-port
+   authorization suites pass, may not be reviewed against a base lacking the tables its verifier
+   inspects, and may not enable the absence action before Phase P admits it.
 3. **Green disposable runtime.** The local test runtime must be able to run a fresh install, an upgrade
    from Schema 30, and the concurrency runner before Phase-W suites are added.
 4. **Owner decisions on the four timing and exposure values** (§21, decisions 2 to 5): the capability
@@ -1141,14 +1212,20 @@ It schedules no event, creates no background worker, and decides none of the ope
   kind, writes nothing, caches nothing, and refuses `portal_principal_required`,
   `portal_principal_unresolved`, `portal_principal_ambiguous` and
   `portal_principal_kind_not_permitted` without ever widening a requirement.
-- Every portal read and command proves object-level ownership through the owning module's read service;
-  another principal's record, an archived Lesson, a non-portal-visible target and a corrupt upstream
-  aggregate each refuse with their declared code and append one digest-only `portal_access_denials`
-  row.
+- Every portal read and command proves object-level ownership through the scoped owner ports of
+  §10.0; each owner re-proves the typed subject and exact target, while another principal's record, an
+  archived Lesson, a non-portal-visible target and a corrupt upstream aggregate each refuse with their
+  declared code and cause Phase W to append one digest-only `portal_access_denials` row.
 - Every declared read model carries its declared version, exposes exactly its declared fields, hydrates
-  only through owning read services, fails closed rather than degrading, and exposes no email, phone,
-  address, provider reference, secret, sealed value, raw digest, finance amount or another person's
-  data.
+  only through `TeacherAssignmentPortalReadPort`, `CanonicalLessonSchedulePortalReadPort`,
+  `CanonicalLessonDeliveryPortalReadPort` and `CanonicalAttendancePortalReadPort`, fails closed rather
+  than degrading, and exposes no email, phone, address, provider reference, secret, sealed value, raw
+  digest, finance amount or another person's data.
+- The four existing administrator/reviewer read services retain their capability checks unchanged;
+  no Teacher receives a schedule, delivery, attendance-review or assignment-management capability,
+  no Student capability or role is created, no owner port treats
+  `dzn_view_own_portal_schedule` as object authority, and no Phase-W class reads an owning table
+  directly.
 - Capabilities exist for exactly the two declared purposes, are bound to an exact Lesson and an exact
   applicable schedule version, use a high-entropy handle whose keyed digest is the only stored lookup
   key, are verified in constant time, carry an absolute immutable expiry, and have exactly one live
