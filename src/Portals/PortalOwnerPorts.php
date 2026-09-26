@@ -23,7 +23,7 @@ final class PortalAccessPolicy {
     }
     private static function deny(string $surface,string $kind,int $target,array $principal,string $reason):void {
         global $wpdb; $p=$wpdb->prefix.'dzn_portal_access_denials'; if(!$wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s',$p)))return;
-        $reason=in_array($reason,PortalRule::REASON_CODES,true)?$reason:'portal_upstream_aggregate_invalid';
+        $reason=in_array($reason,PortalRule::EXCEPTION_REASON_CODES,true)?$reason:'portal_upstream_aggregate_invalid';
         $wpdb->insert($p,array('uid'=>substr(hash('sha256',wp_generate_uuid4()),0,26),'surface'=>$surface,'principal_kind'=>$principal['kind']??null,'principal_id'=>$principal['id']??null,'target_kind'=>$kind,'target_id'=>$target,'reason_code'=>$reason,'request_fingerprint_digest'=>hash('sha256',wp_json_encode($_REQUEST)),'occurred_at'=>gmdate('Y-m-d H:i:s'),'created_at'=>gmdate('Y-m-d H:i:s')));
     }
 }
