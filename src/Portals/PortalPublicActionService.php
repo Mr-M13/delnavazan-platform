@@ -16,7 +16,6 @@ final class PortalPublicActionService {
 
     public function confirmAbsence(string $handle,string $token,string $confirmation):array {
         if(!preg_match('/^[a-f0-9]{64}$/',$confirmation))throw new \InvalidArgumentException('portal_confirmation_invalid'); global $wpdb; $p=$wpdb->prefix.'dzn_'; $digest=$this->digest($confirmation);
-        try{$proof=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE); $proofSubject=new PublicCapabilityReadSubject((int)$proof->id,PortalRule::ABSENCE,(int)$proof->lesson_id,(int)$proof->schedule_version_id,(int)$proof->generation,(int)$proof->subject_student_id,(string)$proof->expires_at); PortalOwnerPorts::attendance()->assertCapabilityClaimAdmissible($proofSubject);}catch(\InvalidArgumentException $e){if($e->getMessage()!=='portal_capability_consumed')throw $e;}
         $resume=false;
         $wpdb->query('START TRANSACTION');
         try{
@@ -27,7 +26,11 @@ final class PortalPublicActionService {
                 $row=(new PortalCapabilityService())->verifyConsumed($handle,$token,PortalRule::ABSENCE,(int)$row->id);
                 $bound=$wpdb->get_row($wpdb->prepare("SELECT id FROM {$p}portal_public_action_events WHERE id=%d AND capability_id=%d AND confirmation_digest=%s AND action_state='confirmed_submitting' FOR UPDATE",(int)$row->consumed_action_event_id,(int)$row->id,$digest));
                 if(!$bound)throw new \InvalidArgumentException('portal_confirmation_invalid');
-            }else{$row=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE);}
+            }else{
+                $row=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE);
+                $proofSubject=new PublicCapabilityReadSubject((int)$row->id,PortalRule::ABSENCE,(int)$row->lesson_id,(int)$row->schedule_version_id,(int)$row->generation,(int)$row->subject_student_id,(string)$row->expires_at);
+                PortalOwnerPorts::attendance()->assertCapabilityClaimAdmissible($proofSubject);
+            }
             $rendered=$wpdb->get_row($wpdb->prepare("SELECT id FROM {$p}portal_public_action_events WHERE capability_id=%d AND confirmation_digest=%s AND action_state='confirmation_rendered' LIMIT 1",$row->id,$digest));if(!$rendered)throw new \InvalidArgumentException('portal_confirmation_invalid');
             $existing=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$p}portal_public_action_events WHERE capability_id=%d AND confirmation_digest=%s AND action_state IN ('confirmed_submitting','submitted','refused') ORDER BY id DESC LIMIT 1",$row->id,$digest));
             if($existing){if($existing->action_state==='refused'){ $wpdb->query('COMMIT');throw new \InvalidArgumentException((string)$existing->outcome_reason_code); }if($existing->action_state==='submitted'){ $wpdb->query('COMMIT');return array('capability_id'=>(int)$row->id,'lesson_id'=>(int)$row->lesson_id,'attribution'=>'public_capability_on_behalf','state'=>'submitted','replayed'=>true); }$resume=true; $wpdb->query('COMMIT');}
