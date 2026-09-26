@@ -1,9 +1,9 @@
 # Phase 2A.2-W — Portal-Facing Services: Session-to-Core-Principal Resolution, Object-Level Authorization, Stable Read Models & Purpose-Bound Signed Public Join/Absence Capabilities (Schema 031)
 
-**Status:** implementation contract (preflight). Contract authoring and planning only — this document
-creates no schema, migration, service, capability, route, template, asset, test, option or
-configuration, and it authorises no implementation, independent review, merge, Theme work, external
-publication, deployment, production access or production cutover by itself.
+**Status:** implementation contract — Phase-W candidate materialised. This candidate implements the
+additive Schema 031 access-artefact boundary only; it does not implement the deferred Phase-P
+capability-attributed absence seam, Theme integration, external publication, deployment, production
+access or public cutover.
 **Schema:** 031 (`031_portal_facing_services_principal_authorization`).
 **Build:** `phase2a2w-portal-facing-services-20260926.1` (proposed).
 **Base:** this candidate tree — `main` @ `773e13e2bf148f6e9ff250b58c7bd6ee4b135f48`, tree

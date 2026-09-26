@@ -8,10 +8,10 @@
  */
 defined( 'ABSPATH' ) || exit;
 define( 'DZN_PLATFORM_VERSION', '0.1.0' );
-define( 'DZN_PLATFORM_SCHEMA_VERSION', '30' );
+define( 'DZN_PLATFORM_SCHEMA_VERSION', '31' );
 // Package-stamped runtime-validation identity. This is deliberately explicit
 // because production packages do not include Git metadata.
-define( 'DZN_PLATFORM_BUILD_ID', 'phase2a2u-finance-payability-rate-statement-20260925.1' );
+define( 'DZN_PLATFORM_BUILD_ID', 'phase2a2w-portal-facing-services-20260926.1' );
 // Temporary Phase 1F beta diagnostic. Define as false before loading the
 // plugin to disable it; remove after the nonce failure is understood.
 defined( 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS' ) || define( 'DZN_PLATFORM_PHASE_1F_NONCE_DIAGNOSTICS', true );
@@ -36,6 +36,8 @@ add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Admin\Controller\FinancePayabilityController::register();
 	Delnavazan\Platform\Admin\Controller\FinanceStatementController::register();
 	Delnavazan\Platform\Admin\Controller\FinanceReconciliationController::register();
+	Delnavazan\Platform\Admin\Controller\PortalCapabilityController::register();
 } );
 add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Public\\BookingRequestRestController', 'register' ) );
 add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Integrations\\Payment\\Stripe\\StripeWebhookController', 'register' ) );
+add_action( 'rest_api_init', array( 'Delnavazan\\Platform\\Portals\\PortalPublicActionController', 'register' ) );
