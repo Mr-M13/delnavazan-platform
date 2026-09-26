@@ -5,17 +5,18 @@ final class PortalPublicActionService {
     private function table(string $name):string { global $wpdb; return $wpdb->prefix.'dzn_'.$name; }
     private function uid():string { return substr(hash('sha256',wp_generate_uuid4()),0,26); }
     private function digest(string $value):string { return hash('sha256',$value); }
-    private function requestDigest():string { return $this->digest(wp_json_encode($_REQUEST)); }
+    private function requestDigest():string { return hash_hmac('sha256','portal_public_request_v1|'.wp_json_encode($_REQUEST),wp_salt('dzn_portal_request_fingerprint')); }
 
     public function renderAbsenceConfirmation(string $handle,string $token):string {
-        $row=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE); $confirmation=bin2hex(random_bytes(32)); global $wpdb; $now=gmdate('Y-m-d H:i:s');
-        $sequence=(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(action_sequence),0)+1 FROM {$this->table('portal_public_action_events')} WHERE capability_id=%d",$row->id));
-        if(false===$wpdb->insert($this->table('portal_public_action_events'),array('uid'=>$this->uid(),'capability_id'=>(int)$row->id,'lesson_id'=>(int)$row->lesson_id,'purpose'=>PortalRule::ABSENCE,'action_sequence'=>$sequence,'action_state'=>'confirmation_rendered','resolved_student_id'=>(int)$row->subject_student_id,'confirmation_digest'=>$this->digest($confirmation),'redemption_key_digest'=>$this->digest($confirmation),'request_fingerprint_digest'=>$this->requestDigest(),'occurred_at'=>$now,'created_at'=>$now,'created_by'=>null)))throw new \RuntimeException('portal_action_evidence_persistence_failed');
+        global $wpdb; $wpdb->query('START TRANSACTION'); try { $row=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE); $wpdb->get_row($wpdb->prepare("SELECT id FROM {$this->table('portal_lesson_capability_roots')} WHERE lesson_id=%d FOR UPDATE",$row->lesson_id)); $wpdb->get_row($wpdb->prepare("SELECT id FROM {$this->table('portal_public_capabilities')} WHERE id=%d FOR UPDATE",$row->id)); $confirmation=bin2hex(random_bytes(32)); $now=gmdate('Y-m-d H:i:s');
+        $sequence=(int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(action_sequence),0)+1 FROM {$this->table('portal_public_action_events')} WHERE capability_id=%d FOR UPDATE",$row->id));
+        if(false===$wpdb->insert($this->table('portal_public_action_events'),array('uid'=>$this->uid(),'capability_id'=>(int)$row->id,'lesson_id'=>(int)$row->lesson_id,'purpose'=>PortalRule::ABSENCE,'action_sequence'=>$sequence,'action_state'=>'confirmation_rendered','resolved_student_id'=>(int)$row->subject_student_id,'confirmation_digest'=>$this->digest($confirmation),'redemption_key_digest'=>$this->digest($confirmation),'request_fingerprint_digest'=>$this->requestDigest(),'occurred_at'=>$now,'created_at'=>$now,'created_by'=>null)))throw new \RuntimeException('portal_action_evidence_persistence_failed'); $wpdb->query('COMMIT'); } catch(\Throwable $e){$wpdb->query('ROLLBACK');throw $e;}
         return '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,noarchive"><title>Confirm absence</title></head><body><main><h1>Confirm absence</h1><p>Reference: <span>'.esc_html((string)$row->uid).'</span></p><form method="post" action="'.esc_attr(home_url('/wp-json/delnavazan-platform/v1/portal/absence/confirm')).'"><input type="hidden" name="handle" value="'.esc_attr($handle).'"><input type="hidden" name="token" value="'.esc_attr($token).'"><input type="hidden" name="confirmation" value="'.esc_attr($confirmation).'"><button type="submit">Confirm absence</button></form></main></body></html>';
     }
 
     public function confirmAbsence(string $handle,string $token,string $confirmation):array {
         if(!preg_match('/^[a-f0-9]{64}$/',$confirmation))throw new \InvalidArgumentException('portal_confirmation_invalid'); global $wpdb; $p=$wpdb->prefix.'dzn_'; $digest=$this->digest($confirmation);
+        try{$proof=(new PortalCapabilityService())->verify($handle,$token,PortalRule::ABSENCE); $proofSubject=new PublicCapabilityReadSubject((int)$proof->id,PortalRule::ABSENCE,(int)$proof->lesson_id,(int)$proof->schedule_version_id,(int)$proof->generation,(int)$proof->subject_student_id,(string)$proof->expires_at); PortalOwnerPorts::attendance()->assertCapabilityClaimAdmissible($proofSubject);}catch(\InvalidArgumentException $e){if($e->getMessage()!=='portal_capability_consumed')throw $e;}
         $resume=false;
         $wpdb->query('START TRANSACTION');
         try{

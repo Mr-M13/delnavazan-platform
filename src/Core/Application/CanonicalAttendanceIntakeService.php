@@ -215,6 +215,23 @@ final class CanonicalAttendanceIntakeService {
         }
     }
 
+    /** Re-prove mutable owner gates before a public capability is consumed. The handoff repeats
+     * these checks inside its own transaction because this proof can race with finality. */
+    public function assertCapabilityClaimAdmissible(\Delnavazan\Platform\Portals\PublicCapabilityReadSubject $subject):void{
+        if($subject->purpose!=='lesson_absence'||$subject->studentId===null)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+        $this->repository->begin();
+        try{
+            global $wpdb;$p=$wpdb->prefix.'dzn_';
+            if((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND revoked_at IS NULL AND active_slot=1",$subject->studentId))!==1)throw new \InvalidArgumentException('portal_principal_required');
+            [$case]= $this->lockOccurrence($subject->lessonId,$subject->scheduleVersionId,self::PUBLIC_CAPABILITY_AUDIT_ACTOR,null);
+            if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+            if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
+            if(gmdate('Y-m-d H:i:s')>=(string)$case->window_end_utc)throw new \InvalidArgumentException('portal_absence_window_closed');
+            if($this->isAfterTermClosure((int)$case->term_id))throw new \InvalidArgumentException('portal_absence_late_evidence');
+            $this->repository->commit();
+        }catch(\Throwable $e){$this->repository->rollback();throw $e;}
+    }
+
     /** Administrative adjudication: the only Phase-P path allowed to change effective canonical truth. */
     public function adjudicate(int $caseId,array $input,string $key):array{
         $this->requireCapability(self::REVIEW_CAPABILITY);

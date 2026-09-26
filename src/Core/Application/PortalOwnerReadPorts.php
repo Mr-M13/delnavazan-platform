@@ -24,6 +24,7 @@ final class CanonicalLessonDeliveryPortalReadPortImpl implements CanonicalLesson
 }
 
 final class CanonicalAttendancePortalReadPortImpl implements CanonicalAttendancePortalReadPort {
+    public function assertCapabilityClaimAdmissible(PublicCapabilityReadSubject $subject):void { (new CanonicalAttendanceIntakeService())->assertCapabilityClaimAdmissible($subject); }
     public function summaryForSubject(AuthenticatedPortalReadSubject|PublicCapabilityReadSubject $subject,int $lessonId,int $scheduleVersionId):array { (new CanonicalLessonSchedulePortalReadPortImpl())->forSubject($subject,$lessonId); $case=(new CanonicalAttendanceRepository())->caseFor($lessonId,$scheduleVersionId); return array('lesson_id'=>$lessonId,'schedule_version_id'=>$scheduleVersionId,'attendance_state_summary'=>$case?(string)$case->state:'not_recorded','absence_available'=>$case?(string)$case->state==='open':false,'absence_final'=>$case?(string)$case->state==='settled':false); }
     public function submitCapabilityClaim(PublicCapabilityReadSubject $subject,string $redemptionReference):array { if($subject->purpose!=='lesson_absence')throw new \InvalidArgumentException('portal_capability_purpose_mismatch'); if(trim($redemptionReference)==='')throw new \InvalidArgumentException('portal_confirmation_invalid'); return (new CanonicalAttendanceIntakeService())->submitCapabilityClaim($subject,$redemptionReference); }
 }
