@@ -176,11 +176,37 @@ final class CanonicalAttendanceIntakeService {
     /** Phase-W handoff: capability proof is re-bound to the exact occurrence before intake. */
     public function submitCapabilityClaim(\Delnavazan\Platform\Portals\PublicCapabilityReadSubject $subject,string $redemptionReference):array{
         if($subject->purpose!=='lesson_absence'||$subject->studentId===null)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
-        $case=$this->repository->caseFor($subject->lessonId,$subject->scheduleVersionId);
-        if(!$case)throw new \InvalidArgumentException('portal_absence_window_closed');
-        if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
-        if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
-        return array('case_id'=>(int)$case->id,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference),'state'=>'submitted');
+        if(trim($redemptionReference)==='')throw new \InvalidArgumentException('portal_confirmation_invalid');
+        $digest=CanonicalAttendanceIdempotency::key('portal_absence:'.$redemptionReference);
+        $this->repository->begin();
+        try{
+            [$case,$lesson,$version,$created]=$this->lockOccurrence($subject->lessonId,$subject->scheduleVersionId);
+            if((int)$case->student_id!==$subject->studentId)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+            if((string)$case->state==='settled')throw new \InvalidArgumentException('portal_absence_outcome_final');
+            if(gmdate('Y-m-d H:i:s')>=(string)$case->window_end_utc)throw new \InvalidArgumentException('portal_absence_window_closed');
+            if($this->isAfterTermClosure((int)$case->term_id))throw new \InvalidArgumentException('portal_absence_late_evidence');
+            global $wpdb;$p=$wpdb->prefix.'dzn_';
+            $cap=$wpdb->get_row($wpdb->prepare("SELECT c.* FROM {$p}portal_public_capabilities c INNER JOIN {$p}portal_public_action_events a ON a.id=c.consumed_action_event_id AND a.action_state='confirmed_submitting' WHERE c.id=%d AND c.lesson_id=%d AND c.schedule_version_id=%d AND c.purpose=%s AND c.generation=%d AND c.subject_student_id=%d AND c.state='consumed' FOR UPDATE",$subject->capabilityId,$subject->lessonId,$subject->scheduleVersionId,\Delnavazan\Platform\Portals\PortalRule::ABSENCE,$subject->generation,$subject->studentId));
+            if(!$cap||strtotime((string)$cap->expires_at)<=time())throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+            $studentLink=$wpdb->get_var($wpdb->prepare("SELECT id FROM {$p}student_principal_links WHERE student_id=%d AND status='active' AND revoked_at IS NULL LIMIT 1",$subject->studentId));
+            if(!$studentLink)throw new \InvalidArgumentException('portal_capability_binding_mismatch');
+            $payload=CanonicalAttendanceIdempotency::payload(array('operation'=>'submit_capability_claim','capability_id'=>$subject->capabilityId,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'generation'=>$subject->generation,'redemption_reference_digest'=>hash('sha256',$redemptionReference)));
+            if($winner=$this->repository->command($digest)){$replay=$this->replayCommand($winner,$payload,'submit_capability_claim');$this->repository->commit();return array_merge($replay,array('lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference)));}
+            $intent=array('source_kind'=>'student','evidence_kind'=>'advance_absence_claim','provider_code'=>null,'provider_account_digest'=>null,'provider_session_digest'=>null,'provider_event_key_digest'=>null,'provider_payload_digest'=>null,'participant_role'=>null,'participant_identity_state'=>null,'resolved_student_id'=>null,'resolved_teacher_id'=>null,'verification_state'=>'unverified','join_at_utc'=>null,'leave_at_utc'=>null,'observed_at'=>gmdate('Y-m-d H:i:s'),'provenance_digest'=>null,'reason_code'=>'public_capability_absence','evidence_reference_digest'=>CanonicalAttendanceIdempotency::evidence($redemptionReference),'attribution'=>'public_capability_on_behalf');
+            $evidenceId=$this->insertEvidence($case,$lesson,$intent,gmdate('Y-m-d H:i:s'),$this->actor());
+            if(!CanonicalAttendanceValidator::validForCase((int)$case->id,$this->repository,$this->lessons,$this->schedules,true))throw new \InvalidArgumentException('canonical_attendance_integrity_conflict');
+            $this->insertCommand($digest,$payload,'submit_capability_claim',array('lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId),$case,$evidenceId,'submitted',null,gmdate('Y-m-d H:i:s'),$this->actor());
+            $this->repository->commit();
+            return array('case_id'=>(int)$case->id,'evidence_id'=>$evidenceId,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference),'state'=>'submitted');
+        }catch(\Throwable $e){
+            $this->repository->rollback();
+            if($this->repository->duplicate($e)==='command_key_digest'&&($winner=$this->repository->command($digest))){
+                $payload=CanonicalAttendanceIdempotency::payload(array('operation'=>'submit_capability_claim','capability_id'=>$subject->capabilityId,'lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'generation'=>$subject->generation,'redemption_reference_digest'=>hash('sha256',$redemptionReference)));
+                $replay=$this->replayCommand($winner,$payload,'submit_capability_claim');
+                return array_merge($replay,array('lesson_id'=>$subject->lessonId,'schedule_version_id'=>$subject->scheduleVersionId,'student_id'=>$subject->studentId,'attribution'=>'public_capability_on_behalf','redemption_reference_digest'=>hash('sha256',$redemptionReference)));
+            }
+            throw $e;
+        }
     }
 
     /** Administrative adjudication: the only Phase-P path allowed to change effective canonical truth. */

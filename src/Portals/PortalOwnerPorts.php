@@ -29,9 +29,11 @@ final class PortalOwnerPorts {
 final class PortalAccessPolicy {
     public static function assertObject(string $surface,string $kind,int $targetId,array $principal,object $port):array {
         try {
-            if($principal['kind']==='student'&&$kind==='lesson') return $port->forLesson($targetId,(int)$principal['id'],0);
-            if($principal['kind']==='teacher'&&$kind==='assignment') return $port->forTeacher((int)$principal['id'],$targetId);
-            throw new \InvalidArgumentException('portal_object_not_portal_visible');
+            $allowed=($principal['kind']==='student'&&$kind==='lesson')||($principal['kind']==='teacher'&&$kind==='assignment');
+            if(!$allowed)throw new \InvalidArgumentException('portal_object_not_portal_visible');
+            $subject=new AuthenticatedPortalReadSubject($surface,(int)get_current_user_id(),(string)$principal['kind'],(int)$principal['id']);
+            if($kind==='lesson')return $port->forSubject($subject,$targetId);
+            return $port->forSubject($subject,$targetId);
         } catch(\Throwable $e) { self::deny($surface,$kind,$targetId,$principal,(string)$e->getMessage()); throw $e; }
     }
     private static function deny(string $surface,string $kind,int $target,array $principal,string $reason):void {
