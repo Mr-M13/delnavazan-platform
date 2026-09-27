@@ -4,7 +4,9 @@
  *
  * WordPress-free: it reads the tree and proves the three reviewed corrections — the Schema-033
  * migration is locked, a reconciliation run is persisted, and an exact operator replay converges —
- * so a later edit cannot silently reopen any of them.
+ * plus the two round-3 corrections — the operator payload binds the evidence-reference digest it
+ * stores, and a reconciliation run and its required findings commit in one transaction — so a later
+ * edit cannot silently reopen any of them.
  */
 $root=dirname(__DIR__);
 $migrator=file_get_contents($root.'/src/Core/Infrastructure/Migration/Migrator.php');
@@ -40,5 +42,23 @@ dzn_readiness_assert(substr_count($service,'WHERE command_key_digest=%s')>=2,'A 
 dzn_readiness_assert(str_contains($service,'Core operator evidence replay conflict'),'A same-key/different-payload replay must fail closed');
 $replay=strpos($service,'private static function replayedCommandId');
 dzn_readiness_assert($replay!==false&&strpos($service,'self::replayedCommandId($existing,$payloadDigest)')!==false,'Both replay paths must converge through the recorded row');
+
+// §4 The operator idempotency payload binds the evidence-reference digest the row stores.
+dzn_readiness_assert(str_contains($service,"\$evidenceReferenceDigest=hash('sha256',\$evidenceReference)"),'The evidence reference must be digested once, from the value the row stores');
+dzn_readiness_assert(str_contains($service,"'evidence_reference_digest'=>\$evidenceReferenceDigest,'result'=>\$result"),'The digested evidence reference must be part of the idempotency payload');
+dzn_readiness_assert(str_contains($service,"'evidence_reference_digest'=>\$evidenceReferenceDigest,'reason_code'=>\$reason"),'The stored evidence-reference digest must be the same value the payload bound');
+$bound=strpos($service,"'evidence_reference_digest'=>\$evidenceReferenceDigest,'result'=>\$result");
+$digested=strpos($service,'$payloadDigest=hash(');
+dzn_readiness_assert($bound!==false&&$digested!==false&&$bound<$digested,'The evidence-reference digest must be bound before the payload digest is computed');
+
+// §5 A reconciliation run and its required findings are one transaction.
+dzn_readiness_assert(substr_count($service,'START TRANSACTION')===1&&substr_count($service,'ROLLBACK')===1,'The run row and its findings must share exactly one transaction');
+$opened=strpos($service,'START TRANSACTION');
+$insertRun=strpos($service,'$wpdb->insert($runs,');
+$findings=strpos($service,'self::recordFindings($runId,');
+$committed=strpos($service,"'COMMIT'");
+dzn_readiness_assert($opened!==false&&$insertRun!==false&&$findings!==false&&$committed!==false,'The reconciliation writes must open a transaction and commit it');
+dzn_readiness_assert($opened<$insertRun&&$insertRun<$findings&&$findings<$committed,'The run row and all of its required findings must be written before COMMIT');
+dzn_readiness_assert(str_contains($service,'}catch(\Throwable $e){$wpdb->query(')&&str_contains($service,');throw $e;}'),'A failed run or finding insert must roll the transaction back and rethrow');
 
 echo "Core-dataset readiness contract passed\n";

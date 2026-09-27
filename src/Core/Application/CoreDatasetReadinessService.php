@@ -12,7 +12,9 @@ final class CoreDatasetReadinessService {
      *
      * The projection itself writes no Core row and repairs no mismatch: the run row, and on a mismatch its
      * deterministic findings, are the only writes, so the recorded reconciliation digest, result, actor and
-     * mismatch evidence survive the request that produced them.
+     * mismatch evidence survive the request that produced them. Those writes are one transaction — opened
+     * before the run row is inserted and held until every required finding is persisted — so a mismatched
+     * run never becomes durable without its findings: any failed insert rolls the whole run back.
      */
     public function reconcile(string $scope, int $expectedCount, string $expectedDigest): array {
         if (!in_array($scope,self::SCOPES,true) || $expectedCount < 0 || !preg_match('/^[a-f0-9]{64}$/D',$expectedDigest)) throw new \InvalidArgumentException('Bounded Core reconciliation input required');
@@ -22,13 +24,18 @@ final class CoreDatasetReadinessService {
         $actualCount=count($rows); $actualDigest=hash('sha256',wp_json_encode($rows,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));
         $match=$expectedCount===$actualCount && hash_equals($expectedDigest,$actualDigest); $completedAt=gmdate('Y-m-d H:i:s');
         $runs=$wpdb->prefix.'dzn_core_dataset_reconciliation_runs';
-        if($wpdb->insert($runs,array('uid'=>Identifier::uid(),'scope_kind'=>$scope,'expected_digest'=>$expectedDigest,'actual_digest'=>$actualDigest,'expected_count'=>$expectedCount,'actual_count'=>$actualCount,'match_state'=>$match?'matched':'mismatched','started_at'=>$startedAt,'completed_at'=>$completedAt,'recorded_by'=>$actor,'created_at'=>$completedAt,'created_by'=>$actor))===false)throw new \RuntimeException('Core reconciliation persistence failed: '.$wpdb->last_error);
-        $runId=(int)$wpdb->insert_id; self::recordFindings($runId,$scope,$expectedCount,$actualCount,$expectedDigest,$actualDigest,$match,$completedAt,$actor);
+        if($wpdb->query('START TRANSACTION')===false)throw new \RuntimeException('Core reconciliation persistence failed: '.$wpdb->last_error);
+        try{
+            if($wpdb->insert($runs,array('uid'=>Identifier::uid(),'scope_kind'=>$scope,'expected_digest'=>$expectedDigest,'actual_digest'=>$actualDigest,'expected_count'=>$expectedCount,'actual_count'=>$actualCount,'match_state'=>$match?'matched':'mismatched','started_at'=>$startedAt,'completed_at'=>$completedAt,'recorded_by'=>$actor,'created_at'=>$completedAt,'created_by'=>$actor))===false)throw new \RuntimeException('Core reconciliation persistence failed: '.$wpdb->last_error);
+            $runId=(int)$wpdb->insert_id; self::recordFindings($runId,$scope,$expectedCount,$actualCount,$expectedDigest,$actualDigest,$match,$completedAt,$actor);
+            if($wpdb->query('COMMIT')===false)throw new \RuntimeException('Core reconciliation persistence failed: '.$wpdb->last_error);
+        }catch(\Throwable $e){$wpdb->query('ROLLBACK');throw $e;}
         return array('run_id'=>$runId,'scope'=>$scope,'expected_count'=>$expectedCount,'actual_count'=>$actualCount,'expected_digest'=>$expectedDigest,'actual_digest'=>$actualDigest,'match'=>$match);
     }
     /**
      * The declared mismatch findings for one failed run, in a fixed order and with digests only, so a
      * mismatch always records the same bounded evidence and a matched run records no finding at all.
+     * Runs inside the caller's reconciliation transaction, so the run row and its findings commit together.
      */
     private static function recordFindings(int $runId,string $scope,int $expectedCount,int $actualCount,string $expectedDigest,string $actualDigest,bool $match,string $now,int $actor): void {
         if($match)return; global $wpdb; $table=$wpdb->prefix.'dzn_core_dataset_reconciliation_findings'; $findings=array();
@@ -38,10 +45,10 @@ final class CoreDatasetReadinessService {
     }
     public function recordOperation(string $operation,string $targetKind,?int $targetId,string $reason,string $evidenceChannel,string $evidenceReference,string $key,array $result): int {
         $actor=get_current_user_id(); if($actor<1) throw new \RuntimeException('Core readiness actor unavailable'); if($operation===''||$targetKind===''||$reason===''||$evidenceChannel===''||trim($evidenceReference)==='') throw new \InvalidArgumentException('Complete operator evidence required'); if(strlen(trim($key))<24) throw new \InvalidArgumentException('Operator idempotency key required');
-        global $wpdb; $table=$wpdb->prefix.'dzn_core_dataset_operator_commands'; $now=gmdate('Y-m-d H:i:s'); $payload=array('operation'=>$operation,'target_kind'=>$targetKind,'target_id'=>$targetId,'reason_code'=>$reason,'evidence_channel'=>$evidenceChannel,'result'=>$result); $keyDigest=hash_hmac('sha256',trim($key),wp_salt('dzn_core_dataset_readiness')); $payloadDigest=hash('sha256',wp_json_encode($payload,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));
+        global $wpdb; $table=$wpdb->prefix.'dzn_core_dataset_operator_commands'; $now=gmdate('Y-m-d H:i:s'); $evidenceReferenceDigest=hash('sha256',$evidenceReference); $payload=array('operation'=>$operation,'target_kind'=>$targetKind,'target_id'=>$targetId,'reason_code'=>$reason,'evidence_channel'=>$evidenceChannel,'evidence_reference_digest'=>$evidenceReferenceDigest,'result'=>$result); $keyDigest=hash_hmac('sha256',trim($key),wp_salt('dzn_core_dataset_readiness')); $payloadDigest=hash('sha256',wp_json_encode($payload,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));
         $existing=$wpdb->get_row($wpdb->prepare("SELECT id,command_payload_digest FROM {$table} WHERE command_key_digest=%s",$keyDigest));
         if($existing)return self::replayedCommandId($existing,$payloadDigest);
-        $ok=$wpdb->insert($table,array('uid'=>Identifier::uid(),'operation'=>$operation,'command_key_digest'=>$keyDigest,'command_payload_digest'=>$payloadDigest,'target_kind'=>$targetKind,'target_id'=>$targetId,'result_state'=>(string)($result['state']??'recorded'),'result_id'=>isset($result['id'])?(int)$result['id']:null,'evidence_channel'=>$evidenceChannel,'evidence_reference_digest'=>hash('sha256',$evidenceReference),'reason_code'=>$reason,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
+        $ok=$wpdb->insert($table,array('uid'=>Identifier::uid(),'operation'=>$operation,'command_key_digest'=>$keyDigest,'command_payload_digest'=>$payloadDigest,'target_kind'=>$targetKind,'target_id'=>$targetId,'result_state'=>(string)($result['state']??'recorded'),'result_id'=>isset($result['id'])?(int)$result['id']:null,'evidence_channel'=>$evidenceChannel,'evidence_reference_digest'=>$evidenceReferenceDigest,'reason_code'=>$reason,'recorded_at'=>$now,'recorded_by'=>$actor,'created_at'=>$now,'created_by'=>$actor));
         if($ok===false){
             $existing=$wpdb->get_row($wpdb->prepare("SELECT id,command_payload_digest FROM {$table} WHERE command_key_digest=%s",$keyDigest));
             if($existing)return self::replayedCommandId($existing,$payloadDigest);
@@ -51,7 +58,9 @@ final class CoreDatasetReadinessService {
     }
     /**
      * An exact replay of a completed readiness operation converges on the recorded row rather than
-     * failing on the unique command key; only a same-key/different-payload replay fails closed.
+     * failing on the unique command key; only a same-key/different-payload replay fails closed. The
+     * payload digest binds the evidence-reference digest the row stores, so replaying a key against a
+     * different operator evidence reference is a conflicting payload and is refused.
      */
     private static function replayedCommandId(object $existing,string $payloadDigest): int {
         if($existing->command_payload_digest===null||!hash_equals((string)$existing->command_payload_digest,$payloadDigest))throw new \RuntimeException('Core operator evidence replay conflict');
