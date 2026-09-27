@@ -23,7 +23,10 @@ $concurrency=file_get_contents($root.'/tests/phase-2a2r2-concurrency-runner.sh')
 $phaseR2=$rule.$support.$idempotency.$enrol.$cycle.$collection.$recovery.$refund.$protection.$read.$integrity;
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<26)throw new RuntimeException('Missing Phase R2 schema identity');
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r2-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R2 build identity');
+// The package build identity is monotonic, exactly as the R1 suite states it and as every later phase
+// suite already asserts: R2's identity must still be recognisable in the bootstrap while any additive
+// descendant phase (for example S) may stamp a later one of the same canonical shape.
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2[a-z0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R2 build identity');
 
 // Migration, storage, verifier wiring and capabilities.
 foreach(array(
@@ -40,7 +43,11 @@ foreach(array(
 if(!str_contains($migration,"if(\$id==='026_renewal_recurring_enrolment_authority')self::verify_renewal_recurring_enrolment_schema();"))throw new RuntimeException('Migration 026 must invoke the Phase R2 schema verifier before it is recorded');
 if(substr_count($migration,'self::verify_renewal_recurring_enrolment_schema();')<3)throw new RuntimeException('Phase R2 verifier must run after migration 026, on current-schema verification and before schema activation');
 if(!str_contains($migration,"in_array( '026_renewal_recurring_enrolment_authority', (array) get_option( self::COMPLETED, array() ), true )"))throw new RuntimeException('Retained-026 pre-activation verification is missing');
-if(!str_contains($migration,"'026_renewal_recurring_enrolment_authority' )"))throw new RuntimeException('Phase R2 migration must be listed as required');
+// The required list is asserted over the list itself, so an additive descendant phase may append its own
+// migration to the same array without invalidating R2's assertion about its own entry.
+$requiredStart=strpos($migration,'$required = array(');
+$requiredList=substr($migration,$requiredStart,strpos($migration,');',$requiredStart)-$requiredStart);
+if($requiredStart===false||!str_contains($requiredList,"'026_renewal_recurring_enrolment_authority'"))throw new RuntimeException('Phase R2 migration must be listed as required');
 $install=substr($migration,strpos($migration,'private static function install_renewal_recurring_enrolment_authority'),strpos($migration,'private static function verify_renewal_recurring_enrolment_schema')-strpos($migration,'private static function install_renewal_recurring_enrolment_authority'));
 if(str_contains($install,'UPDATE ')||str_contains($install,'INSERT INTO'))throw new RuntimeException('Phase R2 migration must be additive only');
 if(stripos($install,'stripe')!==false||stripos($install,'google')!==false||stripos($install,'webhook')!==false)throw new RuntimeException('Phase R2 storage must stay provider-neutral');
@@ -170,7 +177,13 @@ foreach(array('recurring_enrolment','renewal_cycle','collection_intent','recover
 if(!str_contains($cycle,'resolveCycleMode')||!str_contains($cycle,'recurring_collection_mode_conflict'))throw new RuntimeException('A renewal cycle must snapshot the locked recurring-enrolment collection mode and refuse a conflicting input');
 if(!str_contains($cycle,'enrolment($recurringEnrolmentId,true)'))throw new RuntimeException('The cycle mode must be derived from the locked recurring enrolment');
 if(!str_contains($cycle,'public static function automaticChargeAt'))throw new RuntimeException('The charge instant must have one shared derivation seam');
-foreach(array('collection_charge_time_not_authoritative','collection_intent_kind_conflict','assertCycleCollection','RenewalCycleService::automaticChargeAt') as $needle) if(!str_contains($collection,$needle))throw new RuntimeException('The collection intent authority must derive its kind and charge instant: '.$needle);
+foreach(array('collection_charge_time_not_authoritative','collection_intent_kind_conflict','assertCycleCollection','automatic_charge_at') as $needle) if(!str_contains($collection,$needle))throw new RuntimeException('The collection intent authority must derive its kind and read its charge instant: '.$needle);
+// §6.2.4(b)(4) (R2 amendment): the collection side reads the instant the cycle persisted when it
+// announced the advance notice. A second derivation from the current lead-time policy would let the
+// charged instant diverge from the announced one, so the seam is removed rather than merely unused.
+if(str_contains($collection,'automaticChargeAt'))throw new RuntimeException('The collection side must read the persisted tier-F instant instead of re-deriving it');
+if(!str_contains($cycle,'\'automatic_charge_at\'=>$chargeAt'))throw new RuntimeException('The cycle-open transaction must persist the announced instant durably');
+if(!str_contains($cycle,'$mode===\'manual\'?\'MANUAL_RENEWAL_PAYMENT_REQUIRED\':null'))throw new RuntimeException('An automatic require_payment transition must publish no second advance notice');
 if(!str_contains($collection,"!=='payment_required'")||!str_contains($collection,'invalid_renewal_cycle_state'))throw new RuntimeException('A collection intent may only open on a live payment-required cycle');
 // §5.5: a review records matching authoritative refund evidence, and never an unrepresented reversal.
 foreach(array('reversal_evidence_not_supported','refund_review_amount_conflict','evidence_kind','processing_state') as $needle) if(!str_contains($refund,$needle))throw new RuntimeException('A refund review must prove the authoritative evidence provenance: '.$needle);

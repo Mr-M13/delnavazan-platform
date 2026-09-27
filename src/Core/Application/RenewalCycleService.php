@@ -45,7 +45,11 @@ final class RenewalCycleService {
                 'uid'=>Identifier::uid(),'recurring_enrolment_id'=>$recurringEnrolmentId,'sequence'=>$sequence,
                 'source_term_id'=>$sourceTermId,'next_term_id'=>null,'collection_mode'=>$mode,
                 'currency'=>$facts['currency'],'amount_minor'=>$facts['amount_minor'],
-                'boundary_derived_at'=>$facts['boundary_derived_at'],'guarantee_deadline_at'=>$facts['guarantee_deadline_at'],
+                'boundary_derived_at'=>$facts['boundary_derived_at'],
+                // §6.2.4(a): the announced instant is written once, in the transaction that commits the
+                // cycle's own `opened` fact, so it is a durable subject fact rather than a later
+                // recomputation. `automatic_charge_at` is never rewritten after this insert.
+                'automatic_charge_at'=>$chargeAt,'guarantee_deadline_at'=>$facts['guarantee_deadline_at'],
                 'state'=>'pending','renewal_cycle_version'=>1,'created_at'=>$now,'updated_at'=>$now,'created_by'=>$actor,'updated_by'=>$actor,
             ));
             $this->repository->insertEvent(array(
@@ -59,7 +63,9 @@ final class RenewalCycleService {
                 'result_state'=>'pending','result_id'=>$id,'created_at'=>$now,'created_by'=>$actor,
             ));
             // An automatic-renewal notice is an advance notice: with the charge lead time unset there
-            // is no advance instant to announce, so the intent stays unrecorded (safe default).
+            // is no advance instant to announce, so the intent stays unrecorded (safe default). This is
+            // the *only* publication site of `AUTOMATIC_RENEWAL_UPCOMING` (§6.2.4(b)(3)/(b)(6)): the
+            // durable intent name identifies this one bound `opened` fact, never a later transition.
             if($chargeAt!==null)RecurringSupport::publishIntent('renewal_cycle',$id,'AUTOMATIC_RENEWAL_UPCOMING',$actor);
             RecurringSupport::hook('dzn_phase_2a2r2_after_cycle_event_insert','open_cycle',$id);
             $this->repository->commit();
@@ -273,7 +279,13 @@ final class RenewalCycleService {
     private function nextCycleSequence(int $recurringId):int{global $wpdb;$p=$wpdb->prefix.'dzn_';return (int)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(MAX(sequence),0)+1 FROM {$p}renewal_cycles WHERE recurring_enrolment_id=%d",$recurringId));}
 
     private function intentForTransition(string $operation,string $mode):?string{
-        if($operation==='require_payment')return $mode==='automatic'?'AUTOMATIC_RENEWAL_UPCOMING':'MANUAL_RENEWAL_PAYMENT_REQUIRED';
+        // §6.2.4(b)(6): `AUTOMATIC_RENEWAL_UPCOMING` is bound to the cycle-open `opened` fact alone, and
+        // the seam carries aggregate type, aggregate id and intent name only — never the originating
+        // event. Publishing the same intent name from `require_payment` in `automatic` mode would
+        // therefore add a second candidate bound fact the durable evidence cannot tell apart, so an
+        // automatic `require_payment` transition publishes no advance notice at all. The manual
+        // publication is unchanged: that intent is bound to its own `payment_required` event.
+        if($operation==='require_payment')return $mode==='manual'?'MANUAL_RENEWAL_PAYMENT_REQUIRED':null;
         if($operation==='lapse')return 'TERM_LAPSED';
         return null;
     }
@@ -363,9 +375,12 @@ final class RenewalCycleService {
      * `AUTOMATIC_RENEWAL_CHARGE_LEAD_TIME` is an unresolved product decision: while it is unset no
      * advance charge instant exists and the automatic-charge date stays NULL.
      *
-     * This is the single derivation seam for an automatic charge instant: both the renewal cycle and
-     * the collection intent read it, so no caller can assert a charge time of its own while the
-     * lead-time policy is unset (or record one that disagrees with the analysed boundary).
+     * This is the *write-time* resolution seam for an automatic charge instant, used exactly once: by
+     * `openCycle()`, which persists the resolved value as the cycle's durable `automatic_charge_at`
+     * (§6.2.4(a)). The collection side never calls it again — `CollectionIntentService::open()` reads
+     * the persisted column — so an announced instant and a charged instant can no longer diverge after
+     * a policy version. No caller can assert a charge time of its own while the lead-time policy is
+     * unset (or record one that disagrees with the analysed boundary).
      */
     public static function automaticChargeAt(string $mode,string $boundary):?string{
         if($mode!=='automatic')return null;

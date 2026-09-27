@@ -3,6 +3,366 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-S — Canonical Notification & Communications Authority — candidate, unmerged — 2026-09-24
+
+Schema 32 / migration `032_notification_communications_authority` / build
+`phase2a2s-notification-communications-authority-20260924.1`. Additive only: it extends the shared
+`platform_outbox` seam and adds the S-owned notification storage, and preserves every Phase-1/R1/R2 row.
+
+### Implementation correction round (independent review of candidate `a35d4f4`)
+
+Five blocking findings were corrected in the product code; the schema identity, table count, migration
+name and build identity are unchanged and no merge or deploy is involved.
+
+- The dispatch claim now normalizes its evidence envelope and writes it on every history row it appends, so
+  a lease can actually be acquired (`claim_lease` no longer passes `null` to `event_row`).
+- The claim path re-evaluates the complete frozen eligibility set — subject, recipient, consent, guardian
+  authority and the active suppression, all resolved through their own read sources — proves the frozen
+  rule set against its digest, records the bound-evidence digest, and closes a no-longer-eligible
+  notification in its controlled terminal state without a lease. `re_evaluate_eligibility` runs the same
+  guard, and `hand_off` performs a full successful re-evaluation as an unavoidable prerequisite.
+- The claim set requires the derived window to be open, and each claim pass first expires overdue queued
+  work in one transaction per row (`expired`/`retry_window_exhausted`, outbox row closed in place), so a
+  notification can never be sent outside its mandatory window.
+- One shared aggregate verification re-derives the persisted schedule and identity, checks the outbox
+  mirror, and proves every closed attempt's closure partition and persisted retry schedule; it now runs in
+  `NotificationReadService`, `NotificationAttemptReadService`, the dispatch claim path and
+  `verify_notification_communications_schema`.
+- Observation resolves the version's active template version, freezes the immutable rendered-parameter
+  snapshot in the observation transaction (failing closed with `template_variable_mismatch` /
+  `envelope_decrypt_failure`), persists both `template_version_id` and `rendered_snapshot_id`, and
+  hand-off builds its channel-neutral command from that frozen snapshot.
+
+### Implementation correction round 2 (independent review of candidate `9dabd56`)
+
+Four blocking findings were corrected in the product code; the schema identity, table count and build
+identity are unchanged, the only schema addition is one nullable column inside migration 032, and no merge
+or deploy is involved.
+
+- The transport command is a strict allowlist: `NotificationDispatchService::authorisedCommand()` takes no
+  caller input and returns exactly the six frozen fields — `notification_key_digest`, `attempt_sequence`,
+  `audience`, `template_version_id`, `variable_codes` and the decrypted parameter map — each read from the
+  persisted aggregate and its proved snapshot. The merge of caller input and the post-hoc `unset` loop are
+  gone, so no raw payload, provider-specific field or operator envelope can reach
+  `NotificationTransportPort`.
+- The claim proves the aggregate under its own locks: `claim_lease()` now runs the new `aggregateGuard()`
+  while the notification and outbox rows are locked and before any eligibility verdict or lease, re-deriving
+  the frozen composition and policy, the persisted tier-F instants, the frozen identity and the attempt
+  history and passing them to `NotificationIntegrity::aggregateIntegrity()`. A corrupted schedule,
+  identity, mirror or prior closure refuses the claim whole.
+- An attempt that is already open when the dispatch-time re-evaluation refuses the notification now closes
+  as its own audited fourth closure class, `eligibility_abort` (a correction-round addition to the §14
+  diagnostic vocabulary, recorded here with its `eligibility_abort_invalid` refusal code): it carries the refusal code identically on
+  the attempt (`outcome_code`) and the notification (`failure_reason_code`), closes the notification in the
+  controlled state that code maps to (one shared `NotificationRule::controlledState()`), appends its own
+  `failed` attempt event, derives and persists no retry schedule and re-arms nothing, so it is never
+  represented as — or rejected as — a retry closure. `NotificationIntegrity::closureIntegrity()` gained the
+  matching partition and the `eligibility_abort_invalid` diagnostic, and `FAILURE_CLASSES` stays the closed
+  caller-declarable vocabulary so only the refusal path can write the abort class.
+- The canonical rendered-template variable contract is now persisted and proved:
+  `notification_template_versions.variable_contract` (nullable `varchar(191)`) holds the sorted,
+  deduplicated allowlisted codes as comma-separated text, with the digest and required count *derived* from
+  exactly that text at registration; `NotificationIntegrity::variableContract()` /
+  `renderParameters()` / `renderedSnapshot()` require the declared code set, the encrypted parameter keys
+  and the canonical key-ordered `params_digest` to equal the contract exactly. Snapshot freeze, hand-off,
+  the template read seam and the schema verifier all enforce it, so a snapshot can no longer claim an
+  arbitrary required code set while encrypting a different or empty parameter map.
+
+Two coherence repairs accompany them: `NotificationRetry::exhaustionReasonCode()` is now the single
+mapping from an exhaustion gate to its closed reason code (both the closure path and lease-expiry recovery
+use it), and the static contract suite asserts the draft-only rule guard over the sources that perform the
+guarded write (the workflow service and its repository, per §6.2/§7.2) instead of the migration installer.
+
+### Implementation correction round 3 (independent review of candidate `902b060`)
+
+Three blocking findings were corrected in the product code; the schema identity, table count, migration
+name and build identity are unchanged, no schema object is added, and no merge or deploy is involved.
+
+- **Attempt transitions are enforced.** The hand-off is now a durable, idempotent reservation: `hand_off()`
+  commits the exact `leased → handed_off` transition plus its digest-only `hand_off` command row (guarded on
+  the persisted source state, on the outbox row carrying the *same* lease token and on a lease that has not
+  elapsed, under the §10 lock order aggregate → outbox row → attempt row) **before** it calls
+  `NotificationTransportPort`. A repeated hand-off of an already reserved attempt, and a replay of the same
+  key, both return the persisted reservation without a second port call; an elapsed lease is refused
+  outright because recovery owns it. `record_outcome` now admits an acknowledgement only from `handed_off`
+  and a closure only from an open (`leased`/`handed_off`) attempt, refusing anything else with
+  `notification_attempt_state_conflict`. `NotificationIntegrity::attemptHistoryIntegrity()` (new) proves
+  every persisted history — contiguity from attempt 1, the closed state vocabulary, a contiguous chain of
+  legal transitions ending on the persisted state, the open/closed marker agreeing with that state, at most
+  one open attempt and never an open attempt beside a terminal notification — reporting
+  `attempt_lifecycle_invalid`, and the shared aggregate verification runs it in every protected read, every
+  dispatch claim, the attempt read seam and the schema verifier.
+- **A terminal command resolves the live lease it finds.** `cancel`/`expire`/`suppress` now close the open
+  attempt inside their own transaction through a fifth, audited closure class: the attempt closes
+  `abandoned` with `failure_class = 'lease_cancelled'` and `outcome_code` equal to the terminal state the
+  command produced, appends its own attempt event, persists no retry schedule and re-arms nothing, while the
+  outbox row closes consistently. `closureIntegrity()` gained the matching partition and the
+  `lease_cancellation_invalid` refusal code, `notification_lifecycle` gained the `handed_off|abandoned` and
+  `dispatching|queued` transitions, `release_lease` now closes through the same bounded ceiling-first
+  two-gate path as every other non-terminal closure (it previously wrote an undeclared `abandoned` attempt
+  that no partition could judge), `erase_recipient` takes the root lock inside its own transaction, and a
+  terminal notification with an open attempt is refused by aggregate integrity. The claim guard also
+  re-validates `available_at`/`scheduled_for` under the lock, so a deferral or retry that moved the instant
+  can no longer be leased.
+- The §10 lock order is now uniform: `record_outcome` and `recover_expired_leases` previously locked the
+  attempt row first and the aggregate second, which inverted the fixed order every other path (claim,
+  hand-off reservation, terminal command, overdue expiry, erasure) already uses. Both now discover the ids
+  by an unlocked read and then lock aggregate → outbox row → attempt row, so a hand-off racing a closure on
+  one attempt can no longer deadlock, and the static contract suite asserts the order on both paths.
+- **The concurrency harness drives the complete §15 matrix.** The runner declares `MODES` in the contract's
+  own order and the setup, worker and verifier each implement every one of the fourteen modes
+  (`dispatch_vs_retry`, `lease_expiry_vs_handoff`, `retry_exhaustion_vs_recovery`,
+  `subject_transition_after_enqueue_vs_dispatch`, `policy_change_after_publication_vs_dispatch`,
+  `deferral_vs_claim`, `activation_vs_dispatch`, `competing_activation_same_intent`,
+  `rule_attach_vs_activation`, `suppress_vs_enqueue`, `cancel_vs_dispatch`, `delivery_vs_attempt_close`,
+  `erase_vs_dispatch`, `unrelated_notifications`); the runner is committed executable (`100755`) and the
+  static contract suite asserts the complete matrix, the executable bit and the new lifecycle vocabulary
+  and guards against the sources. Runtime coverage was added for the new rules (retry suite §11 — an
+  acknowledgement refused from `leased`, a repeated hand-off replaying without a second port call, and a
+`cancel` resolving a live lease to a clean protected read; corruption suite §5 — truncated chain,
+unreachable state and terminal-beside-open-attempt each failing closed with `attempt_lifecycle_invalid`
+and converging when restored).
+
+### Implementation correction round 4 (targeted correction of the preserved candidate `3f67d3d`)
+
+A targeted, additive correction on top of the preserved candidate. Schema 32 /
+`032_notification_communications_authority`, the eighteen tables, the migration name and the build identity
+are unchanged, and no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- The five blocking findings of the candidate's first independent review (`a35d4f4`) are re-verified as
+  already corrected in this candidate and are left unchanged: the claim normalizes its evidence envelope on
+  entry and writes that array on every history row it appends; the claim and hand-off paths resolve the
+  complete frozen eligibility set — subject, recipient, consent, guardian authority and the active
+  suppression, each through its own read source — under the guard, record the bound-evidence digest, close a
+  no-longer-eligible notification terminally without a lease, and make a successful re-evaluation an
+  unavoidable prerequisite to hand-off; the claim set requires an open derived window and every claim pass
+  expires overdue queued work in one transaction per row; and observation resolves the version's active
+  template version, freezes the immutable rendered-parameter snapshot in the observation transaction and
+  persists both `template_version_id` and `rendered_snapshot_id`.
+- **The persisted outbox mirror is proved by the shared aggregate verification on every protected read and in
+  the schema verifier.** `NotificationIntegrity::aggregateIntegrity()` now treats the mirror as part of the
+  proof instead of an optional extra: a notification that carries an `outbox_id` and is handed over without
+  its persisted row is refused whole with `schedule_derivation_divergence`, so no read path can skip the
+  mirror check. `NotificationAttemptReadService` resolves the notification's persisted `platform_outbox` row
+  and hands it to the shared verification (it previously passed `null`, so the attempt seam validated no
+  mirror), and `Migrator::verify_notification_authority_data()` hands each notification's persisted mirror
+  row to the same shared call in addition to its row-by-row mirror loop. The mirrored triple and the
+  `available_at` contract are therefore proved by one rule on the aggregate read, the attempt read, the
+  dispatch claim and schema verification.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts the unconditional mirror requirement and that the
+  attempt read seam and the schema verifier hand the persisted mirror to the shared check (never `null`);
+  `tests/phase-2a2s-corruption-runtime.php` §6 diverges a mirrored `scheduled_for`, proves the attempt read
+  seam refuses it with `schedule_derivation_divergence` through both of its projections, and proves the read
+  converges once the mirror is restored.
+
+### Implementation correction round 5 (independent review of failed candidate `aefe39a`, tree `0a519a7d`)
+
+The independent re-review of the previous correction candidate refused it with one blocking finding — the
+outbox identity was not verified. The schema identity, table count, migration name and build identity are
+unchanged, no schema object is added, and no merge, deploy, provider activation, external send, Amelia or
+Theme change is involved.
+
+- **The notification/outbox 1:1 relationship is now proved on both sides, not from the schedule alone.**
+  `NotificationIntegrity::outboxMirror()` compared only the mirrored triple and `available_at`, so a
+  notification whose `outbox_id` was NULL — or named a *different* valid/legacy row — was accepted whenever
+  the supplied row mirrored its schedule, even with another row pointing back at the aggregate. The shared
+  verification now refuses both halves of that split with `schedule_derivation_divergence` *before* it
+  proves anything about the row: the row must name the notification (`platform_outbox.notification_id`) and
+  the notification must name the row (`notifications.outbox_id`). Because that rule is the one every
+  protected read, the dispatch claim, the attempt read seam and the schema verifier run, no path can accept
+  a divergent reciprocal pointer.
+- **The schema verifier compares both pointers row by row.** `Migrator::verify_notification_authority_data()`
+  now selects `n.outbox_id` beside `o.id` and refuses any mirrored row whose notification does not point
+  back at it (`notification outbox pointer divergence`), a NULL aggregate pointer included, in addition to
+  handing each notification's persisted mirror to the same shared verification.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts both reciprocal checks on the shared rule and the
+  row-by-row schema comparison; `tests/phase-2a2s-corruption-runtime.php` §7 mutates either pointer — a
+  notification pointing at a different valid S-owned row, a NULL notification pointer, and an outbox pointer
+  that no longer names its notification — while every mirrored schedule value stays exactly what the
+  aggregate derived, and proves the aggregate read, the attempt read seam and the schema verifier each fail
+  closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
+  which its §5 assertion referenced without the import (a latent fatal in the suite itself).
+
+### Implementation correction round 9 (host review `CORRECTION ROUND 7`, failed candidate `465a708`, tree `766ef7b4`)
+
+The host review refused the candidate with one blocking finding: the notification-side retry-audit proof
+required the `retry_scheduled` row's predecessor in the `event_sequence`-ordered result set to be the
+`queued` row, but never required the pair's own sequences to be contiguous. The host ledger numbers this
+review correction round 7 of the current implementation attempt — the identical blocking finding was also
+returned as `CORRECTION ROUND 6` against this same failed candidate, and no candidate was produced in
+between — while this record's own sequence continues at 9. The schema identity, table count, migration name
+and build identity are unchanged, no schema object is added (the finding restates the retry-audit placement
+§7.3 and §9 already state, with §14's `attempt_lifecycle_invalid` diagnostic already naming that contiguous
+successor), and no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The notification-side retry audit row must be the numeric contiguous successor of its own `queued`
+  row, not merely the next row the ordering returned.** `NotificationIntegrity::retryEvidenceIntegrity()`
+  proved only that the preceding result-set row was `event_type = queued` with `to_state = queued` and that
+  the audit row itself restated `queued → queued`, so a forged re-arm pair whose sequences skip one —
+  `queued` at `Q`, `retry_scheduled` at `Q + 2`, with nothing between them — stayed adjacent in the
+  ordered read and passed every protected read and the schema verifier. The per-re-arm match now refuses
+  the row unless `(int) $event->event_sequence === (int) $previous->event_sequence + 1` beside the existing
+  predecessor, state, reason and digest proofs, so the pair is judged by its own sequence numbers and a
+  skipped sequence is refused whole with `attempt_lifecycle_invalid`.
+- Coverage: `tests/phase-2a2s-corruption-runtime.php` §9(h) renumbers the intact ceiling walk's first
+  re-arm audit row and every later notification-history row one higher, asserts the resulting `Q`/`Q + 2`
+  pair is still adjacent in the ordered read, proves the aggregate read, the attempt read seam and the
+  schema verifier each fail closed with `attempt_lifecycle_invalid`, then restores every sequence and
+  asserts the walk reads clean again. `tests/phase-2a2s-contract.php` §15 asserts the numeric-contiguity
+  source rule and every new runtime case label.
+- Verification available here: this correction environment provides no PHP or WordPress runtime, so the
+  runtime suites are updated and reviewed by source but were **not executed here**; no migration was
+  re-run and no schema object, identity or build changed.
+
+### Implementation correction round 8 (host review `CORRECTION ROUND 5`, failed candidate `52ebb18`, tree `e821b302`)
+
+The host review refused the candidate with two blocking findings in the shared integrity proofs. This is
+the same review the host ledger numbers correction round 5 of the current implementation attempt; this
+record's own sequence continues at 8. The schema identity, table count, migration name and build identity
+are unchanged, no schema object is added (the findings restate rules §6.6, §7.3 and §9 already state), and
+no merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The acknowledgement is now proved against the aggregate it produced, not only against its own row.**
+  The null-class branch of `NotificationIntegrity::closureIntegrity()` accepted a class-less `acknowledged`
+  attempt on its shape alone, so a forged attempt with `state`/`outcome_code = acknowledged`, no
+  `failure_class` and no retry columns passed even beside a `failed`, `expired`, `suppressed` or
+  `cancelled` notification — the outbox mirror constrains only the mirrored schedule, not the aggregate's
+  status, and a class-less attempt leaves no closure partition to judge — although §6.6 defines the
+  acknowledgement by its result: the port accepted the hand-off, so the notification it closes is
+  `dispatched`. The branch now refuses unless the notification's `state` is exactly `dispatched` **and** its
+  `failure_reason_code` is NULL, so an acknowledged-looking attempt beside a terminal status — or a
+  `dispatched` row that still carries a failure code — is refused whole with `attempt_lifecycle_invalid` on
+  every protected read, the dispatch claim, the attempt read seam and `verify_notification_communications_schema()`.
+- **The notification-side `retry_scheduled` evidence is proved per re-arm, in lifecycle order, not as an
+  unordered set.** `NotificationIntegrity::retryEvidenceIntegrity()` compared each audit row's digest
+  against a set of acceptable digests, so for two retryable re-arms exchanging their distinct digests
+  passed — both were expected, both preceding `queued` rows carried the same reason and the cardinality was
+  unchanged — and the method never checked the audit row's own `from_state`/`to_state`, although §9
+  requires each row to directly follow and restate the `queued` transition of its own re-arm. The expected
+  evidence is now built as one entry per re-arming closure, ordered by the re-arming attempt's
+  `attempt_sequence`, and the `retry_scheduled` rows are consumed in `event_sequence` order, so the *n*-th
+  row must carry exactly the *n*-th re-arm's digest and outcome code (a missing row, a stray row beyond the
+  expected count, or an exchanged pair is refused), and each row must be the contiguous immediate successor
+  of its own `queued` row while itself restating `queued → queued`.
+- Coverage: `tests/phase-2a2s-retry-runtime.php` §6 refuses the acknowledged attempt beside a `failed`, an
+  `expired` and a failure-coded `dispatched` notification; `tests/phase-2a2s-corruption-runtime.php` §9(b)
+  proves the forged acknowledgement pair end-to-end — a real acknowledgement whose notification is
+  rewritten to `failed`/`retry_exhausted` (and, separately, `expired`/`retry_window_exhausted` and a
+  `dispatched` row carrying a failure code) — fails the protected read **and** the schema verifier,
+  converging once the `dispatched` status is restored, while §9(g) exchanges the two re-arms' distinct
+  notification-side digests (refused) and rewrites the audit row's `from_state`, its `to_state` and its
+  preceding `queued` row's `to_state` in turn (each refused), converging once restored.
+  `tests/phase-2a2s-contract.php` §15 asserts every new source rule and every new runtime case label.
+- Verification available here: this correction environment provides no PHP or WordPress runtime, so the
+  runtime suites are updated and reviewed by source but were **not executed here**; no migration was
+  re-run and no schema object, identity or build changed.
+
+### Implementation correction round 7 (host review `CORRECTION ROUND 4`, failed candidate `8c83d2f`, tree `f2a0dee5`)
+
+The host review refused the candidate with three blocking findings in the shared integrity proofs. This is
+the same review the host ledger numbers correction round 4 of the current implementation attempt; this
+record's own sequence continues at 7. The schema identity, table count, migration name and build identity
+are unchanged, no schema object is added, and no merge, deploy, provider activation, external send, Amelia
+or Theme change is involved.
+
+- **The retry ceiling and the single live lease are proved, not asserted.** `NotificationIntegrity::
+  attemptHistoryIntegrity()` now validates each `attempt_sequence` against the frozen `retry_max_attempts` —
+  a persisted attempt above the ceiling is refused whole with `attempt_lifecycle_invalid` instead of being
+  read as a further ceiling closure — and counts the live leases, so exactly one attempt may be open and
+  only while the aggregate is `dispatching`. `closureIntegrity()` reads the same frozen ceiling and refuses
+  an above-ceiling row itself: the ceiling shape belongs to the sequence **at** the ceiling alone, so `>=`
+  is not a spelling of `==`.
+- **A null `failure_class` is now allowed only for the acknowledgement.** The class-less shape is scoped to
+  the closed `acknowledged` attempt carrying the shared acknowledgement outcome code
+  (`NotificationRule::ACKNOWLEDGED_OUTCOME`, now written by the acknowledgement path as well) with no
+  persisted retry schedule; a forged `failed`, `expired` or `abandoned` closure with a legal event chain is
+  refused with `attempt_lifecycle_invalid`, and no closure class may borrow the acknowledgement member.
+- **The digest-only `retry_scheduled` audit evidence is proved on both append-only histories.** The
+  attempt-side row must be the closing attempt's own last history row, its `reason_code` must be that
+  closure's outcome code and its `evidence_reference_digest` must be exactly the retry evidence of the
+  persisted quadruple; the new `NotificationIntegrity::retryEvidenceIntegrity()` proves the notification's
+  own `retry_scheduled` row — exactly one per re-arming attempt, directly after the `queued` row the same
+  re-arm appended, carrying the same evidence, and none where no schedule was derived.
+  `NotificationDispatchService` writes that row on both re-arm paths (the port-reported/defer closure and
+  the lease-expiry recovery) from one shared `retryEvidence()` derivation, in the same transaction as the
+  schedule, the transition and the outbox re-arm, and `retryScheduleIntegrity()` now reads the §9
+  derivation in both directions (a closure that re-arms must carry the quadruple that reproduces it; a
+  closure the derivation exhausts must carry none).
+- Coverage: `tests/phase-2a2s-corruption-runtime.php` §8 walks a legitimate three-attempt ceiling and
+  proves a forged `retry_max_attempts + 1` attempt — and a second open attempt beside a live lease — fail
+  closed through the aggregate read, the attempt read seam and the schema verifier while the intact walk
+  reads clean; §9 proves the three class-less closures, the removed/forged/reused retry evidence on either
+  history, the evidence injected beside the exhausted closure, the legitimate acknowledgement that still
+  reads clean, and a re-arm whose persisted quadruple disagrees with the derivation even when both evidence
+  rows were recomputed to match it. `tests/phase-2a2s-retry-runtime.php` §6 asserts the above-ceiling
+  refusal beside the passing ceiling shape and the three class-less refusals (its ceiling forgeries now sit
+  **at** the ceiling, so the ceiling rule — not the window's — judges them, matching §7.3's scoping of the
+  two diagnostics), and the concurrency verifier passes each raced notification's own frozen policy and
+  proves the notification-side evidence.
+- Verification available here: `tests/phase-2a2s-contract.php` §15 asserts every new source rule and every
+  new runtime case label. This correction environment provides no PHP or WordPress runtime, so the runtime
+  suites are updated and reviewed by source but were **not executed here**; no migration was re-run and no
+  schema object, identity or build changed.
+
+### Implementation correction round 6 (independent review of failed candidate `9fef9b9`, tree `301e359d`)
+
+The independent re-review of the previous correction candidate refused it with one blocking finding: a
+notification/outbox pair whose reciprocal pointers were **both** cleared was still accepted. The schema
+identity, table count, migration name and build identity are unchanged, no schema object is added, and no
+merge, deploy, provider activation, external send, Amelia or Theme change is involved.
+
+- **The mirror requirement is unconditional, so a pair cleared on both sides is refused.** The shared
+  `NotificationIntegrity::aggregateIntegrity()` refused an absent mirror row only when
+  `notifications.outbox_id` was non-null, so corruption that cleared *both* `notifications.outbox_id` and
+  the former `platform_outbox.notification_id` left nothing for either lookup to find and the notification
+  was read as an aggregate with no mirror to compare — violating §6.5's exact 1:1 relationship and the
+  fail-closed authority invariant. The rule now refuses **any** notification handed over without its
+  persisted mirror row (`schedule_derivation_divergence`), before the mirror proof, so the aggregate read,
+  the attempt read seam, the dispatch claim and schema verification all refuse that pair.
+- **The schema verifier states the same rule as a row-level anti-join.**
+  `Migrator::verify_notification_authority_data()` now runs
+  `notifications LEFT JOIN platform_outbox ON o.notification_id = n.id WHERE o.id IS NULL` and refuses any
+  S-owned notification with no mirror row (`notification without an outbox mirror:
+  schedule_derivation_divergence`) — the row its outbox loop can no longer see — in addition to the
+  reciprocal `n.outbox_id`/`o.id` comparison and the shared-call hand-over it already performed.
+- Coverage: `tests/phase-2a2s-contract.php` §14 asserts the unconditional requirement (and that a NULL
+  aggregate pointer can no longer be read as an acceptable missing mirror) and the anti-join;
+  `tests/phase-2a2s-corruption-runtime.php` §7(d) clears both pointers on a mirrored, leased pair, proves
+  the aggregate read, the attempt read seam (both projections) and the schema verifier each fail closed
+  while every mirrored schedule value stays untouched, and proves convergence once both pointers are
+  restored.
+
+- `platform_outbox` gains the additive dispatch representation — `notification_id` (unique), `workflow_key`,
+  `workflow_version`, `intent_key`, `audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`,
+  `lease_token_digest`, `failure_reason_code` — plus the `dispatch` and `intent_version` lookup indexes.
+  Every added column is nullable with no default, so the R2 insert-only publisher and the Phase-1
+  invitation delivery seam keep working unchanged and S never claims a row it does not own.
+- Eighteen S-owned tables: workflow identity, immutable versions with the `workflow_active`/`intent_active`
+  routing slots, draft-only frozen rule storage, digest-only commands, templates and their immutable
+  versions, rendered-parameter snapshots, the notification aggregate and its append-only history, the
+  attempt lifecycle with its persisted deterministic retry schedule, digest-only delivery facts, the
+  channel-neutral suppression register and the digest-only privacy tombstones.
+- `NotificationWorkflowService` freezes a version's complete required eligibility set, its closed §6.3
+  schedule composition, its mandatory expiry window and its narrow-only §9 retry policy at activation, and
+  arbitrates the single active version per consumed intent through the named routing slot.
+- `NotificationService` observes an R2 intent from the seam, freezes the §6.2.3 bound evidence and the
+  §6.2.4 tier-F instant, derives and mirrors the schedule, and closes an unavailable tier-F instant or an
+  unresolvable timezone basis terminally instead of scheduling one.
+- `NotificationDispatchService` leases through the existing `attempt_count` counter, hands off only through
+  the channel-neutral `NotificationTransportPort`, and closes every attempt through the ceiling-first
+  two-gate rule: ceiling exhaustion is `failed`/`retry_exhausted`, below-ceiling window exhaustion is
+  `expired`/`retry_window_exhausted`, and a `terminal` class closes terminal `failed` with its own
+  normalised reason code at every attempt sequence.
+- Retry scheduling is deterministic and keyed — the immutable notification identity, the attempt sequence
+  and the frozen parameters are the only inputs — and the base back-off is the §9 bounded recurrence, which
+  is the sole canonical semantics.
+- Bounded Phase 2A.2-R2 amendment (§6.2.4): `dzn_renewal_cycles.automatic_charge_at` is a durable,
+  immutable per-cycle fact written in the cycle-open transaction, `CollectionIntentService::open()` reads
+  that persisted column instead of re-deriving the instant from the current lead-time policy, and
+  `AUTOMATIC_RENEWAL_UPCOMING` is published from the cycle-open fact alone.
+- Provider-neutral and external-send-free: no transport binding, no credential, no provider template or
+  identifier, no raw provider payload, no provider call, no Amelia or Theme change, no merge, no deploy.
+
 ## Phase 2A.2-U — Finance, Payability, Effective-Dated Teacher Rates, Statements & Audited Corrections — candidate, unmerged — 2026-09-25
 
 Schema 30 / migration `030_finance_payability_rate_statement_authority` / build

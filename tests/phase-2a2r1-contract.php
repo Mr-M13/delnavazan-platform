@@ -36,8 +36,8 @@ $phaseR1Application=$rule.$money.$validator.$lineage.$commitment.$commandShape.$
 
 if(!preg_match("/DZN_PLATFORM_SCHEMA_VERSION', '([0-9]+)'/",$plugin,$schema)||(int)$schema[1]<25)throw new RuntimeException('Missing Phase R1 schema identity');
 // The package build identity is monotonic: R1's identity must still be recognisable in the
-// bootstrap while any additive descendant phase (for example R2) may stamp a later one.
-if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2r[0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
+// bootstrap while any additive descendant phase (for example R2 or S) may stamp a later one.
+if(!preg_match("/DZN_PLATFORM_BUILD_ID', 'phase2a2[a-z0-9]+-[a-z0-9-]+-[0-9]{8}\.[0-9]+'/",$plugin))throw new RuntimeException('Missing Phase R1 build identity');
 
 // Migration, storage, verifier wiring and capabilities.
 foreach(array(
