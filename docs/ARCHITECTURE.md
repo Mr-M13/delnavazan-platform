@@ -11,7 +11,7 @@
 > seams, not current REST endpoints. See [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md).
 > Earlier Schema-25/26 text below is retained as historical provenance.
 
-> **Phase 2A.2-R1 merged and closed (historical Schema 25, superseded by the Schema-31 current-state
+> **Phase 2A.2-R1 merged and closed (historical Schema 25, superseded by the Schema-33 current-state
 > override below); Phase 2A.2-R2 candidate (Schema 26) — not authoritative:** Phase 2A.2-R1 commercial purchase, funding and current-Term
 > capacity authority is merged and closed on `main` at
 > `f9df3bfb0fda79fba7dee916c4687464ee67d480` (Schema 25, migration
@@ -48,8 +48,9 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 
 > **Current-state override (2026-09-27):** Platform 0.1.0 local candidate is at **Schema 33**
 > after the Phase 2A.2-R2, V, T, U and W candidate trees, the historical additive Schema-032 Notifications S
-> re-land were materialised on top of the merged R1 (Schema 25) baseline; `main` / `origin/main` is at
-> `4ccd43c` and the package declares build `phase2a2s-notification-communications-authority-20260924.1`
+> re-land were materialised on top of the merged R1 (Schema 25) baseline; local `main` is at
+> `4ccd43c` atop `origin/main` at `6673e7b`, and the package declares build
+> `phase2a2s-notification-communications-authority-20260924.1`
 > (the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2`). Phases 2A.2-A through Q are complete, independently
 > reviewed where consequential, merged and closed; R1 is merged and closed; R2/V/T/U/W and the S
 > re-land are present in
