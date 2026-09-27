@@ -5,7 +5,9 @@
  * It locks the route from the registered readiness submenu through its pre-render POST hook,
  * operation-specific authorization and nonce, each existing authority wrapper, and the durable
  * CoreDatasetReadinessService receipt returned to the operator. It deliberately proves that no
- * new broad capability, REST route, provider path or correction-as-domain-command route is added.
+ * new broad capability, REST route, provider path or correction-as-domain-command route is added,
+ * and that the submenu itself is registered behind the actor's own narrow command capability rather
+ * than the unrelated diagnostics capability.
  */
 $root = dirname( __DIR__ );
 $controller = file_get_contents( $root . '/src/Admin/Controller/CoreDatasetReadinessController.php' );
@@ -35,6 +37,24 @@ dzn_core_operator_entrypoint_assert(
 dzn_core_operator_entrypoint_assert(
     ! str_contains( $controller, 'register_rest_route' ) && ! str_contains( $controller, 'admin_post_' ),
     'Core operator commands must not acquire a public REST or unaffiliated admin-post surface.'
+);
+// WordPress only registers a submenu page — and therefore its load-$hook handler — for a capability
+// the actor holds, so the entrypoint must be registered behind the actor's own narrow command
+// capability and never behind an unrelated read capability such as dzn_view_diagnostics.
+dzn_core_operator_entrypoint_assert(
+    ! str_contains( $controller, 'dzn_view_diagnostics' ),
+    'The Core operator entrypoint must not be gated by the unrelated diagnostics capability.'
+);
+dzn_core_operator_entrypoint_assert(
+    str_contains( $controller, "\$capability = self::entrypointCapability();" ) &&
+    str_contains( $controller, "if ( \$capability === null ) return;" ) &&
+    str_contains( $controller, "\$capability,\n            self::MENU_SLUG," ),
+    'The readiness submenu must be registered with a command capability the actor actually holds.'
+);
+dzn_core_operator_entrypoint_assert(
+    str_contains( $controller, 'foreach ( self::ACTIONS as $capability )' ) &&
+    str_contains( $controller, 'if ( current_user_can( $capability ) ) return $capability;' ),
+    'The entrypoint capability must be one of the exact command capabilities.'
 );
 
 // §2 The only reachable mutations map one-for-one to their pre-existing narrow Core capabilities.

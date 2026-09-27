@@ -4,7 +4,9 @@
  *
  * The fakes replace only the three existing authority boundaries and the append-only readiness
  * recorder. They prove a denied request cannot reach either writer, while an authorised, nonce-bound
- * request invokes the existing conversion authority and returns its durable operator receipt.
+ * request invokes the existing conversion authority and returns its durable operator receipt. They
+ * also reproduce WordPress' submenu-capability behaviour, so they prove the entrypoint registers for
+ * each exact narrow command capability on its own and never for the unrelated diagnostics capability.
  */
 namespace Delnavazan\Platform\Core\Application {
     final class EnrolmentConversionService {
@@ -50,6 +52,17 @@ namespace {
     function sanitize_key( mixed $value ): string { return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $value ) ); }
     function sanitize_text_field( mixed $value ): string { return trim( (string) $value ); }
     function absint( mixed $value ): int { return abs( (int) $value ); }
+    // WordPress registers a submenu page only for a capability the actor holds and returns false
+    // otherwise, which is why an actor without the page capability got neither the page nor its
+    // load-$hook handler.
+    function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, $callback = '', $position = null ): string|false {
+        if ( ! current_user_can( $capability ) ) return false;
+        $GLOBALS['dzn_core_operator_page_registrations'][] = array( $parent_slug, $capability, $menu_slug );
+        return $parent_slug . '_page_' . $menu_slug;
+    }
+    function add_action( string $hook_name, $callback, int $priority = 10, int $accepted_args = 1 ): void {
+        $GLOBALS['dzn_core_operator_action_registrations'][] = $hook_name;
+    }
 
     require dirname( __DIR__ ) . '/src/Admin/Controller/CoreDatasetReadinessController.php';
 
@@ -96,6 +109,37 @@ namespace {
         ) ),
         'A successful conversion must append the complete operator-entrypoint audit receipt after the authority result.'
     );
+
+    // The entrypoint itself registers for each exact command capability on its own, because WordPress
+    // only registers the submenu page and its load-$hook handler for a capability the actor holds.
+    $entrypoint_page = array( 'dzn-platform', null, 'dzn-core-dataset-readiness' );
+    foreach ( array( 'dzn_convert_service_arrangements_to_enrolments', 'dzn_manage_teacher_assignments', 'dzn_manage_canonical_lessons' ) as $command_capability ) {
+        $GLOBALS['dzn_core_operator_caps'] = array( $command_capability );
+        $GLOBALS['dzn_core_operator_page_registrations'] = array();
+        $GLOBALS['dzn_core_operator_action_registrations'] = array();
+        $controller::menu();
+        $entrypoint_page[1] = $command_capability;
+        dzn_core_operator_entrypoint_unit_assert(
+            $GLOBALS['dzn_core_operator_page_registrations'] === array( $entrypoint_page ),
+            'An actor holding only ' . $command_capability . ' must reach the readiness submenu behind exactly that capability.'
+        );
+        dzn_core_operator_entrypoint_unit_assert(
+            $GLOBALS['dzn_core_operator_action_registrations'] === array( 'load-dzn-platform_page_dzn-core-dataset-readiness' ),
+            'An actor holding only ' . $command_capability . ' must get the entrypoint pre-render load hook.'
+        );
+    }
+
+    // The unrelated diagnostics capability is neither required nor sufficient for the entrypoint.
+    foreach ( array( array( 'dzn_view_diagnostics' ), array() ) as $no_command_caps ) {
+        $GLOBALS['dzn_core_operator_caps'] = $no_command_caps;
+        $GLOBALS['dzn_core_operator_page_registrations'] = array();
+        $GLOBALS['dzn_core_operator_action_registrations'] = array();
+        $controller::menu();
+        dzn_core_operator_entrypoint_unit_assert(
+            $GLOBALS['dzn_core_operator_page_registrations'] === array() && $GLOBALS['dzn_core_operator_action_registrations'] === array(),
+            'An actor holding no Core operator command capability must get no entrypoint page and no POST hook.'
+        );
+    }
 
     echo "Core operator entrypoint unit passed\n";
 }

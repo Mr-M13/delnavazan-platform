@@ -24,6 +24,15 @@ authority's existing narrow capability:
 | Assign initial Teacher | `TeacherAssignmentService::assignInitial()` | `dzn_manage_teacher_assignments` | `initial_teacher_assignment` |
 | Issue standard canonical Lesson | `CanonicalLessonAuthorityService::createStandard()` | `dzn_manage_canonical_lessons` | `canonical_lesson_issuance` |
 
+The submenu is registered behind the actor's own exact command capability — the first of the three
+capabilities above that the actor holds — and never behind `dzn_view_diagnostics` or any other
+read capability. WordPress registers a submenu page together with its callback and its
+`$_registered_pages` entry only when the actor holds the registration capability, and otherwise
+records a no-privilege entry that denies the page, so an actor holding exactly one of the three
+documented command capabilities reaches this entrypoint while an actor holding none of them gets no
+entrypoint page and no POST hook at all. The unrelated diagnostics capability is therefore neither
+required nor sufficient to reach a Core operator command.
+
 The handler rejects an actor without the operation's exact capability with HTTP 403 before nonce
 verification or a domain call. The action-bound admin nonce is then verified before dispatch. The same
 capability is checked again by the wrapper and by its owning authority. On success the wrapper records a
@@ -78,3 +87,13 @@ Applied on top of the reviewed candidate `82ef727f46518a3ea9b327ebb3e0e813cb105b
 The candidate is additive: it adds only this record, and changes no source or test file. The reviewed commit stays an ancestor; nothing was reset, rebased, amended or force-pushed; and no PHP source file, test file, schema, migration, build identity, table, route, capability or reason code changed. No merge, push, deployment, provider call, credential use or cutover is performed or authorised.
 
 The one gate the review recorded as unmet is unchanged and is not closed by this round. `runtime/bin/run-pure-tests.sh` — which executes the WordPress-free contract guard and the projection-read failure-injection proof that guard embeds — could not run, because the prescribed cached `mariadb:11.4` image is unavailable and Docker access is denied. Executing that wrapper in a PHP-capable, Docker-capable environment remains the outstanding acceptance step.
+
+## Final-acceptance entrypoint correction round 2
+
+Applied on top of the reviewed-and-failed candidate `be7596d7b0094b68437474c4ee3da7a02d91d456` / tree `3ba735dca7a9eb1c5b6f8c469a99c5e5cf2657eb`, whose independent review returned one blocking finding. The candidate is additive: the reviewed commit stays an ancestor and nothing was reset, rebased, amended or force-pushed.
+
+1. **Reachable narrow entrypoint.** `CoreDatasetReadinessController::menu()` registered the readiness submenu behind `dzn_view_diagnostics`. WordPress' `add_submenu_page()` returns `false` and records a `$_wp_submenu_nopriv` entry for any capability the current actor does not hold, so an actor holding only one documented Core command capability received no submenu entry, no `$_registered_pages` entry and no `load-$hook` handler — `user_can_access_admin_page()` denied the page before the POST hook could run. That contradicted the invariant that every command is available behind its exact existing narrow capability. The submenu is now registered behind the actor's own exact command capability: `entrypointCapability()` returns the first of `dzn_convert_service_arrangements_to_enrolments`, `dzn_manage_teacher_assignments` and `dzn_manage_canonical_lessons` that the actor holds, the registration passes that capability, and an actor holding none of the three is registered no entrypoint at all. The `VIEW_CAPABILITY` constant and its `dzn_view_diagnostics` render gate are gone, so the controller no longer references the diagnostics capability anywhere. Nothing in `dispatchOperatorAction()` changed: each action still requires its exact capability (HTTP 403) before the action-bound nonce and before any authority or receipt writer runs, and the UI still shows each form only to an actor holding that command's capability.
+
+`tests/phase-opreadiness-core-operator-entrypoint-contract.php` §1 now also fails if the controller references `dzn_view_diagnostics`, if the submenu capability is not the actor-resolved command capability, or if that capability is not drawn from the action map. `tests/phase-opreadiness-core-operator-entrypoint-unit.php` gained WordPress-shape `add_submenu_page()`/`add_action()` fakes and proves behaviourally that the submenu and its `load-` hook register for each of the three command capabilities held on its own, and that neither the unrelated diagnostics capability alone nor an empty capability set produces any entrypoint page or POST hook. Both files remain WordPress-free and are executed by `runtime/bin/run-pure-tests.sh`.
+
+The candidate adds no REST route, provider call, credential use, data seed, deployment or cutover path, and grants no new capability. This implementation environment still has no host PHP and the sandbox denies the Docker socket, so the pure guard was not executed here; running it on a PHP-capable, Docker-capable host remains the outstanding acceptance step.

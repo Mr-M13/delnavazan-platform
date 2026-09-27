@@ -10,10 +10,11 @@ use Delnavazan\Platform\Core\Application\TeacherAssignmentService;
  * Authenticated Core-operator entrypoint. Canonical authorities remain the only domain writers.
  *
  * The readiness receipt supplements, but never substitutes for, the authority's own command and
- * lifecycle evidence. Each action is guarded by the same narrow capability as its authority.
+ * lifecycle evidence. The entrypoint is reachable by an actor holding any one of the exact narrow
+ * command capabilities below, and by no unrelated capability; each action is still guarded by the
+ * same narrow capability as its authority.
  */
 final class CoreDatasetReadinessController {
-    private const VIEW_CAPABILITY = 'dzn_view_diagnostics';
     private const MENU_SLUG = 'dzn-core-dataset-readiness';
     private const ACTIONS = array(
         'convert_enrolment' => 'dzn_convert_service_arrangements_to_enrolments',
@@ -26,16 +27,35 @@ final class CoreDatasetReadinessController {
     }
 
     public static function menu(): void {
+        // WordPress registers the submenu page, its callback and its $_registered_pages entry only for
+        // a capability the current actor holds, and records a no-privilege entry that denies the page
+        // otherwise. The page capability is therefore the actor's own exact command capability rather
+        // than the unrelated diagnostics capability, so an actor holding exactly one documented Core
+        // command reaches this entrypoint and an actor holding none of them gets no entrypoint at all.
+        $capability = self::entrypointCapability();
+        if ( $capability === null ) return;
         $hook = add_submenu_page(
             'dzn-platform',
             'Core dataset readiness',
             'Core dataset readiness',
-            self::VIEW_CAPABILITY,
+            $capability,
             self::MENU_SLUG,
             array( __CLASS__, 'render' )
         );
         // Handle mutations before admin-header.php so the post/redirect/get response can send headers.
         if ( $hook ) add_action( 'load-' . $hook, array( __CLASS__, 'handlePost' ) );
+    }
+
+    /**
+     * The entrypoint's page capability is one of the actor's own narrow command capabilities, never a
+     * diagnostics or other read capability. Null means the actor holds no Core operator command, so the
+     * entrypoint is not registered for them at all; it can never widen an action the actor cannot run.
+     */
+    private static function entrypointCapability(): ?string {
+        foreach ( self::ACTIONS as $capability ) {
+            if ( current_user_can( $capability ) ) return $capability;
+        }
+        return null;
     }
 
     /** The authenticated submenu's sole mutation dispatcher. */
@@ -141,7 +161,7 @@ final class CoreDatasetReadinessController {
     }
 
     public static function render(): void {
-        if ( ! current_user_can( self::VIEW_CAPABILITY ) ) return;
+        if ( self::entrypointCapability() === null ) return;
         echo '<div class="wrap"><h1>Core dataset readiness</h1>';
         echo '<p>Authenticated operator commands retain their existing Core authorities and capabilities. Each successful command records a separate, digest-only readiness receipt.</p>';
         self::messages();
