@@ -215,7 +215,7 @@ expect_rejected_match 'state directory that is an ancestor of the home directory
   'must not be a user data directory' \
   guarded HOME="$tmp/fake-home/deeper" DZN_RUNTIME_STATE_DIR="$tmp/fake-home" -- ': sourced'
 expect_accepted 'the documented default state directory' \
-  guarded DZN_RUNTIME_STATE_DIR=/tmp/dzn-platform-schema31-local -- ': sourced'
+  guarded DZN_RUNTIME_STATE_DIR=/tmp/dzn-platform-schema32-local -- ': sourced'
 
 # `docker`, `git`, `rm` and `rmdir` are recorded (and never destructive), so the
 # cleanup command stream itself is the evidence.
@@ -282,7 +282,7 @@ fi
 echo 'CHECKED   destroy refuses unrecognised entries and deletes nothing'
 
 mkdir -p "$scope/owned/candidate/plugin" "$scope/owned/mariadb" "$scope/owned/wordpress" "$scope/owned/no-pull-bin"
-printf 'snapshot\n' >"$scope/owned/schema31-after.json"
+printf 'snapshot\n' >"$scope/owned/rehearsal-after.json"
 reset_scope_log
 expect_accepted 'destroy with a dedicated state directory holding only owned children' \
   destroy "$scope/owned" "$scope_bin"
@@ -332,6 +332,68 @@ if [ -n "$unpulled_compose" ]; then
   exit 1
 fi
 echo 'CHECKED   every docker run keeps --pull=never and every compose start keeps --pull never'
+
+# --- the harness must validate the schema this package declares -----------------
+# The integrated candidate declares Schema 32, so the stored-state check, the fresh
+# install, the retained migration and both upgrade rehearsals must all target 32, the
+# Schema-032 storage must be asserted, and no check may still demand Schema 31.
+grep -q 'dzn-platform-schema32-local' "$root/runtime/bin/common.sh" || {
+  echo 'FAIL: the default state directory is not the Schema-32 one' >&2
+  exit 1
+}
+grep -q 'expected Schema 32' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not require Schema 32' >&2
+  exit 1
+}
+grep -q '032_notification_communications_authority' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not require the Schema-032 migration' >&2
+  exit 1
+}
+grep -q 'failure_reason_code' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not assert the added outbox columns' >&2
+  exit 1
+}
+grep -q 'verify-schema32.sh' "$root/runtime/bin/run-fresh-install.sh" || {
+  echo 'FAIL: the fresh install does not verify Schema 32' >&2
+  exit 1
+}
+grep -q 'verify-schema32.sh' "$root/runtime/bin/run-retained-migration.sh" || {
+  echo 'FAIL: the retained migration does not verify Schema 32' >&2
+  exit 1
+}
+grep -q "'32|32'" "$root/runtime/bin/run-retained-migration.sh" || {
+  echo 'FAIL: the retained migration does not pin the complete Schema-32 ledger' >&2
+  exit 1
+}
+for rehearsal in run-schema30-to-32-rehearsal.sh run-schema31-to-32-rehearsal.sh; do
+  test -s "$root/runtime/bin/$rehearsal" || { echo "FAIL: missing upgrade rehearsal: $rehearsal" >&2; exit 1; }
+done
+grep -q 'wp_dzn_portal_access_denials' "$root/runtime/bin/run-schema30-to-32-rehearsal.sh" || {
+  echo 'FAIL: the 30->32 rehearsal does not declare the Schema-031 portal tables' >&2
+  exit 1
+}
+grep -q 'wp_dzn_notification_workflows' "$root/runtime/bin/run-schema30-to-32-rehearsal.sh" || {
+  echo 'FAIL: the 30->32 rehearsal does not declare the Schema-032 notification tables' >&2
+  exit 1
+}
+grep -q 'wp_dzn_notification_privacy_tombstones' "$root/runtime/bin/run-schema31-to-32-rehearsal.sh" || {
+  echo 'FAIL: the 31->32 rehearsal does not declare the Schema-032 notification tables' >&2
+  exit 1
+}
+if grep -rn -E 'verify-schema31|run-schema30-to-31|expected Schema 31' "$root/runtime/bin" "$root/runtime/Makefile"; then
+  echo 'FAIL: the harness still targets a Schema-31 check' >&2
+  exit 1
+fi
+pure_list="$(grep -E '^tests=\(' "$root/runtime/bin/run-pure-tests.sh")"
+case "$pure_list" in *tests/phase-2a2w-contract.php*) ;; *) {
+  echo 'FAIL: the no-runtime guard list dropped the Phase-W contract guard' >&2
+  exit 1
+};; esac
+case "$pure_list" in *tests/schema-contract.php*) {
+  echo 'FAIL: the stale Phase-1 schema guard would abort the acceptance sequence' >&2
+  exit 1
+};; esac
+echo 'CHECKED   the harness validates the declared Schema 32 (stored state, retained ledger and both rehearsals)'
 
 # --- the destructive invariant is also enforced statically --------------------
 outside="$(grep -rn -- 'rm -rf' "$root/runtime/bin" | grep -v '/common.sh:' | grep -v -E ':[0-9]+:[[:space:]]*#' || true)"

@@ -59,4 +59,24 @@ rg -q 'portal_access_denials' "$action"
 rg -Fq "false===\$wpdb->insert(\$p.'portal_access_denials'" "$action"
 rg -Fq 'Public action state (`PortalRule::ACTION_STATES`) | `confirmed_submitting`, `delegating`, `submitted`, `redirected`, `refused`' "$doc"
 rg -Fq "array('confirmed_submitting','delegating','submitted','redirected','refused')" "$rule"
+
+# Correction round 4 — §15.6 refusal-versus-failure split.  Only a declared business refusal may append
+# refusal evidence; a persistence, corruption or infrastructure failure has already rolled its own
+# transaction back, so it is re-raised unchanged and can never be followed by a durable refusal record.
+capctrl="$root/src/Admin/Controller/PortalCapabilityController.php"
+unit="$root/tests/phase-2a2w-persistence-failure-unit.php"
+rg -q 'PERSISTENCE_FAILURE_CODES' "$rule"
+rg -q 'public static function refusalReason' "$rule"
+rg -Fq 'portal_action_evidence_persistence_failed' "$rule"
+rg -Fq 'portal_capability_persistence_failed' "$rule"
+for source in "$controller" "$capctrl"; do
+  rg -Fq 'PortalRule::refusalReason($e)' "$source" || { echo "missing declared-refusal classification in $source" >&2; exit 1; }
+  rg -Fq 'if($reason===null)throw $e;' "$source" || { echo "a persistence or unrecognised throwable must be re-raised in $source" >&2; exit 1; }
+  ! rg -q 'in_array\(\$e->getMessage\(\),PortalRule::EXCEPTION_REASON_CODES,true\)' "$source" || { echo "unrecognised throwables must not be recorded as refusals in $source" >&2; exit 1; }
+done
+test -s "$unit" || { echo 'missing Phase-W §15.6 persistence-failure proof' >&2; exit 1; }
+rg -q 'no subsequent refusal record' "$unit"
+rg -q 'rolls the whole refusal evidence back' "$unit"
+rg -Fq '$refusal=PortalRule::refusalReason($e);if($refusal===null)throw $e;' "$action" || { echo "the post-delegation owner handoff must re-raise a non-refusal owner failure" >&2; exit 1; }
+rg -q 'an owner persistence failure propagates unchanged out of the absence handoff' "$unit"
 printf 'Phase-W blocking findings source contract passed\n'

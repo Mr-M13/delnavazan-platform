@@ -173,3 +173,70 @@ tree.
 
 The combined tree requires independent review before any authoritative merge, deployment, provider
 activation or cutover.
+
+## 5. Correction round 2 — host review of `8867999f77b42b3b458592eb48ea22eaac82a1ba`
+
+The independent review of the first integration candidate (`8867999`, tree
+`de5f4d1725734183630a40e6856be26652c08da6`) returned `CORRECTION REQUIRED` with two blocking findings.
+Both are closed in this tree, additively: the four reviewed candidate tips, the four merge commits and
+every §1–§4 resolution above are unchanged.
+
+**Finding 1 — persistence failures became new “business refusal” records (§15.6).** The public-action
+controller and the administrative capability command caught every `Throwable`, normalised an unrecognised
+failure such as `portal_action_evidence_persistence_failed` to `portal_upstream_aggregate_invalid`, and
+then called `recordRefusal()` in a new transaction, so a transient failed insert or commit could be
+followed by durable refusal evidence. `PortalRule` now declares `PERSISTENCE_FAILURE_CODES`
+(`portal_action_evidence_persistence_failed`, `portal_capability_persistence_failed`) and one
+classification point, `PortalRule::refusalReason(\Throwable): ?string`, that returns a reason only for a
+declared business refusal. Both controllers classify before writing: a declared refusal keeps its exact
+durable evidence, and every persistence, corruption or infrastructure failure — including any unexpected
+throwable — is re-raised unchanged after its own rollback with no refusal command, action, denial or
+audit row. The same split is applied to the post-delegation owner handoff in
+`PortalPublicActionService::confirmAbsence()`, the one remaining catch-all on that path: a declared owner
+refusal is still recorded as the refused outcome with the owner's own reason plus its denial row, while an
+owner persistence or infrastructure failure propagates unchanged and records neither, leaving only the
+redemption claim and delegation lease the §15.8 bound and an exact replay converge.
+`tests/phase-2a2w-persistence-failure-unit.php` is the new failure-path proof (one declared
+refusal is one transaction; a failed action insert, a failed denial insert and a failed commit each roll
+both rows back and re-raise; a failing capability/action evidence write propagates unchanged out of both
+public callbacks and appends no subsequent refusal row; and the owner handoff is proved for both the
+declared refusal and the owner failure). The W contract §15.6/§18, the portal
+authorization registry, the W contract guard and `tests/phase-2a2w-blocking-findings-contract.sh` are
+updated to that split.
+
+**Finding 2 — the harness could not validate the Schema-32 candidate.** The fresh-install and retained
+checks required schema `31`, and the 30→31 rehearsal required exactly six added portal tables, while
+activating this candidate also applies migration 032 and creates notification storage — so the advertised
+acceptance harness failed deterministically against its own default target. The harness now targets the
+declared Schema 32: `runtime/bin/verify-schema32.sh` (schema option and constant `32`, both migrations in
+the ledger, the six portal and eighteen notification tables, the eleven added nullable `platform_outbox`
+columns, the retained `status`/`attempt_count` contract, no seeded portal option); the fresh-install and
+retained runs end with it, and the retained run pins the complete `32|32` ledger; the 30→31 rehearsal is
+replaced by the shared `runtime/bin/schema-upgrade-rehearsal.sh` plus
+`run-schema30-to-32-rehearsal.sh` (immutable `86d5760`) and `run-schema31-to-32-rehearsal.sh` (immutable
+`2ab0c71`, the Schema-031 base of the S re-land). Each rehearsal snapshots every pre-existing table's
+schema and data (only Migrator's two ledger options excluded) and requires exactly the declared added
+tables, no lost table and no other change, with the Schema-032 `platform_outbox` columns projected out of
+the comparison and re-asserted positively by the verifier. `runtime/README.md`, `runtime/Makefile`,
+`runtime/.env.example`, `runtime/manifests/historical-suites.json` and `tests/runtime-path-guards.sh` are
+updated to the same state, and the guards now assert the harness targets Schema 32.
+`runtime/bin/run-pure-tests.sh` also stops running the stale Phase-1 `tests/schema-contract.php` guard
+(it forbids the `finance` storage Schema 030 added and fails identically on authoritative `main`, per §3
+above), so the acceptance sequence no longer aborts on that pre-existing failure; it keeps the parse/lint
+sweep and the Phase-2A.2-W contract guard.
+
+**Corrected verification record.** `tests/phase-2a2w-contract.php` (with both embedded behavioural
+proofs) passes under the local PHP 8.3 WebAssembly CLI, as does
+`tests/phase-2a2w-persistence-failure-unit.php` standalone; the same proof fails against the failed
+candidate's controllers, so the coverage is not a tautology.
+`tests/phase-2a2w-blocking-findings-contract.sh` and `tests/runtime-path-guards.sh` pass. Every
+`runtime/bin/*.sh` passes `bash -n`; the new verifier body and both rehearsal PHP snippets parse clean;
+and the rehearsal comparison was exercised against synthetic snapshots (pass on the declared additive
+change; fail on a changed pre-existing table, an undeclared added table and a disappeared table). The
+WordPress/MariaDB harness and every suite that needs it are still **not executed** here — no cached
+images, no reachable Docker daemon, no network — and remain required acceptance gates before any merge,
+deployment, public enablement or cutover.
+
+The corrected combined tree again requires independent review before any authoritative merge,
+deployment, provider activation or cutover: nothing was pushed, no authoritative `main` was moved, and no
+credential, provider call, external send or cutover was used in this correction round.

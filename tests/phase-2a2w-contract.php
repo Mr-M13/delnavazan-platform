@@ -2,7 +2,9 @@
 /** Contract guard for Phase-W's security and migration seams. The static seams below are followed by the
  *  behavioural coverage of the public rate-limit admission (`phase-2a2w-public-rate-limit-unit.php`),
  *  embedded so the two run as one guard: fixed per-surface admission and audit attribution, a genuine
- *  limit refusal, and fail-open on a fingerprinting or cache failure. */
+ *  limit refusal, and fail-open on a fingerprinting or cache failure.  The §15.6 refusal-versus-failure
+ *  split (`phase-2a2w-persistence-failure-unit.php`) is embedded the same way: only a declared business
+ *  refusal writes refusal evidence, and a persistence/corruption failure propagates with no refusal row. */
 $root=dirname(__DIR__);
 $cap=file_get_contents($root.'/src/Portals/PortalCapabilityService.php');
 $public=file_get_contents($root.'/src/Portals/PortalPublicActionController.php');
@@ -25,6 +27,15 @@ if(strpos($admit,'catch(\InvalidArgumentException')!==false)throw new RuntimeExc
 if(strpos($admit,'catch(\Throwable')>strpos($admit,"throw new \InvalidArgumentException('portal_rate_limited')"))throw new RuntimeException('portal_rate_limited must be thrown only after the fail-open catch completes');
 if(strpos($public,'portal_access_denials')!==false)throw new RuntimeException('Public-action controller must not write denial evidence outside the refusal transaction');
 if(strpos($public,'recordRefusal')===false)throw new RuntimeException('Public-action controller must delegate its refusal evidence to the root-serialised refusal transaction');
+$rule=file_get_contents($root.'/src/Portals/PortalRule.php');
+$admin=file_get_contents($root.'/src/Admin/Controller/PortalCapabilityController.php');
+foreach(array('PERSISTENCE_FAILURE_CODES','public static function refusalReason') as $needle)if(strpos($rule,$needle)===false)throw new RuntimeException('Phase-W declared refusal/failure split missing '.$needle);
+foreach(array('administrative command controller'=>$admin,'public-action controller'=>$public) as $label=>$source){
+    if(strpos($source,'PortalRule::refusalReason($e)')===false||strpos($source,'if($reason===null)throw $e;')===false)throw new RuntimeException('The '.$label.' must classify a throwable before it writes refusal evidence');
+    if(strpos($source,'in_array($e->getMessage(),PortalRule::EXCEPTION_REASON_CODES,true)')!==false)throw new RuntimeException('The '.$label.' must not classify a throwable by its own message vocabulary');
+    if(strpos($source,"?'portal_upstream_aggregate_invalid'")!==false)throw new RuntimeException('The '.$label.' must not convert an unrecognised throwable into portal_upstream_aggregate_invalid');
+}
+if(strpos($action,'$refusal=PortalRule::refusalReason($e);if($refusal===null)throw $e;')===false)throw new RuntimeException('The post-delegation owner handoff must record only a declared owner refusal and re-raise anything else');
 $joinStart=strpos($public,'public static function join(');
 $absenceStart=strpos($public,'public static function absence(');
 if($joinStart===false||$absenceStart===false||$absenceStart<$joinStart)throw new RuntimeException('Public route callbacks are missing');
@@ -45,4 +56,6 @@ foreach(array('renderAbsenceConfirmation(','confirmAbsence(','verifyConsumed(','
 foreach(array('PUBLIC_CAPABILITY_AUDIT_ACTOR','public_capability_on_behalf','command($digest)') as $needle)if(strpos($attendance,$needle)===false)throw new RuntimeException('Anonymous capability handoff seam missing '.$needle);
 if(!defined('DZN_2A2W_RATE_UNIT_EMBEDDED'))define('DZN_2A2W_RATE_UNIT_EMBEDDED',true);
 require __DIR__.'/phase-2a2w-public-rate-limit-unit.php';
+if(!defined('DZN_2A2W_PERSISTENCE_UNIT_EMBEDDED'))define('DZN_2A2W_PERSISTENCE_UNIT_EMBEDDED',true);
+require __DIR__.'/phase-2a2w-persistence-failure-unit.php';
 echo "Phase-W contract passed\n";

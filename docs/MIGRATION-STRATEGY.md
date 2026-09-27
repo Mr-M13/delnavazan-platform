@@ -1,8 +1,23 @@
 # Delnavazan Platform Migration Strategy
 
+## 032_notification_communications_authority (Phase 2A.2-S, additive; the integrated candidate's current horizon)
+
+The integrated operational-readiness candidate, built on `main` / `origin/main` at `6673e7b`, declares
+**Schema 32**. It adds this one migration on top of Schema 031: it creates exactly the eighteen declared
+notification tables (workflow, template, snapshot, notification, event, command, attempt, delivery,
+suppression and privacy-tombstone storage) and extends the *existing* `platform_outbox` seam with eleven
+nullable, no-default columns (`notification_id`, `workflow_key`, `workflow_version`, `intent_key`,
+`audience`, `scheduled_for`, `expires_at`, `deferral_count`, `priority`, `lease_token_digest`,
+`failure_reason_code`) plus the unique `notification_id` key and the `dispatch`/`intent_version` indexes.
+It performs no backfill, alters no pre-existing column or index, sets no `dzn_platform_portal_actions`
+option, and calls no provider. Schema 31 → 32 is repeat-safe and leaves every Schema-031 row unchanged;
+the runtime harness rehearses it from the immutable Schema-31 base
+`2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` and the full chain from Schema 30 (`86d5760`), asserting that
+exactly the declared tables are added and that every other table is unchanged.
+
 ## 031_portal_facing_services_principal_authorization (Phase 2A.2-W, current source candidate)
 
-Current `main` declares Schema 31 and includes this additive migration. It creates exactly six portal
+The portal slice declares Schema 31 and includes this additive migration. It creates exactly six portal
 access-artefact tables: `portal_lesson_capability_roots`, `portal_public_capabilities`,
 `portal_public_capability_events`, `portal_public_capability_commands`, `portal_public_action_events` and
 `portal_access_denials`. It creates no portal business-authority table and changes no existing table.
@@ -149,12 +164,13 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration horizon — Schema 31 (authoritative on `main`)
+## Current authoritative migration horizon — Schema 32 (authoritative on `main`)
 
-The current horizon is **001–031**; the sections below are retained as historical phase records. The
-latest entry, `031_portal_facing_services_principal_authorization`, is documented at the top of this
+The current horizon is **001–032**; the sections below are retained as historical phase records. The
+latest entries, `032_notification_communications_authority` and
+`031_portal_facing_services_principal_authorization`, are documented at the top of this
 file. The most recent *merged* commercial slice is still Schema 25 / Phase 2A.2-R1; Schemas 26, 27, 29,
-30 and 31 are present as additive candidate trees with their recorded review/activation posture, and
+30, 31 and 32 are present as additive candidate trees with their recorded review/activation posture, and
 none is deployed or activated.
 
 ### Schema 26 — renewal, next-Term, recurring collection, recovery, lapse & refund review authority (Phase 2A.2-R2 **candidate**)

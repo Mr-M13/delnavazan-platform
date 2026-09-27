@@ -1,13 +1,16 @@
-# Offline Schema-31 disposable runtime
+# Offline Schema-32 disposable runtime
 
-This is the bounded WordPress/MariaDB evidence harness for Schema 31. It is
-not a deployment tool and it never reads from, checks out, or symlinks the
-shared checkout into a running WordPress instance.
+This is the bounded WordPress/MariaDB evidence harness for the Schema-32 integrated
+candidate — Schema 031 (`031_portal_facing_services_principal_authorization`, the
+Phase-2A.2-W portal slice) plus the additive Schema 032
+(`032_notification_communications_authority`, the Phase-2A.2-S notification slice)
+this package declares. It is not a deployment tool and it never reads from, checks
+out, or symlinks the shared checkout into a running WordPress instance.
 
 Every run creates detached Git worktrees beneath `DZN_RUNTIME_STATE_DIR`
-(default: `/tmp/dzn-platform-schema31-local`). Path boundaries are enforced
-physically, never lexically. The state directory, both worktree paths
-(`candidate`, `schema30`), the database and WordPress bind mounts and
+(default: `/tmp/dzn-platform-schema32-local`). Path boundaries are enforced
+physically, never lexically. The state directory, the worktree paths
+(`candidate`, `schema30`, `schema31`), the database and WordPress bind mounts and
 `DZN_PLUGIN_SOURCE` are each resolved with `realpath` and refused unless they
 land inside the canonical state directory, so a symlink, a relative alias or a
 `..` component cannot redirect a run; the state directory itself is also
@@ -61,7 +64,9 @@ aliased database/WordPress/plugin-source path, an unresolved symlink and a path
 escaping the state directory are refused, that a retarget introduced after
 sourcing still never reaches docker, and that genuinely disposable paths keep
 working. It also re-asserts the offline transport policy (`pull_policy: never`,
-`docker run --pull=never`, `dzn_compose up --pull never`).
+`docker run --pull=never`, `dzn_compose up --pull never`) and that this harness
+targets the Schema 32 the package declares: the fresh-install, retained and diff
+checks all assert Schema 32, and both declared upgrade rehearsals exist.
 
 For destructive scope the same test proves that `/`, `/tmp`, `/var`, `/var/tmp`,
 `/etc`, `/opt`, `/Users`, the home directory, a directory containing this
@@ -76,24 +81,67 @@ cd runtime
 bin/check-cache.sh
 bin/run-fresh-install.sh
 bin/run-retained-migration.sh
-bin/run-schema30-to-31-rehearsal.sh
+bin/run-schema30-to-32-rehearsal.sh
+bin/run-schema31-to-32-rehearsal.sh
 bin/run-pure-tests.sh
 ```
 
-The rehearsal creates Schema 30 from immutable commit
-`86d57606cabcddba15d076edfe14fb4e7257e60f`, snapshots every pre-existing
-table's schema and data (with only Migrator's two ledger options excluded),
-switches the disposable plugin link to the Schema-31 worktree, and requires
-the only additions to be exactly:
+`bin/verify-schema32.sh` is the stored-state check every one of those targets
+ends with. It requires the schema option *and* `DZN_PLATFORM_SCHEMA_VERSION` to
+be `32`, the ledger to carry `031_portal_facing_services_principal_authorization`
+and `032_notification_communications_authority`, the six Schema-031 portal
+tables and the eighteen Schema-032 notification tables to be present, the eleven
+`platform_outbox` columns the Schema-032 slice adds to be present, nullable and
+without a default, the pre-existing `platform_outbox` `status`/`attempt_count`
+contract to be intact, and `dzn_platform_portal_actions` to remain unseeded.
 
-- `portal_lesson_capability_roots`
-- `portal_public_capabilities`
-- `portal_public_capability_events`
-- `portal_public_capability_commands`
-- `portal_public_action_events`
-- `portal_access_denials`
+`bin/run-retained-migration.sh` runs the fresh install, repeats
+`Migrator::maybe_upgrade()` against the same database, and requires the ledger
+to be unchanged and complete: `32` recorded migrations at Schema 32.
 
-It also verifies that `dzn_platform_portal_actions` remains absent.
+`bin/run-pure-tests.sh` runs the guard that needs no WordPress database inside
+the cached CLI image: the parse/lint sweep (`tests/static.php`) and the
+Phase-2A.2-W contract guard (`tests/phase-2a2w-contract.php`, which embeds the
+§15.6 refusal-versus-failure behavioural proof). The stale Phase-1
+`tests/schema-contract.php` guard — it forbids the `finance` storage Schema 030
+legitimately added and fails identically on authoritative `main` — is recorded
+as a pre-existing failure in the integration manifest and is deliberately **not**
+in that list, so the acceptance sequence is not aborted by a defect outside this
+package.
+
+`bin/schema-upgrade-rehearsal.sh <base-schema> <base-ref> <declared table>...`
+is the shared in-place upgrade rehearsal. It creates the base schema from one
+immutable commit, snapshots every pre-existing table's schema and data (with
+only Migrator's two ledger options excluded), switches the disposable plugin
+link to the candidate worktree, runs `Migrator::maybe_upgrade()`, snapshots
+again, and requires:
+
+- the only *added* tables to be exactly the declared ones;
+- no pre-existing table to disappear; and
+- every other pre-existing table to be byte-identical in schema and data.
+
+The `platform_outbox` identity and rows are compared with the eleven added
+Schema-032 columns projected out, because that slice only *adds* nullable
+columns to that one existing table; `verify-schema32.sh` then re-asserts those
+columns positively.
+
+Two rehearsals are declared, and each ends by re-running `verify-schema32.sh`:
+
+- `bin/run-schema30-to-32-rehearsal.sh` — Schema 30 from immutable commit
+  `86d57606cabcddba15d076edfe14fb4e7257e60f`, upgraded in place by the candidate.
+  The only additions must be the six Schema-031 portal tables and the eighteen
+  Schema-032 notification tables.
+- `bin/run-schema31-to-32-rehearsal.sh` — the integrated Schema 31 base from
+  immutable commit `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` (the portal slice's
+  tip the Schema-032 re-land was built on), upgraded in place by the candidate.
+  The only additions must be the eighteen Schema-032 notification tables, and
+  the six Schema-031 portal tables must be untouched.
+
+The Phase-2A.2-S suites under `tests/` (for example
+`tests/phase-2a2s-migration-runtime.php`) remain that phase's own acceptance
+gates: this harness proves the Schema-032 migration's stored result and its
+upgrade behaviour directly instead of re-driving another phase's runtime suite
+from here.
 
 `bin/run-regressions.sh` and `bin/run-concurrency.sh` are opt-in hooks for
 the pre-existing R2, V, T, and U suites. Their immutable refs and historical
@@ -101,17 +149,17 @@ schemas are recorded in
 [`manifests/historical-suites.json`](manifests/historical-suites.json).
 Each starts a fresh database and its own historical worktree, so those suites
 retain their own exact version semantics rather than being run against Schema
-31. The historical runner files are unmodified; a private disposable Docker
+32. The historical runner files are unmodified; a private disposable Docker
 shim injects `--pull=never` into their worker containers.
 
 Run `bin/destroy.sh YES` to remove only the declared disposable state and
 worktrees. Destructive cleanup is scoped twice over: the state directory must
 satisfy the dedicated-directory rule above, and only the children this harness
-itself creates (`candidate`, `schema30`, `historical-<phase>`, `mariadb`,
-`wordpress`, `no-pull-bin`, `historical-source`, `schema30-before.json`,
-`schema31-after.json`) are deleted, each after its physical path is
-re-validated. The state directory itself is then removed with `rmdir` — never
-`rm -rf` — so it disappears only once nothing else remains; an unrecognised
-entry makes the command refuse and delete nothing. No Theme file, provider,
-credential, network call, deploy, or business-code remediation is part of this
-package.
+itself creates (`candidate`, `schema30`, `schema31`, `historical-<phase>`,
+`mariadb`, `wordpress`, `no-pull-bin`, `historical-source`,
+`rehearsal-before.json`, `rehearsal-after.json`) are deleted, each after its
+physical path is re-validated. The state directory itself is then removed with
+`rmdir` — never `rm -rf` — so it disappears only once nothing else remains; an
+unrecognised entry makes the command refuse and delete nothing. No Theme file,
+provider, credential, network call, deploy, or business-code remediation is
+part of this package.

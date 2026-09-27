@@ -3,6 +3,94 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Operational-readiness integration — correction round 2 — candidate, unmerged — 2026-09-27
+
+- Closes both blocking findings of the host review of `8867999f77b42b3b458592eb48ea22eaac82a1ba` / tree
+  `de5f4d1725734183630a40e6856be26652c08da6` (the review's `CORRECTION ROUND 2`, verdict
+  `FAIL - CORRECTION REQUIRED`). The candidate stays local: nothing is pushed, no authoritative `main` is
+  moved, nothing is merged or deployed, no provider, credential or external send is used, and public
+  actions stay disabled by default.
+- **Finding 1 — persistence failures were converted into new “business refusal” records.**
+  `PortalPublicActionController::refused()` and `PortalCapabilityController::command()` caught every
+  `Throwable`, normalised an unrecognised failure such as `portal_action_evidence_persistence_failed` to
+  `portal_upstream_aggregate_invalid`, and then called `recordRefusal()` in a *new* transaction — so a
+  transient failed insert or commit could be followed by durable refusal evidence, contrary to §15.6's
+  all-or-nothing rollback.
+  - Correction: `PortalRule` now declares the two Phase-W persistence codes
+    (`PERSISTENCE_FAILURE_CODES = portal_action_evidence_persistence_failed`,
+    `portal_capability_persistence_failed`) and one classification point,
+    `PortalRule::refusalReason(\Throwable): ?string`, which returns a reason only for a declared business
+    refusal (`EXCEPTION_REASON_CODES`, never a persistence code). Both controllers classify with it
+    **before** writing anything: a declared refusal keeps its exact durable evidence, while every
+    persistence, corruption or infrastructure failure — including any unexpected throwable — is re-raised
+    unchanged after its own rollback and appends no refusal command row, action row, denial row or audit
+    row. The refused evidence of one command remains one transaction. The same split is applied to the one
+    remaining catch-all on that path, the post-delegation owner handoff in
+    `PortalPublicActionService::confirmAbsence()`: a declared owner refusal is still recorded as the
+    refused outcome with the owner's own reason and its denial row in that one transaction, while an owner
+    persistence or infrastructure failure now propagates unchanged and records neither — leaving only the
+    redemption claim and delegation lease the §15.8 bound and an exact replay converge.
+  - New failure-path coverage: `tests/phase-2a2w-persistence-failure-unit.php` drives the real
+    `PortalPublicActionService::recordRefusal()` and both real public callbacks against an in-memory store
+    that fails on request, and proves: one declared refusal still commits exactly the refused action row
+    and its denial row in one transaction; a failed refused-action insert, a failed denial insert and a
+    failed commit each roll *both* rows back and re-raise `portal_action_evidence_persistence_failed` with
+    no committed row; a failing capability/action evidence write inside the invoked service propagates
+    unchanged out of `join` and out of `absence` and appends **no subsequent refusal row** because the
+    controller opens no second transaction; the post-delegation owner handoff records a declared owner
+    refusal as the refused outcome with the owner's reason and its denial row, and an owner persistence
+    failure leaves only the committed claim and lease with no refused outcome and no denial; and only a
+    declared refusal reason classifies as a refusal.
+    `tests/phase-2a2w-contract.php` now asserts the classification seam in both controllers and embeds the
+    new proof, and `tests/phase-2a2w-blocking-findings-contract.sh` gains the same static assertions.
+    `docs/PHASE-2A-2W-PORTAL-FACING-SERVICES-PRINCIPAL-AUTHORIZATION-CONTRACT.md` §15.6 and §18 and
+    `docs/PORTAL-AUTHORIZATION-REGISTRY.md` now record the split.
+- **Finding 2 — the runtime harness could not validate this Schema-32 candidate.**
+  `runtime/bin/run-fresh-install.sh` and `runtime/bin/run-retained-migration.sh` verified schema `31`
+  through the removed `runtime/bin/verify-schema31.sh`, and `runtime/bin/run-schema30-to-31-rehearsal.sh`
+  required exactly six added portal tables — while activating the candidate also applies migration 032 and
+  creates notification storage. The advertised acceptance harness therefore failed deterministically
+  against its own default target.
+  - Correction: the harness now targets the Schema 32 the package declares.
+    `runtime/bin/verify-schema32.sh` requires the schema option *and* `DZN_PLATFORM_SCHEMA_VERSION` to be
+    `32`, the ledger to carry `031_portal_facing_services_principal_authorization` and
+    `032_notification_communications_authority`, the six portal tables and the eighteen notification
+    tables, the eleven added `platform_outbox` columns as nullable-without-default, the pre-existing
+    `status`/`attempt_count` contract, and no seeded `dzn_platform_portal_actions`. The fresh install and
+    the retained migration both end with it, and the retained run additionally pins the complete `32|32`
+    ledger. The 30→31 rehearsal is replaced by a shared
+    `runtime/bin/schema-upgrade-rehearsal.sh <base-schema> <base-ref> <declared table>...` plus two
+    declared rehearsals: `run-schema30-to-32-rehearsal.sh` (Schema 30 from immutable `86d5760`) and
+    `run-schema31-to-32-rehearsal.sh` (the integrated Schema-31 base from immutable `2ab0c71`, the tip the
+    Schema-032 re-land was built on). Each builds the base schema, snapshots every pre-existing table's
+    schema and data (only Migrator's two ledger options excluded), upgrades in place with the candidate
+    worktree, and requires the added tables to be exactly the declared set, no table to disappear, and
+    every other table to be unchanged — with the Schema-032 `platform_outbox` columns projected out of the
+    comparison because that slice only adds nullable columns to that one existing table. `runtime/README.md`
+    (and the `Makefile`, `.env.example`, the historical-suite manifest and `tests/runtime-path-guards.sh`)
+    are updated to the same Schema-32 state and now assert it.
+  - One more harness-level cause of a deterministic default-target failure is removed at the same time:
+    `runtime/bin/run-pure-tests.sh` no longer runs the stale Phase-1 `tests/schema-contract.php` guard,
+    which forbids the `finance` storage Schema 030 legitimately added and fails identically on
+    authoritative `main` (recorded as a pre-existing failure in the integration manifest). It keeps the
+    parse/lint sweep and the Phase-2A.2-W contract guard, so the acceptance sequence is not aborted by a
+    defect outside this package.
+- **Verification in this environment** (local PHP 8.3 WebAssembly CLI; no WordPress, no database, no
+  Docker daemon, no network): `tests/phase-2a2w-contract.php` passes with both embedded proofs;
+  `tests/phase-2a2w-persistence-failure-unit.php` passes standalone; the new proof **fails** when run
+  against the failed candidate's controllers (negative control — it reports the propagation and
+  no-second-transaction probes as failures and the removed `PERSISTENCE_FAILURE_CODES` constant as
+  undefined); `tests/phase-2a2w-blocking-findings-contract.sh` and `tests/runtime-path-guards.sh` pass;
+  every `runtime/bin/*.sh` passes `bash -n`; the new `verify-schema32.sh` PHP body and both rehearsal PHP
+  snippets parse clean; and the rehearsal comparison logic was exercised against synthetic snapshots,
+  passing on the declared additive change and failing on a changed pre-existing table, an undeclared added
+  table and a disappeared table.
+- **Not executed**: the WordPress/MariaDB `runtime/` harness itself and every suite that needs it (no
+  cached images, no reachable Docker daemon, no network). Those remain required acceptance gates before
+  any merge, deployment, public enablement or cutover. The Phase-2A.2-S suites under `tests/` likewise
+  remain that phase's own gates; this harness proves the Schema-032 migration's stored result and upgrade
+  behaviour directly instead of re-driving them.
+
 ## Phase 2A.2-W — revocation-replay claim correction, round 9 — candidate, unmerged — 2026-09-27
 
 - Closes the one blocking finding of the review of `2aa2333522a84254cac33eaff1179049466058c0` / tree

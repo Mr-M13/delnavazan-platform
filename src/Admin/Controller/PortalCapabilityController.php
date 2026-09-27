@@ -21,7 +21,13 @@ final class PortalCapabilityController {
             if($operation==='revoke'){$service->revoke((int)($_POST['capability_id']??0),$reasonInput,$key);self::result('Capability revoked.');return;}
             throw new \InvalidArgumentException('portal_vocabulary_member_not_allowed');
         } catch(\Throwable $e) {
-            $reason=in_array($e->getMessage(),PortalRule::EXCEPTION_REASON_CODES,true)?$e->getMessage():'portal_upstream_aggregate_invalid';
+            /*
+             * §15.6 — only a declared business refusal writes refusal evidence.  A persistence, corruption
+             * or infrastructure failure (`portal_capability_persistence_failed`, an unexpected `\Throwable`)
+             * has already rolled its own transaction back, so it is re-raised unchanged: a transient failed
+             * insert or commit can never be followed by a durable refusal command record.
+             */
+            $reason=PortalRule::refusalReason($e); if($reason===null)throw $e;
             $recordLesson=$lesson;$recordPurpose=$purpose;
             if($operation==='revoke'&&(int)($_POST['capability_id']??0)>0){global $wpdb;$capability=$wpdb->get_row($wpdb->prepare("SELECT lesson_id,purpose FROM {$wpdb->prefix}dzn_portal_public_capabilities WHERE id=%d",(int)$_POST['capability_id']));if($capability){$recordLesson=(int)$capability->lesson_id;$recordPurpose=(string)$capability->purpose;}}
             try{$reason=$service->recordRefusal($operation===''?'unknown':$operation,$key,$payload,(string)$reason,$recordLesson,$recordPurpose);}catch(\InvalidArgumentException$replay){$reason=$replay->getMessage()==='command_replay_conflict'?'command_replay_conflict':'portal_upstream_aggregate_invalid';}

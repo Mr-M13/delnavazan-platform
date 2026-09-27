@@ -1123,6 +1123,21 @@ row nor a second denial (§15.5); the route-declared surface of each public purp
 or `portal_public_absence`) is carried on the denial row, with the resolved `capability_id` and
 `lesson_id` when the handle resolves to a capability (§7.3, §13.2).
 
+The two classes are told apart by the declaration, not by the catch: a controller converts a throwable
+into refusal evidence only when that throwable carries a declared refusal reason
+(`PortalRule::refusalReason()`, i.e. a member of `PortalRule::EXCEPTION_REASON_CODES`). A persistence,
+corruption or infrastructure failure — `portal_action_evidence_persistence_failed`,
+`portal_capability_persistence_failed`, or any unexpected throwable — carries no declared refusal reason,
+so it is **re-raised unchanged** by both the public-action controller and the administrative capability
+command and is never followed by a durable refusal record: the refused evidence of one command is
+all-or-nothing, and a command that failed to persist its own evidence never acquires a refusal row, a
+denial row or a refusal audit row. The declared persistence codes themselves are never refusal-reason
+vocabulary members. The same split governs the post-delegation owner handoff (§15.3): a declared owner
+refusal is recorded as the refused outcome with the owner's own reason and its denial row in that one
+transaction, while an owner persistence, corruption or infrastructure failure propagates unchanged and
+records neither a refused outcome nor a denial — the redemption claim and the delegation lease committed
+before the delegation stay durable, so the §15.8 bound and an exact replay converge the abandoned claim.
+
 ### 15.7 Declared write allowlist
 
 The only tables a Phase-W code path may write are the six declared portal tables plus **insert-only,
@@ -1217,8 +1232,9 @@ first is available in this environment.
 
 - **Executed here — the PHP-only source guard and behavioural proofs.** A PHP interpreter is the only
   prerequisite. `tests/phase-2a2w-contract.php`, together with the behavioural proof it embeds from
-  `tests/phase-2a2w-public-rate-limit-unit.php`, passes under a local PHP 8.3/8.5 CLI WebAssembly runtime
-  with no WordPress and no database; the embedded behavioural suite and
+  `tests/phase-2a2w-public-rate-limit-unit.php` and the §15.6 refusal-versus-failure proof it embeds from
+  `tests/phase-2a2w-persistence-failure-unit.php`, passes under a local PHP 8.3/8.5 CLI WebAssembly runtime
+  with no WordPress and no database; both embedded behavioural suites and
   `tests/phase-2a2w-replay-runtime.php` also pass standalone under both versions; and 274 of
   274 `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` under both versions. This is
   source-guard and PHP-level behavioural evidence only: it is not runtime, migration, concurrency, browser
@@ -1230,7 +1246,8 @@ first is available in this environment.
 
 | Suite | Proves | Status in this environment |
 | --- | --- | --- |
-| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, all four §10.0 owner ports, no portal call to the four administrator-only read services, no portal repository read of their tables, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written and **executed** — passes under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no database, including the behavioural proof it embeds from `tests/phase-2a2w-public-rate-limit-unit.php`; a static source guard, so this is not runtime, migration, concurrency or browser evidence |
+| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, all four §10.0 owner ports, no portal call to the four administrator-only read services, no portal repository read of their tables, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, the §15.6 `PortalRule::refusalReason()`-before-`recordRefusal()` classification in both the public-action and administrative controllers, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written and **executed** — passes under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no database, including the behavioural proofs it embeds from `tests/phase-2a2w-public-rate-limit-unit.php` and `tests/phase-2a2w-persistence-failure-unit.php`; a static source guard, so this is not runtime, migration, concurrency or browser evidence |
+| `tests/phase-2a2w-persistence-failure-unit.php` | the §15.6 refusal-versus-failure split: a declared business refusal still commits exactly one refused action row and one denial row in one transaction; a failed refused-action insert, a failed denial insert and a failed commit each roll the whole refusal evidence back and re-raise `portal_action_evidence_persistence_failed` with no committed row; a failing capability/action evidence write inside the invoked service propagates unchanged out of both registered public callbacks (`join` and `absence`) and appends no subsequent refusal row or denial because the controller opens no second transaction; the post-delegation owner handoff records a declared owner refusal as the refused outcome with the owner's own reason plus its denial row, while an owner persistence failure propagates unchanged and leaves only the committed redemption claim and delegation lease; and only a declared refusal reason classifies as a refusal, never a declared persistence code, an unexpected exception or a PHP error | written and **executed** — passes standalone and embedded in the contract guard under a local PHP 8.3 CLI WebAssembly runtime with no WordPress and no database; a PHP-level behavioural proof against a stubbed store and stubbed owner ports, so this is not runtime, migration, concurrency or browser evidence |
 | `tests/phase-2a2w-replay-runtime.php` | consumed-confirmation replay after principal revocation: the suite renders a one-time Student absence confirmation through the real `PortalPublicActionService::renderAbsenceConfirmation()`, consumes it through the real `::confirmAbsence()` (which appends the `confirmed_submitting` claim, the `consumed` capability event, the `consume` command and the `submitted` outcome), revokes the Student's principal link so a fresh `PortalCapabilityOwnerPort::binding()` with `requirePrincipal=true` refuses `portal_principal_required`, and then replays the exact same handle/token/confirmation through `::confirmAbsence()`/`verifyConsumed()`: the replay converges on the recorded `submitted` outcome with `replayed=true` because `verifyConsumed()` re-resolves the immutable Lesson/schedule/student proof with `requirePrincipal=false` instead of re-proving mutable owner state, and it appends no second confirmed-submitting claim, consumed event or consume command. The suite drives the real service classes against an in-memory stub of the portal evidence tables and the two owner ports it reads; the contract guard asserts its `renderAbsenceConfirmation(`, `confirmAbsence(`, `verifyConsumed(`, `requirePrincipal`, `portal_principal_required`, `replayed` and `consumed_action_event_id` seams | written and **executed** — the suite prints `Phase-W revoked-principal replay coverage passed` and exits 0 standalone under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no database; a PHP-level behavioural proof against a stubbed store, so this is not runtime, migration, concurrency or browser evidence |
 | `tests/phase-2a2w-migration-runtime.php` | Schema 30 to 31 additive and repeat-safe, no existing row or column changed, no option seeded but the marker, and `dzn_platform_portal_actions` absent | written, **not executed** |
 | `tests/phase-2a2w-principal-runtime.php` | resolution for each principal kind; zero, ambiguous and kind-mismatch refusals; a multi-role user resolving per surface; and that no parameter, cookie, header, email or meta changes the answer | written, **not executed** |

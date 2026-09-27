@@ -67,7 +67,11 @@ final class PortalPublicActionService {
         if((string)$claim['decision']==='refused')throw new PortalPublicActionRefusalRecorded((string)$claim['reason']);
         if((string)$claim['decision']==='held')throw new \InvalidArgumentException('portal_absence_submission_pending');
         $row=$claim['capability'];
-        try{$result=PortalOwnerPorts::attendance()->submitCapabilityClaim($this->subject($row),$confirmation);$state='submitted';$reason=null;}catch(\Throwable $e){$result=array('capability_id'=>(int)$row->id,'lesson_id'=>(int)$row->lesson_id);$state='refused';$reason=in_array($e->getMessage(),PortalRule::EXCEPTION_REASON_CODES,true)?$e->getMessage():'portal_upstream_aggregate_invalid';}
+        // §15.6 — only a declared owner refusal is recorded as the refused outcome, with the owner's own
+        // reason; an owner persistence, corruption or infrastructure failure propagates unchanged and is
+        // never converted into a durable refusal.  The claim and lease committed before the delegation
+        // stay durable, so the §15.8 bound and an exact replay converge the abandoned claim.
+        try{$result=PortalOwnerPorts::attendance()->submitCapabilityClaim($this->subject($row),$confirmation);$state='submitted';$reason=null;}catch(\Throwable $e){$refusal=PortalRule::refusalReason($e);if($refusal===null)throw $e;$result=array('capability_id'=>(int)$row->id,'lesson_id'=>(int)$row->lesson_id);$state='refused';$reason=$refusal;}
         return $this->recordOutcome($row,$digest,$confirmation,$state,$reason,$result);
     }
 

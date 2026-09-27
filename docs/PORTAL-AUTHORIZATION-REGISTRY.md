@@ -12,6 +12,12 @@ that revision). It records what this checkout registers and calls. It approves n
 provider activation, public enablement, Theme work, deployment, production access or cutover. Schema 31
 and build `phase2a2w-portal-facing-services-20260926.1` are package constants.
 
+This registry is written against the portal slice's own base: on the integrated operational-readiness
+candidate the package declares **Schema 32**, because the additive
+`032_notification_communications_authority` notification slice is merged on top of Schema 031. That slice
+adds notification storage and extends `platform_outbox`; it changes no portal table, portal rule or portal
+reason code described below, and the portal rules here are the rules of the integrated tree.
+
 **Authority order (highest first).** A conflict is resolved in this order and never by older prose:
 
 1. Current `main` source and migrations.
@@ -426,10 +432,15 @@ with `public_capability_on_behalf` attribution.
 | Absence submission | `confirmed_submitting`, then `submitted` or `refused` in `portal_public_action_events`; the consumed `portal_public_capability_events` and `portal_public_capability_commands` rows | Successful owner result is `200`; replay can converge from the recorded claim/result. A refused owner outcome is not reported as success. |
 | Public-route failure | `portal_access_denials` when the table exists, with a permitted reason code and request-fingerprint digest | Always `404 {"code":"portal_action_unavailable"}` and `Cache-Control: no-store`; the public response does not disclose whether the handle, token, state or target existed. |
 | Public rate-limit refusal | `portal_access_denials` row with `reason_code = "portal_rate_limited"` and the invoked callback's own registered `surface` value when the table exists | The same uniform `404 {"code":"portal_action_unavailable"}` and `Cache-Control: no-store`; the admission runs before the option gate and before any capability verification or action-event append. |
+| Persistence, corruption or infrastructure failure | **None** — the command's own transaction has already rolled back and no refusal record is appended beside it | The declared failure (`portal_action_evidence_persistence_failed`, `portal_capability_persistence_failed`) or the unexpected throwable is re-raised unchanged: both the public-action controller and the administrative capability command convert a throwable into refusal evidence only when it carries a declared refusal reason (`PortalRule::refusalReason()`), so a failure can never be followed by a durable refusal. The same split governs the post-delegation owner handoff: only a declared owner refusal is recorded as the refused outcome (with the owner's reason and its denial row in that transaction); an owner failure propagates and leaves only the already-committed redemption claim and delegation lease, which the §15.8 bound and an exact replay converge. |
 | Authenticated internal object failure | `PortalAccessPolicy::deny()` writes `portal_access_denials` when the table exists | The internal caller receives the typed exception; there is no current REST exposure. |
 
-Controller failures whose message is not a member of `PortalRule::REASON_CODES` are normalized to the
-same outward shape and stored as `portal_capability_unknown` when a denial row is written.
+Only a throwable whose message is a declared refusal reason (`PortalRule::EXCEPTION_REASON_CODES`) is a
+business refusal: it is normalized onto the uniform outward shape above and its exact reason code is
+recorded durably. A throwable that carries no declared refusal reason — an unexpected error, or one of the
+declared persistence codes, which are deliberately **not** refusal-reason vocabulary members — is
+propagated unchanged after its rollback and writes no denial row, no refused action row and no refusal
+command row (§15.6).
 
 ## Prohibited data and non-authorised behaviour
 

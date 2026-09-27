@@ -1,9 +1,14 @@
 # Delnavazan Platform Conceptual Data Model
 
-> **Current-source reconciliation (2026-09-27):** Current `main` contains Schema 31 migration
-> `031_portal_facing_services_principal_authorization`: portal capability roots, capabilities,
-> capability events/commands, public action events and access denials. These are access artefacts;
-> they do not become canonical Lesson, schedule, delivery or attendance truth. The precise fields,
+> **Current-source reconciliation (2026-09-27):** the integrated operational-readiness candidate is
+> built on `main` / `origin/main` at `6673e7b` and declares **Schema 32**: Schema 031
+> `031_portal_facing_services_principal_authorization` (portal capability roots, capabilities,
+> capability events/commands, public action events and access denials) plus the additive Schema 032
+> `032_notification_communications_authority` (notification workflow/template/snapshot/notification/
+> event/command/attempt/delivery/suppression/tombstone storage and the `platform_outbox` extension).
+> The portal tables are access artefacts;
+> they do not become canonical Lesson, schedule, delivery or attendance truth, and the notification
+> storage is not delivery or provider authority. The precise fields,
 > route gates and prohibited data are recorded in the
 > [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). Historical Schema-25/26 state
 > statements below are retained as provenance.
