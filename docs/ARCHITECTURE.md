@@ -1,7 +1,11 @@
 # Delnavazan Platform Architecture
 
-> **Current-source reconciliation (2026-09-27):** local `main` at `4ccd43c` declares **Schema 33**
-> with the unchanged build `phase2a2s-notification-communications-authority-20260924.1`. Migration
+> **Current-source reconciliation (2026-09-27):** the reviewed local `main` baseline at
+> `5bd376881769b15a27f5b20a5c02cef5bad0397c` (tree `f6dac0bd978e62ecef3247a5f64e8957b1b96d5a`)
+> declares **Schema 33** with the unchanged build
+> `phase2a2s-notification-communications-authority-20260924.1`. The formerly recorded
+> `4ccd43c` / `6673e7b` source identity is a historical review snapshot only, not the current HEAD
+> or checkout. Migration
 > `033_core_dataset_technical_prerequisites` is additive on the historical Schema-32 W/S integration
 > and provides five bounded Core-dataset readiness-evidence tables; it is verified before its ledger
 > entry and schema-version advance. The Phase-W portal implementation remains present. This is a
@@ -48,8 +52,9 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 
 > **Current-state override (2026-09-27):** Platform 0.1.0 local candidate is at **Schema 33**
 > after the Phase 2A.2-R2, V, T, U and W candidate trees, the historical additive Schema-032 Notifications S
-> re-land were materialised on top of the merged R1 (Schema 25) baseline; local `main` is at
-> `4ccd43c` atop `origin/main` at `6673e7b`, and the package declares build
+> re-land were materialised on top of the merged R1 (Schema 25) baseline; the reviewed local `main`
+> baseline is `5bd376881769b15a27f5b20a5c02cef5bad0397c` (tree
+> `f6dac0bd978e62ecef3247a5f64e8957b1b96d5a`), and the package declares build
 > `phase2a2s-notification-communications-authority-20260924.1`
 > (the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2`). Phases 2A.2-A through Q are complete, independently
 > reviewed where consequential, merged and closed; R1 is merged and closed; R2/V/T/U/W and the S

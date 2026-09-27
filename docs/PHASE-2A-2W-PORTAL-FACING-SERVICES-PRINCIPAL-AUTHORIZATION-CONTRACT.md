@@ -9,12 +9,13 @@ authorised or evidenced.
 `phase2a2s-notification-communications-authority-20260924.1`. The W slice remains the historical
 Schema-031 candidate stamped `phase2a2w-portal-facing-services-20260927.2`; Schema 32 is historical
 Notifications S storage, and Schema 33 adds bounded readiness storage only.
-**Current source:** local `main` at `4ccd43c62d1fd8311cce75bac55681b81b85eda9`, atop
-`origin/main` `6673e7bb6b0dc267d455b61220c3da77eb1b4356`, with the
-reviewed W correction, the finalized operational-readiness runtime correction, this docs/portal
+**Current reviewed source baseline:** local `main` at
+`5bd376881769b15a27f5b20a5c02cef5bad0397c` (tree `f6dac0bd978e62ecef3247a5f64e8957b1b96d5a`), with
+the reviewed W correction, the finalized operational-readiness runtime correction, this docs/portal
 correction and the additive Schema-32 Notifications S re-land merged as explicit non-fast-forward
-merges. The historical base statement in §0.1 is retained as provenance; it is not the current
-checkout identity.
+merges. `4ccd43c62d1fd8311cce75bac55681b81b85eda9` atop `origin/main`
+`6673e7bb6b0dc267d455b61220c3da77eb1b4356` is a historical review snapshot, not the current HEAD or
+checkout. The historical base statement in §0.1 is retained as provenance.
 **Owner brief this document answers:** *"Prepare Phase 2A.2-W / Schema 031 contract for
 Student/Teacher/Admin portal-facing services, session-to-Core-principal resolution, object-level
 authorization, stable read models and purpose-bound signed public Join/Absence capabilities. All

@@ -1,12 +1,14 @@
 # Delnavazan Core — Living Project Continuity Record
 
-> **Current-source reconciliation (2026-09-27):** The checked-out authoritative source branch is
-> local `main` at `4ccd43c62d1fd8311cce75bac55681b81b85eda9` (atop `origin/main`
-> `6673e7bb6b0dc267d455b61220c3da77eb1b4356`); package constants declare Schema 33 (migrations
+> **Current-source reconciliation (2026-09-27):** The reviewed local `main` baseline is
+> `5bd376881769b15a27f5b20a5c02cef5bad0397c` (tree `f6dac0bd978e62ecef3247a5f64e8957b1b96d5a`);
+> package constants declare Schema 33 (migrations
 > 001–033) and the unchanged Notification-Communications build
 > `phase2a2s-notification-communications-authority-20260924.1`. Schema 33 is the additive
 > `033_core_dataset_technical_prerequisites` migration after the historical Schema-032 Notifications S
-> re-land. This is source
+> re-land. The formerly recorded `4ccd43c62d1fd8311cce75bac55681b81b85eda9` atop `origin/main`
+> `6673e7bb6b0dc267d455b61220c3da77eb1b4356` is a historical review snapshot, not the current HEAD
+> or checkout. This is source
 > topology/implementation presence only, not an independent-review, deployment, public-enablement or
 > cutover claim. The source-derived W boundary is recorded in
 > [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md).
@@ -28,7 +30,7 @@
 | Item | Authoritative source state |
 |---|---|
 | Repository | `Mr-M13/delnavazan-platform` |
-| Current source checkout | Local `main` `4ccd43c62d1fd8311cce75bac55681b81b85eda9`, atop `origin/main` `6673e7bb6b0dc267d455b61220c3da77eb1b4356` |
+| Current reviewed source baseline | Local `main` `5bd376881769b15a27f5b20a5c02cef5bad0397c`, tree `f6dac0bd978e62ecef3247a5f64e8957b1b96d5a`; `4ccd43c62d1fd8311cce75bac55681b81b85eda9` atop `origin/main` `6673e7bb6b0dc267d455b61220c3da77eb1b4356` is a historical review snapshot only. |
 | Platform / declared schema | 0.1.0 / **Schema 33** |
 | Migrations | 001–033; latest `033_core_dataset_technical_prerequisites`, additive on historical Schema 32 |
 | Build identity | `phase2a2s-notification-communications-authority-20260924.1`; the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2` |
