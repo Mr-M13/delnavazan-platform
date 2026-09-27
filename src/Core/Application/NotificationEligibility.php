@@ -152,14 +152,21 @@ final class NotificationEligibility {
             $scheduledFor=(string)($facts['scheduled_for']??'');
             $subjectInstant=(string)($facts['subject_instant']??'');
             if($scheduledFor===''||$subjectInstant==='')return self::refusal('eligibility_expired');
-            if(NotificationSupport::seconds($scheduledFor)>=NotificationSupport::seconds($subjectInstant))return self::refusal('eligibility_expired');
+            // Both instants are persisted columns, so an unreadable one is a refusal rather than a zero.
+            $scheduledSeconds=NotificationSupport::seconds($scheduledFor);
+            $subjectSeconds=NotificationSupport::seconds($subjectInstant);
+            if($scheduledSeconds===null||$subjectSeconds===null)return self::refusal('eligibility_expired');
+            if($scheduledSeconds>=$subjectSeconds)return self::refusal('eligibility_expired');
         }
         if(isset($validated[NotificationRule::LEAD_TIME_RULE])){
             $lead=(int)$validated[NotificationRule::LEAD_TIME_RULE]['parameter_c'];
             $scheduledFor=(string)($facts['scheduled_for']??'');
             $subjectInstant=(string)($facts['subject_instant']??'');
             if($scheduledFor===''||$subjectInstant==='')return self::refusal('lead_time_insufficient');
-            if(NotificationSupport::seconds($subjectInstant)-NotificationSupport::seconds($scheduledFor)<$lead*60)return self::refusal('lead_time_insufficient');
+            $scheduledSeconds=NotificationSupport::seconds($scheduledFor);
+            $subjectSeconds=NotificationSupport::seconds($subjectInstant);
+            if($scheduledSeconds===null||$subjectSeconds===null)return self::refusal('lead_time_insufficient');
+            if($subjectSeconds-$scheduledSeconds<$lead*60)return self::refusal('lead_time_insufficient');
         }
         return array('outcome'=>'pass','code'=>null);
     }

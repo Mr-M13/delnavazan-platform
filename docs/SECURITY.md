@@ -1,5 +1,12 @@
 # Delnavazan Platform Security Architecture
 
+> **Current-source reconciliation (2026-09-27):** Schema-31 Phase-W registers three public routes
+> whose WordPress permission callback is intentionally public, but each route independently requires
+> the exact public-action option value and a purpose-bound capability before it can act. Failures are
+> normalized to a non-enumerating response. The exact grants, owner seams, evidence and prohibited data
+> are in the [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). Registration is not
+> authorisation for public enablement, deployment or cutover.
+
 ## 1. Security objective
 
 The platform protects academy identities, lesson state, attendance evidence,
@@ -33,8 +40,33 @@ not bypass Core rules.
 - Every administrator mutation requires an explicit WordPress capability and an
   intent-specific nonce.
 - Object-level authorization is checked server-side for the exact Core record.
-- Portal authorization derives from an authenticated, mapped principal, never
-  from a browser-only flag, email parameter, or external ID.
+- Authenticated portals (where they exist) derive authorization from an
+  authenticated, mapped principal, never from a browser-only flag, email
+  parameter, or external ID. This holds for authenticated surfaces only.
+- The separately authorised public-capability path (Phase 2A.2-W) has no session
+  principal. It requires the exact `dzn_platform_portal_actions === 'enabled'`
+  option gate plus a purpose-bound capability (`lesson_join` or `lesson_absence`)
+  bound to the exact authorised Lesson and applicable schedule version, an
+  unexpired token, and an allowlisted sealed HTTPS join host. Handle/token
+  material is stored only as a digest; refusals are a uniform non-enumerating
+  `404` with `Cache-Control: no-store` (the refusal response does not send
+  `Referrer-Policy`); successful redirect and absence responses send
+  `Referrer-Policy: no-referrer`. Every public-route request also passes a
+  best-effort `PortalRateLimiter` admission before the option gate and before
+  any capability verification — keyed on a salted digest of the client network
+  signal plus the presented handle — and a refusal takes the same uniform
+  non-enumerating `404` and is recorded as `portal_rate_limited`. The bucket is
+  the invoked route's own fixed surface constant, passed by that route's
+  registered callback and never read from the request, so no query value, path
+  suffix or query-style REST route can select or collapse a limiter bucket or a
+  denial-audit row. The admission is fail-open: a salt or cache failure is
+  allowed through, and `portal_rate_limited` is refused only after a completed
+  `allow()` returns false. The numeric
+  budget remains an owner decision. An absence confirmation delegates
+  evidence-only to the Phase-P
+  `CanonicalAttendanceIntakeService::submitCapabilityClaim()` without settling
+  attendance. See the
+  [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md).
 - Read and write capabilities are separate where practical.
 - Background tasks run with a named system actor and bounded service permission.
 - Hiding controls is presentation only and never the sole control.

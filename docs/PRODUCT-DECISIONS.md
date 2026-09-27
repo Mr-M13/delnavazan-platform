@@ -9,6 +9,11 @@ Hamnavaz Phase 4.
 
 > **Current-state override:** The initial Phase-1 academy model and lifecycle vocabulary below remain historical product provenance. Current canonical Enrolment identity is Student + Course; canonical `enrolments.teacher_id` is retained Accepted Service Arrangement context, not current Teacher authority. Current Teacher authority belongs to the separate Teacher Assignment aggregate. Schema 17 adds a Teacher-neutral canonical Term foundation with lifecycle `authorised`, `current`, `closed`, or `cancelled`; Schema 18 Phase L adds bounded Term creation/lifecycle commands but no Lesson consumption or payment authority.
 
+> **Source-state reconciliation (2026-09-27):** Current `main` contains Schema-31 portal access
+> artefacts and disabled-by-default public capability routes. This is not a product decision to distribute
+> links, enable public actions, activate a provider, change Theme presentation or cut over a workflow.
+> The implementation inventory is the [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md).
+
 ## 2. Identity
 
 - Teacher and Student are permanent Core identities.

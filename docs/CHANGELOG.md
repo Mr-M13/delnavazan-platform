@@ -3,6 +3,244 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Phase 2A.2-W — revocation-replay claim correction, round 9 — candidate, unmerged — 2026-09-27
+
+- Closes the one blocking finding of the review of `2aa2333522a84254cac33eaff1179049466058c0` / tree
+  `6258f152b61997c9e4c8af2afd6f764632201c66` (the review's `CORRECTION ROUND 9`): four documents — §18 of
+  `docs/PHASE-2A-2W-PORTAL-FACING-SERVICES-PRINCIPAL-AUTHORIZATION-CONTRACT.md`, the portal authorization
+  registry's execution-evidence paragraph, this changelog's round-8 entry and the `README.md` active-candidate
+  row — recorded
+  `tests/phase-2a2w-replay-runtime.php` as proving consumed-confirmation replay after the Student's
+  principal link was revoked, but the suite as then written only invoked the private
+  `PortalCapabilityService::owner()` with a mock owner and `requirePrincipal=false`. It consumed no
+  confirmation, revoked no principal link, never reached `verifyConsumed()`/`confirmAbsence()`, and asserted
+  no replay/convergence or durable-event invariant, so the claimed validation scope did not match executable
+  evidence and the security-relevant guarantee it described was untested.
+- Correction taken — the review's first option, a real replay proof rather than a narrowed claim.
+  `tests/phase-2a2w-replay-runtime.php` is replaced with a behavioural proof that drives the real service
+  classes against an in-memory stub of the portal evidence tables and the two owner ports, the same
+  stubbed-store technique `tests/phase-2a2w-public-rate-limit-unit.php` already uses and §18 already accepts:
+  (1) it renders a one-time Student absence confirmation through the real
+  `PortalPublicActionService::renderAbsenceConfirmation()`; (2) it consumes it through the real
+  `::confirmAbsence()` while the principal link is live, appending the `confirmed_submitting` claim, the
+  `consumed` capability event, the `consume` command and the `submitted` outcome and moving the capability to
+  `state='consumed'`; (3) it revokes the Student's principal link, after which the ordinary verification path
+  refuses `portal_principal_required`; and (4) it replays the exact same handle/token/confirmation, which
+  converges on the recorded `submitted` outcome with `replayed=true` and re-resolves the immutable proof
+  through `verifyConsumed()` with `requirePrincipal=false`, appending no second claim, event or command.
+- §18, the portal authorization registry and this changelog now describe that executed scope exactly and still
+  claim no runtime, migration, concurrency or browser evidence. The round-8 entry's own scope wording, which
+  described the pre-round-9 stub as if it exercised the flow, is corrected in place and flagged there.
+- The contract guard `tests/phase-2a2w-contract.php` no longer asserts the stub's `revoked_at` /
+  `same consumed confirmation` strings; it now asserts the rewritten suite's real seams
+  (`renderAbsenceConfirmation(`, `confirmAbsence(`, `verifyConsumed(`, `requirePrincipal`,
+  `portal_principal_required`, `replayed`, `consumed_action_event_id`), so deleting or weakening the proof
+  fails the guard instead of silently passing.
+- Re-verified in this environment against this candidate (local PHP 8.3/8.4/8.5 CLI WebAssembly runtime; no
+  WordPress, no database): the replay suite prints `Phase-W revoked-principal replay coverage passed` and
+  exits 0 under all three; `tests/phase-2a2w-contract.php` prints `Phase-W contract passed` and exits 0 under
+  8.3 and 8.5; `tests/phase-2a2w-public-rate-limit-unit.php` passes standalone under both; and 274 of 274
+  `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` under 8.3 and 8.5. Flipping the
+  suite's `requirePrincipal=false` seam back to re-proving mutable owner state (reverting
+  `PortalCapabilityService::verifyConsumed()` to pass `requirePrincipal=true`) makes the replay fail with
+  `portal_principal_required`, so the proof is not a tautology.
+- No `src/` file changed in this round: source is byte-identical to the reviewed candidate's. Only the replay
+  suite, the contract guard and those four documentation claims moved.
+
+## Phase 2A.2-W — contract §18 revocation-replay evidence correction, round 8 — candidate, unmerged — 2026-09-27
+
+- Closes the one blocking finding of the review of `709b4f0468017da94b1ad229bf9faa591c25af4f` / tree
+  `da63f488841ee271489f6aac4b6523e0b34626b0` (the review's `CORRECTION ROUND 8`): §18 of
+  `docs/PHASE-2A-2W-PORTAL-FACING-SERVICES-PRINCIPAL-AUTHORIZATION-CONTRACT.md` (the reviewed candidate's
+  lines 1138–1154) omitted the tracked W suite `tests/phase-2a2w-replay-runtime.php` and its scope and
+  execution status, and this changelog's round-7 entry read as a complete enumeration of the candidate's W
+  evidence, leaving that suite unstated and the contract's acceptance/evidence registry incomplete.
+- §18 now carries that suite as its own row with its scope and an explicit status. Scope: the
+  owner-binding behaviour of a consumed absence confirmation whose Student principal link was revoked
+  after consumption — re-resolution through `PortalCapabilityOwnerPort::binding()` with
+  `requirePrincipal=false` reuses the immutable Lesson/schedule/student proof instead of re-proving
+  mutable owner state, so the same confirmation converges. As first written the suite checked only that
+  delegation seam: it invoked the private `PortalCapabilityService::owner()` with a mock owner and
+  `requirePrincipal=false`, consumed no confirmation, revoked no principal link and never reached
+  `verifyConsumed()`/`confirmAbsence()`, so this row's scope and the guard-needle note first recorded here
+  described more than the file exercised (**round 9 replaces the stub with a real render → consume → revoke
+  → replay proof, corrects this scope, and re-points the guard needles; see the round-9 entry**). Status:
+  **written and executed** — the current suite passes standalone under the local PHP 8.3/8.5 CLI WebAssembly
+  runtime with no WordPress and no database, printing `Phase-W revoked-principal replay coverage passed` and
+  exiting 0 under both. The §18 executed class and its closing paragraph now describe the source guard and
+  these PHP-level behavioural proofs together, and still claim no runtime, migration, concurrency or browser
+  evidence.
+- Re-verified in this environment against this candidate (local PHP 8.3/8.5 CLI WebAssembly runtime; no
+  WordPress, no database): `tests/phase-2a2w-replay-runtime.php` exits 0 under 8.3 and 8.5;
+  `tests/phase-2a2w-contract.php` prints `Phase-W contract passed` and exits 0 under both;
+  `tests/phase-2a2w-public-rate-limit-unit.php` passes standalone under both; and 274 of 274
+  `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` under both. The guard's
+  revoked-principal assertion reads that suite, so removing or changing it fails the guard rather than
+  silently passing.
+- One blocking finding remained and is closed here; nothing else about the candidate moved. No source or
+  test file changed in this round: `src/` and `tests/` in this candidate's tree are byte-identical to the
+  reviewed candidate's.
+- This round completes the round-7 entry's closing enumeration instead of retracting it: the suites that
+  entry named are exactly the §18 suites whose files are absent from this candidate's tree, and the newly
+  recorded revocation-replay suite is not among them (it is present in the tree and executed). The portal
+  authorization registry's execution-evidence paragraph now names the same three PHP-only suites this
+  entry records, so the registry, the contract and this changelog agree.
+
+## Phase 2A.2-W — contract test-matrix evidence correction, round 7 — candidate, unmerged — 2026-09-27
+
+- Closes the one blocking finding of the review of `7600a53e363c487ad3f89b7d39be6802e9a0f96b` / tree
+  `7a23617f9fd1b77c2e27f1171f5b22ac3abc10ac` (the review's `CORRECTION ROUND 7`): §18 of
+  `docs/PHASE-2A-2W-PORTAL-FACING-SERVICES-PRINCIPAL-AUTHORIZATION-CONTRACT.md` (the reviewed candidate's
+  lines 1129–1141) still recorded `tests/phase-2a2w-contract.php` as "written, **not executed** (no PHP)"
+  and closed with the blanket "Until the disposable runtime exists every row above is **written but not
+  executed**", which contradicted this changelog's and the portal authorization registry's executed pass
+  for that guard. §18 now separates the two classes of evidence instead of retracting the pass: the static
+  source guard, with the behavioural proof it embeds from `tests/phase-2a2w-public-rate-limit-unit.php`,
+  is recorded as **executed** under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no
+  database, while every suite that needs the disposable WordPress/MariaDB runtime is recorded as
+  **not present, not executed** and as an acceptance gate this candidate has not met before merge.
+- The portal authorization registry needed no change: its execution-evidence paragraph already states
+  this same static-guard-only evidence for the current candidate, so the contract now agrees with it
+  instead of contradicting it. No other W evidence statement in this repository changed in this round.
+- The same edit corrects a second instance of the same defect class in the same table: those runtime rows
+  read "written" for files that are absent from this candidate's `tests/` directory, so each now records
+  the absence rather than an unexecuted suite, and the closing paragraph states the split directly instead
+  of blanket-claiming execution state for every row. No source or test file changed in this round: `src/`
+  and `tests/` in this candidate's tree are byte-identical to the reviewed candidate's.
+- Re-verified in this environment against this candidate (local PHP 8.3/8.5 CLI WebAssembly runtime; no
+  WordPress, no database): `tests/phase-2a2w-contract.php` prints `Phase-W contract passed` and exits 0
+  under both 8.3 and 8.5; `tests/phase-2a2w-public-rate-limit-unit.php` passes standalone under both
+  (`phase-2a2w-public-rate-limit-unit: OK`); and 274 of 274 `src/**/*.php` files parse clean under
+  `token_get_all(..., TOKEN_PARSE)` under both. Re-run against the pre-change source `9790c137…` this
+  guard fails its fixed-surface assertion (`Public route surface is not a fixed registered constant`), so
+  the recorded pass is not a restatement of the current source.
+- Not executed here or in the review environment: the disposable WordPress/MariaDB runtime and the §18
+  migration, principal, authorization, capability, public-action, corruption, failure, theme-isolation and
+  concurrency suites, none of which is present in this candidate's tree. `tests/schema-contract.php` keeps
+  its unchanged pre-existing legacy-direction failure. (Round 8 completes this enumeration: §18 also
+  carries a PHP-only revocation-replay suite, `tests/phase-2a2w-replay-runtime.php`, which is present in
+  this tree and executed, so it is not among the suites listed here; the suites listed here are exactly
+  the §18 suites absent from the tree.)
+
+## Portal authorization registry — validation-evidence correction — candidate, unmerged — 2026-09-27
+
+- Closes the one blocking finding of the review of `deaf70c3bdb3b6b40a6a43c257609cd176b79ea9` / tree
+  `6f8ec6bc06eff5709ba14156f62a71898b9e5b88` (the review's `CORRECTION ROUND 6`): the portal
+  authorization registry still carried a "not executed here: PHP unavailable" note on both of its
+  `tests/phase-2a2w-contract.php` anchors (`docs/PORTAL-AUTHORIZATION-REGISTRY.md:74` and `:449`) while
+  the round-4 entry above records an executed pass, so the registry's validation evidence contradicted
+  the changelog. Both anchors now record the claimed execution evidence instead, and the execution claim
+  is not retracted. No source or test file changed in this round: `src/` and `tests/` in this candidate's
+  tree are byte-identical to the reviewed candidate's.
+- Re-verified in this environment against this candidate (local PHP 8.3/8.5 CLI WebAssembly runtime; no
+  WordPress, no database): `tests/phase-2a2w-contract.php` passes under both 8.3 and 8.5, including its
+  embedded behavioural proof, and `tests/phase-2a2w-public-rate-limit-unit.php` passes standalone under
+  both. Re-run against the pre-change source `9790c137…` (this candidate's guards over that source) the
+  contract guard fails its fixed-surface assertion and the behavioural proof fails at its fail-open probe,
+  and 274 of 274 `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` under both
+  versions. The registry's `Scope, status and authority order` section now states this execution evidence
+  and its limits directly.
+- One older W entry carried the same class of stale note: the round recorded as `public rate-limit
+  admission correction` said "Not executed here: PHP is unavailable in this environment" about this same
+  guard. It is now marked as the historical note it was, pointing to the round-4 entry's execution
+  evidence. No other W evidence statement in this changelog changed.
+- Not executed here or in the review environment: the disposable WordPress/MariaDB runtime and the §18
+  runtime, migration and concurrency suites. No runtime, migration, concurrency or browser evidence is
+  claimed, and `tests/schema-contract.php` keeps its unchanged pre-existing legacy-direction failure.
+
+## Phase 2A.2-W — public rate-limit admission correction, round 4 — candidate, unmerged — 2026-09-27
+
+- The correction round requested against `f7647f76efe96a4b87df537077e4fae01c21043f` / tree
+  `2b2d25d8e877f9e162e5160f51e834801bc9990a` had **no actionable blocking finding to close**. The
+  independent review of that candidate reported no blocking finding and was recorded as
+  "PASS - MERGE PLANNING MAY PROCEED": fixed route surfaces prevent request-text bucket/audit confusion,
+  and limiter failures correctly fail open. Round 4 therefore changes no source: `src/` and `tests/` in this
+  candidate's tree are byte-identical to the reviewed candidate's.
+- This entry is the round's only change, together with the `README.md` status row. It records the round so
+  the correction sequence is not silent; it asserts nothing new about the candidate's security posture.
+- Re-verified in this environment against this candidate (a local PHP 8.3/8.5 CLI WebAssembly runtime; no
+  WordPress, no database): `tests/phase-2a2w-contract.php` passes under both 8.3 and 8.5, including its
+  embedded behavioural proof; `tests/phase-2a2w-public-rate-limit-unit.php` passes standalone; and 274 of
+  274 `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` (the equivalent of
+  `tests/static.php`, whose `exec()` PHP_BINARY lint cannot run in a WebAssembly runtime). Both guards were
+  re-run against the pre-change source `9790c137…`: the contract guard fails its fixed-surface assertion and
+  the behavioural proof fails at its fail-open probe, so neither is a restatement of the current source.
+- Not executed here or in the review environment: the disposable WordPress/MariaDB runtime and the §18
+  runtime, migration and concurrency suites. No runtime, migration, concurrency or browser evidence is
+  claimed, and `tests/schema-contract.php` keeps its unchanged pre-existing legacy-direction failure.
+
+## Phase 2A.2-W — public rate-limit admission correction, round 3 — candidate, unmerged — 2026-09-27
+
+- Closes the two blocking findings of the review of `9790c1377f2993fa7fc6a79764de43dffb909f39` / tree
+  `9a5cae0426e29addfef76fe16d684421c941dbdf`.
+- **Surface selection is no longer request-derived.** `PortalPublicActionController` declares the two
+  fixed public-surface constants (`SURFACE_JOIN = 'portal_public_join'`,
+  `SURFACE_ABSENCE = 'portal_public_absence'`) and each registered callback passes its own constant into
+  both `admit()` and `refused()`. The former `$_SERVER['REQUEST_URI']` probe is gone, so a Join request
+  carrying `?x=/portal/absence`, or a query-style `/index.php?rest_route=…portal/absence/confirm` route,
+  can no longer select another surface's limiter bucket or denial-audit row. Both values are members of
+  the declared public surface vocabulary; no third surface was introduced.
+- **The fail-open contract now matches the code.** `admit()` keeps fingerprinting and the `allow()` call
+  inside a single `try` and returns normally on any `\Throwable`; `portal_rate_limited` is thrown only
+  after a completed `allow()` returns `false`. The former
+  `catch(\InvalidArgumentException $e){ throw $e; }` — which converted a salt or cache failure of that
+  type into a refusal — is removed.
+- `tests/phase-2a2w-public-rate-limit-unit.php` is new behavioural coverage, embedded by
+  `tests/phase-2a2w-contract.php`. It proves that the Join and absence buckets are selected by the
+  registered surface and not by request text (both directions, including the adversarial query values), a
+  genuine limit refusal recorded as `portal_rate_limited` on the Join surface before the option gate is
+  consulted, and fail-open on a salt failure while fingerprinting and on a cache failure inside
+  `allow()`. The contract guard also asserts the fixed-surface wiring and the fail-open structure
+  statically.
+- Evidence in this environment: `tests/phase-2a2w-contract.php` (its static seams together with the
+  embedded behavioural proof) and `tests/phase-2a2w-public-rate-limit-unit.php` were executed under a
+  local PHP 8.3 CLI runtime (a WebAssembly build; no WordPress and no database) and pass, and an
+  equivalent of `tests/static.php`'s lint is clean across all 274 `src/**/*.php` files. Re-run against
+  this candidate's own pre-change source `9790c137…`, the behavioural proof fails seven of its nine probes
+  and the contract guard fails its fixed-surface assertion, so both are genuine regression guards rather
+  than restatements. The disposable WordPress/MariaDB runtime, the §18 runtime/migration/concurrency
+  suites and `tests/schema-contract.php` were not executed here, and no runtime, migration, concurrency
+  or browser evidence is claimed. (`tests/schema-contract.php` fails identically on the pre-change
+  candidate `9790c137…` and on the base W candidate `2ab0c71…`: its legacy direction guard forbids
+  `finance`/`amelia` text that later-phase migrations already contain in `Migrator.php`. It is unchanged
+  here and is not part of this correction.)
+
+## Phase 2A.2-W — public rate-limit admission correction — candidate, unmerged — 2026-09-27
+
+- `PortalPublicActionController` now invokes `PortalRateLimiter` for every request to all three registered
+  public routes (`/portal/join`, `/portal/absence`, `/portal/absence/confirm`) before the
+  `dzn_platform_portal_actions` gate and before any capability verification, so the best-effort
+  abuse-control budget gates every public request rather than only the verified ones.
+- Keying is a salted digest of the client network signal plus the presented handle; a refusal is
+  normalized through the existing non-enumerating public failure
+  (`404 {"code":"portal_action_unavailable"}`, `Cache-Control: no-store`) and recorded as
+  `portal_rate_limited` in `portal_access_denials`. The declared best-effort limiter stays fail-open on
+  its own cache or salt failure, and the numeric budget remains the open owner decision of W contract
+  §21.5.
+- Closes the blocking finding on candidate `f7f4e9f6b7cffbcc01fbb9fcd0b52b6450f7d4d0`: the registry's
+  Class B rate-limit row, the three public registry rows and `docs/SECURITY.md` now record the
+  implemented mechanism instead of the former gap.
+- `tests/phase-2a2w-contract.php` guards that the admission precedes the option gate on both callbacks.
+  Not executed in that round. (The "PHP is unavailable in this environment" note recorded here is the
+  historical state of that round and is superseded: the guard's execution evidence appears in the round-4
+  entry above.)
+
+## Documentation reconciliation — current Schema-31 source state — 2026-09-27
+
+- Recorded the current `main` source topology at `2ab0c71`: Schema 31 / migration
+  `031_portal_facing_services_principal_authorization` and the Phase-W portal implementation are present.
+  This entry does not mark the candidate independently reviewed, deployed, enabled or cut over.
+- Added [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md), derived from source, for all
+  three W REST routes, the exact public gate, grants, public/internal operations, owner seams, evidence,
+  refusal behaviour and prohibited data.
+- Corrected W contract implementation-state assertions that predated the source: `src/Portals/`, Schema
+  31, migration 031, the capability marker and the capability-attributed attendance handoff now exist;
+  there remains no authenticated Student/Teacher portal REST controller.
+- Recorded topology truth: Notifications S recovery tip `1603936` is not an ancestor of current `main`
+  (shared merge-base `559b173…`). Historical queue metadata is not merge evidence. The operational-readiness
+  integration merges the reviewed Schema-32 Notifications S re-land candidate `56cd831…` itself, which is
+  additive on Schema 031 and is not that recovery branch.
+
 ## Phase 2A.2-S — Canonical Notification & Communications Authority — candidate, unmerged — 2026-09-24
 
 Schema 32 / migration `032_notification_communications_authority` / build
@@ -180,8 +418,41 @@ Theme change is involved.
   notification pointing at a different valid S-owned row, a NULL notification pointer, and an outbox pointer
   that no longer names its notification — while every mirrored schedule value stays exactly what the
   aggregate derived, and proves the aggregate read, the attempt read seam and the schema verifier each fail
-  closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
-  which its §5 assertion referenced without the import (a latent fatal in the suite itself).
+closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
+which its §5 assertion referenced without the import (a latent fatal in the suite itself).
+
+### Implementation correction round 11 (host review `CORRECTION ROUND 3`, failed candidate `6673e7b`, tree `1b2cad8a`)
+
+The host review refused the candidate with one blocking finding: `NotificationSupport::seconds()` validated
+the shape and the calendar but never the declared `datetime` domain, so it accepted a valid date outside
+`1000-01-01`…`9999-12-31` (`0999-12-31 23:59:59`); `NotificationSchedule::derive()` could therefore accept an
+out-of-domain `observed_at` and persist it as `schedule_anchor_at`/`scheduled_for`, and `addSeconds()`
+accepted an out-of-domain base whenever the sum happened to re-enter the domain. The schema identity, table
+count, migration name and build identity are unchanged, no schema object is added, and no merge, deploy,
+provider activation, external send, Amelia or Theme change is involved.
+
+- **The declared `datetime` domain now binds the parse side as well as the format side.** `seconds()`
+  refuses a parsed value below `DATETIME_MIN` or above `DATETIME_MAX` before it constructs anything (the
+  declared `YYYY-MM-DD HH:MM:SS` shape fixes a four-digit zero-padded year, so the domain comparison is exact
+  on the canonical text), so every caller inherits one refusal: the §8.1 evidence envelope
+  (`notification_evidence_at_invalid`), the schedule observation instant and the newly guarded non-null
+  subject instant (`schedule_derivation_divergence`), `dayDifference()`, `coalesceBucket()`, `utcToLocal()`
+  and — because it parses its base through `seconds()` — `addSeconds()` itself, which consequently refuses an
+  out-of-domain base even when the sum would land back inside the domain. `NotificationSchedule::defer()` and
+  `NotificationEligibility::evaluate()` additionally parse both sides of their instant comparisons
+  explicitly, so a refused instant can never be compared as a zero second count, and a derived result that
+  leaves the domain still fails closed exactly as before.
+- Coverage: `tests/phase-2a2s-contract.php` §16 asserts the new `seconds()` domain rule, the subject-instant
+  domain guard and every new runtime case label, and documents that the parse side is bound by the same
+  domain as the format side; `tests/phase-2a2s-schedule-derivation-runtime.php` §10 probes
+  `seconds()`/`addSeconds()`/`dayDifference()`/`coalesceBucket()`/`utcToLocal()`/`evidence()` with
+  `0999-12-31 23:59:59` beside the still-accepted declared boundaries, refuses an out-of-domain observation
+  instant, an out-of-domain subject instant, an out-of-domain `addSeconds()` base inside a deferral, and a
+  derivation whose expiry leaves the domain, and proves the production observation path raises
+  `schedule_derivation_divergence` while persisting no notification and leaving the intent row unclaimed.
+  This correction environment provides no PHP or WordPress runtime, so the runtime suites are updated and
+  reviewed by source but were **not executed here**; no migration was re-run and no schema object, identity
+  or build changed.
 
 ### Implementation correction round 10 (host review `CORRECTION ROUND 2`, failed candidate `63f6b5b`, tree `abd60da`)
 

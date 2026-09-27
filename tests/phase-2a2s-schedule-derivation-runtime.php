@@ -143,4 +143,41 @@ dzn_s_fix_assert($preEpochDerived['schedule_anchor_at']==='1969-12-31 21:30:00',
 dzn_s_fix_assert($preEpochDerived['scheduled_for']==='1969-12-31 21:30:00','a pre-epoch anchor must schedule at its own instant instead of diverging');
 dzn_s_fix_assert($preEpochDerived['expires_at']==='1969-12-31 23:00:00','the tier-F expiry must stay the earlier of the announced instant and the frozen window');
 dzn_s_fix_assert($preEpochDerived['coalesce_bucket']==='-3','the coalesce bucket must be floor(anchor_at / width) for a pre-epoch anchor');
+
+// 10. §6.3's declared `datetime` domain binds the parse side as well as the format side, so no derivation
+//     input and no `addSeconds()` base can launder a value the stored column could never hold back into the
+//     domain by arithmetic. `seconds()` refuses an out-of-domain parse, and every caller inherits it.
+dzn_s_fix_assert(NotificationSupport::seconds(NotificationSupport::DATETIME_MIN)!==null&&NotificationSupport::seconds(NotificationSupport::DATETIME_MAX)!==null,'both declared domain boundaries must still parse');
+dzn_s_fix_assert(NotificationSupport::seconds('0999-12-31 23:59:59')===null,'a valid calendar date below the declared domain must be refused by seconds()');
+dzn_s_fix_assert(NotificationSupport::seconds('9999-12-31 23:59:59')!==null,'the declared domain maximum must still parse');
+dzn_s_fix_assert(NotificationSupport::addSeconds('0999-12-31 23:59:59',10)===null,'an out-of-domain addSeconds() base must be refused even when the sum would re-enter the domain');
+dzn_s_fix_assert(NotificationSupport::addSeconds('9999-12-31 23:59:59',1)===null,'an out-of-domain addSeconds() result must still be refused');
+dzn_s_fix_assert(NotificationSupport::dayDifference('0999-12-31 23:59:59','1970-01-01 00:00:00')===null,'an out-of-domain instant must be unreadable to the day difference');
+dzn_s_fix_assert(NotificationSupport::coalesceBucket('0999-12-31 23:59:59',60)==='','an out-of-domain anchor must derive no coalesce bucket');
+dzn_s_fix_assert(NotificationSupport::utcToLocal('UTC','0999-12-31 23:59:59')===null,'an out-of-domain instant must not resolve to a local wall clock');
+dzn_s_fix_rejected(fn()=>NotificationSupport::evidence(array('evidence_channel'=>'staff_record','evidence_reference'=>'out-of-domain','evidence_at'=>'0999-12-31 23:59:59')),'notification_evidence_at_invalid','an evidence instant below the declared domain');
+
+// Every derivation entry point refuses an out-of-domain input: the observation instant, a persisted
+// subject instant, and the `addSeconds()` base a deferral re-derives from are each judged by the declared
+// domain before any instant is composed.
+$tierPDomain=NotificationSchedule::validateComposition(array(
+    array('rule_code'=>'immediate','ordinal'=>1),array('rule_code'=>'deferral','ordinal'=>1,'parameter_a'=>'60'),array('rule_code'=>'deferral','ordinal'=>2,'parameter_a'=>'3'),array('rule_code'=>'expiry','ordinal'=>1,'parameter_a'=>'1440'),
+),'P');
+$tierFDomain=NotificationSchedule::validateComposition(array(
+    array('rule_code'=>'lead_time','ordinal'=>1,'parameter_a'=>'90'),array('rule_code'=>'expiry','ordinal'=>1,'parameter_a'=>'120'),
+),'F');
+dzn_s_fix_rejected(fn()=>NotificationSchedule::derive($tierPDomain,array('observed_at'=>'0999-12-31 23:59:59','subject_instant'=>null,'timezone'=>'','deferral_count'=>0)),'schedule_derivation_divergence','an out-of-domain observation instant');
+dzn_s_fix_rejected(fn()=>NotificationSchedule::derive($tierPDomain,array('observed_at'=>'9999-12-31 23:59:59','subject_instant'=>null,'timezone'=>'','deferral_count'=>0)),'schedule_derivation_divergence','an observation instant whose derived expiry leaves the declared domain');
+dzn_s_fix_rejected(fn()=>NotificationSchedule::derive($tierFDomain,array('observed_at'=>'2026-01-01 00:00:00','subject_instant'=>'0999-12-31 23:59:59','timezone'=>'','deferral_count'=>0)),'schedule_derivation_divergence','an out-of-domain subject instant');
+dzn_s_fix_rejected(fn()=>NotificationSchedule::defer($tierPDomain,array('derivation_base_at'=>'0999-12-31 23:59:59','deferral_count'=>0,'expires_at'=>''),null,null),'schedule_derivation_divergence','an out-of-domain addSeconds() base inside a deferral');
+
+// The same refusal is reached through the production path, and it writes nothing: an out-of-domain
+// observation instant closes the command as a divergence before a row, instant or mirror is persisted.
+$ready=dzn_s_fix_ready('TERM_LAPSED','sched-out-of-domain',array(),60,array(array('rule_code'=>'immediate'),array('rule_code'=>'expiry','parameter_a'=>'120')));
+$cycle=dzn_s_fix_cycle(null,null,'sched-out-of-domain');
+dzn_s_fix_cycle_transition($cycle,'lapsed','lapsed','sched-out-of-domain');
+$intent=dzn_s_fix_intent('renewal_cycle',$cycle,'TERM_LAPSED','sched-out-of-domain');
+dzn_s_fix_rejected(fn()=>$ready['service']->observeIntent($intent,array_merge(dzn_s_fix_evidence('sched-out-of-domain'),array('observed_at'=>'0999-12-31 23:59:59')),dzn_s_fix_key('obs-out-of-domain')),'schedule_derivation_divergence','an out-of-domain observation instant on the production path');
+dzn_s_fix_assert((int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$p}notifications WHERE outbox_id=%d",$intent))===0,'an out-of-domain observation must persist no notification');
+dzn_s_fix_assert($wpdb->get_var($wpdb->prepare("SELECT notification_id FROM {$p}platform_outbox WHERE id=%d",$intent))===null,'an out-of-domain observation must leave the intent row unclaimed');
 echo "Phase 2A.2-S schedule derivation runtime passed\n";

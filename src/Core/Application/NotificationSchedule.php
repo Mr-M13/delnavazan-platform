@@ -190,7 +190,10 @@ final class NotificationSchedule {
     public static function derive(array $composition,array $inputs):array{
         $observedAt=(string)($inputs['observed_at']??'');
         if(NotificationSupport::seconds($observedAt)===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
-        $subjectInstant=$inputs['subject_instant']??null;
+        $subjectInstant=($inputs['subject_instant']??null)===null?null:(string)$inputs['subject_instant'];
+        // §6.2.4: the subject instant is a persisted column too, so a non-null value is judged by the same
+        // declared domain as the observation instant rather than only by the arithmetic that consumes it.
+        if($subjectInstant!==null&&NotificationSupport::seconds($subjectInstant)===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
         $timezone=(string)($inputs['timezone']??'');
         $deferralCount=(int)($inputs['deferral_count']??0);
         if($deferralCount<0)throw new \InvalidArgumentException('schedule_derivation_divergence');
@@ -244,19 +247,30 @@ final class NotificationSchedule {
      */
     public static function defer(array $composition,array $persisted,?string $subjectInstant,?int $eligibilityLeadMinutes):array{
         if($composition['deferral']===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
+        if($subjectInstant!==null&&NotificationSupport::seconds($subjectInstant)===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
         $count=(int)$persisted['deferral_count']+1;
         if($count>(int)$composition['deferral']['max_deferrals'])throw new \InvalidArgumentException('schedule_derivation_divergence');
         $moved=NotificationSupport::addSeconds((string)$persisted['derivation_base_at'],$count*(int)$composition['deferral']['defer_ceiling_minutes']*60);
         if($moved===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
         $expiresAt=(string)$persisted['expires_at'];
+        // Both sides of the window comparison are parsed rather than assumed, so a refused instant can
+        // never be read as a zero second count and silently pass (or fail) the gate.
+        $movedSeconds=NotificationSupport::seconds($moved);
+        if($movedSeconds===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
         // The window is anchored to the base, so a deferral that reaches or crosses it is exhaustion by
         // window rather than a message delivered outside its agreed window.
-        if($expiresAt!==''&&NotificationSupport::seconds($moved)>=NotificationSupport::seconds($expiresAt))throw new \InvalidArgumentException('retry_window_exhausted');
+        if($expiresAt!==''){
+            $expiresSeconds=NotificationSupport::seconds($expiresAt);
+            if($expiresSeconds===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
+            if($movedSeconds>=$expiresSeconds)throw new \InvalidArgumentException('retry_window_exhausted');
+        }
         if($composition['tier']==='F'){
             if($subjectInstant===null)throw new \InvalidArgumentException('tier_f_instant_unavailable');
-            if(NotificationSupport::seconds($moved)>=NotificationSupport::seconds($subjectInstant))throw new \InvalidArgumentException('eligibility_expired');
-            if($eligibilityLeadMinutes!==null&&$subjectInstant!==null){
-                $remaining=NotificationSupport::seconds($subjectInstant)-NotificationSupport::seconds($moved);
+            $subjectSeconds=NotificationSupport::seconds($subjectInstant);
+            if($subjectSeconds===null)throw new \InvalidArgumentException('schedule_derivation_divergence');
+            if($movedSeconds>=$subjectSeconds)throw new \InvalidArgumentException('eligibility_expired');
+            if($eligibilityLeadMinutes!==null){
+                $remaining=$subjectSeconds-$movedSeconds;
                 if($remaining<$eligibilityLeadMinutes*60)throw new \InvalidArgumentException('lead_time_insufficient');
             }
         }

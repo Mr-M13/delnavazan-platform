@@ -2,7 +2,11 @@
 namespace Delnavazan\Platform\Portals;
 
 final class AuthenticatedPortalReadSubject {
-    public function __construct(public readonly string $surface,public readonly int $wordpressUserId,public readonly string $kind,public readonly int $principalId) { if($wordpressUserId<1||$principalId<1) throw new \InvalidArgumentException('portal_principal_unresolved'); }
+    public function __construct(public readonly string $surface,public readonly int $wordpressUserId,public readonly string $kind,public readonly int $principalId,public readonly ?int $guardianGrantId=null,public readonly ?string $guardianGrantScope=null) {
+        if($wordpressUserId<1||$principalId<1)throw new \InvalidArgumentException('portal_principal_unresolved');
+        if($kind==='guardian'&&($guardianGrantId===null||$guardianGrantId<1||$guardianGrantScope!==PortalRule::GUARDIAN_PORTAL_READ_SCOPE))throw new \InvalidArgumentException('portal_principal_unresolved');
+        if($kind!=='guardian'&&($guardianGrantId!==null||$guardianGrantScope!==null))throw new \InvalidArgumentException('portal_principal_unresolved');
+    }
 }
 final class PublicCapabilityReadSubject {
     public function __construct(public readonly int $capabilityId,public readonly string $purpose,public readonly int $lessonId,public readonly int $scheduleVersionId,public readonly int $generation,public readonly ?int $studentId,public readonly string $expiresAt) { if($capabilityId<1||$lessonId<1||$scheduleVersionId<1||$generation<1) throw new \InvalidArgumentException('portal_capability_binding_mismatch'); }
@@ -27,13 +31,21 @@ final class PortalOwnerPorts {
 }
 
 final class PortalAccessPolicy {
-    public static function assertObject(string $surface,string $kind,int $targetId,array $principal,object $port):array {
+    /**
+     * The policy deliberately selects the registered owner ports itself.  Accepting a caller-supplied
+     * projection here would make it possible for an internal caller to bypass an owning validator.
+     * `$legacyPort` remains an ignored compatibility argument for the previously materialised seam.
+     */
+    public static function assertObject(string $surface,string $kind,int $targetId,array $principal,?object $legacyPort=null):array {
         try {
-            $allowed=($principal['kind']==='student'&&$kind==='lesson')||($principal['kind']==='teacher'&&$kind==='assignment');
+            $allowed=(in_array($principal['kind'],array('student','guardian'),true)&&in_array($kind,array('lesson','enrolment'),true))||($principal['kind']==='teacher'&&in_array($kind,array('lesson','assignment'),true));
             if(!$allowed)throw new \InvalidArgumentException('portal_object_not_portal_visible');
-            $subject=new AuthenticatedPortalReadSubject($surface,(int)get_current_user_id(),(string)$principal['kind'],(int)$principal['id']);
-            if($kind==='lesson')return $port->forSubject($subject,$targetId);
-            return $port->forSubject($subject,$targetId);
+            if($principal['kind']==='teacher'&&!current_user_can('dzn_view_own_portal_schedule'))throw new \InvalidArgumentException('portal_object_not_owned');
+            $subject=new AuthenticatedPortalReadSubject($surface,(int)get_current_user_id(),(string)$principal['kind'],(int)$principal['id'],$principal['kind']==='guardian'?(int)($principal['grant_id']??0):null,$principal['kind']==='guardian'?(string)($principal['grant_scope']??''):null);
+            $surfaceReader=new PortalInternalReadSurface();
+            if($kind==='lesson')return in_array($principal['kind'],array('student','guardian'),true)?$surfaceReader->studentLesson($subject,$targetId):$surfaceReader->teacherLesson($subject,$targetId);
+            if($kind==='enrolment')return $surfaceReader->studentEnrolment($subject,$targetId);
+            return $surfaceReader->teacherAssignment($subject,$targetId);
         } catch(\Throwable $e) { self::deny($surface,$kind,$targetId,$principal,(string)$e->getMessage()); throw $e; }
     }
     private static function deny(string $surface,string $kind,int $target,array $principal,string $reason):void {

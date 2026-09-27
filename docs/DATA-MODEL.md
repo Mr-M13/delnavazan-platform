@@ -1,5 +1,13 @@
 # Delnavazan Platform Conceptual Data Model
 
+> **Current-source reconciliation (2026-09-27):** Current `main` contains Schema 31 migration
+> `031_portal_facing_services_principal_authorization`: portal capability roots, capabilities,
+> capability events/commands, public action events and access denials. These are access artefacts;
+> they do not become canonical Lesson, schedule, delivery or attendance truth. The precise fields,
+> route gates and prohibited data are recorded in the
+> [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). Historical Schema-25/26 state
+> statements below are retained as provenance.
+
 > **Phase 2A.2-U storage (Schema 030, candidate) — not authoritative until independently reviewed and
 > merged:** finance, payability, effective-dated teacher rates, per-Lesson rate/currency snapshots,
 > teacher compensation statements, reconciliation and audited corrections. Twenty-one additive tables in

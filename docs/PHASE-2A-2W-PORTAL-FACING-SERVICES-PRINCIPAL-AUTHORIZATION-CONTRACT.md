@@ -1,21 +1,45 @@
 # Phase 2A.2-W — Portal-Facing Services: Session-to-Core-Principal Resolution, Object-Level Authorization, Stable Read Models & Purpose-Bound Signed Public Join/Absence Capabilities (Schema 031)
 
-**Status:** implementation contract — Phase-W candidate materialised. This candidate implements the
-additive Schema 031 access-artefact boundary only; it does not implement the deferred Phase-P
-capability-attributed absence seam, Theme integration, external publication, deployment, production
-access or public cutover.
+**Status:** implementation contract with a current-source reconciliation. The Schema-031 access-artefact
+boundary and a capability-attributed Phase-P absence seam are present in current `main`; Theme
+integration, external publication, deployment, production access and public cutover are not thereby
+authorised or evidenced.
 **Schema:** 031 (`031_portal_facing_services_principal_authorization`).
-**Build:** `phase2a2w-portal-facing-services-20260926.1` (proposed).
-**Base:** this candidate tree — `main` @ `773e13e2bf148f6e9ff250b58c7bd6ee4b135f48`, tree
-`00adddb809dcf183b88346378db57f07b3158f5c`, the host-materialised Phase 2A.2-U candidate at Schema 30,
-which is additive on the Phase-T, Phase-V, Phase-R2 and Phase-R1 candidate trees.
+**Build:** this integration tree declares `DZN_PLATFORM_SCHEMA_VERSION` = `32` and build
+`phase2a2s-notification-communications-authority-20260924.1`: the W slice is stamped
+`phase2a2w-portal-facing-services-20260927.2` (corrected candidate) and the additive Schema-32
+Notifications S re-land is merged on top of its Schema 031.
+**Current source:** `main` / `origin/main` at `6673e7bb6b0dc267d455b61220c3da77eb1b4356`, with the
+reviewed W correction, the finalized operational-readiness runtime correction, this docs/portal
+correction and the additive Schema-32 Notifications S re-land merged as explicit non-fast-forward
+merges. The historical base statement in §0.1 is retained as provenance; it is not the current
+checkout identity.
 **Owner brief this document answers:** *"Prepare Phase 2A.2-W / Schema 031 contract for
 Student/Teacher/Admin portal-facing services, session-to-Core-principal resolution, object-level
 authorization, stable read models and purpose-bound signed public Join/Absence capabilities. All
 business authority must remain in owning modules. No Theme implementation, external publication,
 production or deployment."*
 
-## 0. Schema number reconciliation — read this before anything else
+## 0. Current implementation-state reconciliation — read this before anything else
+
+This section supersedes only the stale implementation-state assertions in the pre-implementation
+reconciliation that follows. It does not rewrite the historical 2026-09-26 inspection or convert an
+implementation presence into an approval, deployment or product decision.
+
+| Current source fact | Evidence |
+| --- | --- |
+| Schema and build | `delnavazan-platform.php` declares `DZN_PLATFORM_SCHEMA_VERSION = '32'` and build `phase2a2s-notification-communications-authority-20260924.1` in this integration tree; the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2` and the additive Schema-32 Notifications S re-land is merged on top of Schema 031. |
+| Migration and capability marker | `Migrator` installs and verifies `031_portal_facing_services_principal_authorization` and repairs marker `dzn_platform_capability_version_2a2w = 2a2w`; the additive Schema-32 Notifications S re-land adds `032_notification_communications_authority` and marker `dzn_platform_capability_version_2a2s` without changing 031. |
+| Portal surface | `src/Portals/` exists, the owner ports are configured during `plugins_loaded`, and `PortalPublicActionController` is registered on `rest_api_init`. |
+| Public routes | Current source registers the three routes listed in [the implementation-derived registry](PORTAL-AUTHORIZATION-REGISTRY.md). Each is separately gated by an exact option-value check. |
+| Absence handoff | `PortalPublicActionService` calls the configured attendance port, whose Core implementation calls `CanonicalAttendanceIntakeService::submitCapabilityClaim()`. It is not deferred in current source. |
+| Not implemented as an HTTP surface | There is no current authenticated Student/Teacher portal REST controller. The current registered W REST surface is the three public capability routes only. |
+
+Sections describing the original contract's proposed directory layout, declared future read models or
+pre-implementation inspection remain historical contract/provenance rather than a claim that those exact
+paths or all planned surfaces exist. The registry is the canonical source-derived implementation inventory.
+
+## 0.1 Historical schema-number reconciliation — preserved provenance
 
 The owner brief says **Schema 031**. In this repository the highest declared migration is **030**
 (`030_finance_payability_rate_statement_authority`, owned by the Phase 2A.2-U candidate whose tree this
@@ -47,7 +71,9 @@ Two consequences follow and are binding on the implementation candidate:
 
 ## 1. Verified authoritative state
 
-Read-only inspection of this checkout, 2026-09-26. No file was written by this inspection.
+Historical read-only inspection at contract authoring, 2026-09-26. No file was written by that
+inspection. Its values describe the pre-W checkout and are superseded for current implementation-state
+questions by §0 and the portal authorization registry.
 
 | Fact | Verified value (this checkout) |
 | --- | --- |
@@ -59,7 +85,7 @@ Read-only inspection of this checkout, 2026-09-26. No file was written by this i
 | Schema / build | `DZN_PLATFORM_SCHEMA_VERSION` = `30`; `DZN_PLATFORM_BUILD_ID` = `phase2a2u-finance-payability-rate-statement-20260925.1` |
 | Migration ledger | 001–030 declared in `Migrator::maybe_upgrade()`, `verify_current_schema()` and the required list; latest `030_finance_payability_rate_statement_authority`; **no `031_*` identifier exists** |
 | Capability markers today | base `dzn_platform_capability_version` = `2a2n`, plus `_2a2o`, `_2a2p`, `_2a2q`, `_2a2r`, `_2a2v`, `_2a2t`, `_2a2u` (there is no `_2a2w` marker) |
-| Principal identity storage | `dzn_teacher_principal_links` and `dzn_student_principal_links` (both with `status`, `active_slot`, supersession columns and `UNIQUE teacher_id` / `wordpress_user_id` families), `dzn_student_acceptance_authority_grants` (acceptance and guardian authority), `dzn_student_account_invitations` and `dzn_account_claim_attempts` (account claim) |
+| Principal identity storage | `dzn_teacher_principal_links` (legacy singleton `UNIQUE teacher_id` / `wordpress_user_id`, with `status` and revocation columns but **no `active_slot`**) and `dzn_student_principal_links` (with `status`, `active_slot` and supersession columns), plus `dzn_student_acceptance_authority_grants` (acceptance and guardian authority), `dzn_student_account_invitations` and `dzn_account_claim_attempts` (account claim) |
 | Canonical facts a portal may read | The PII-minimised §8 projection of Phase-M Lesson, Phase-N applicable schedule, Phase-O effective delivery, Phase-P attendance summary, Phase-J current Assignment, Phase-M0 Enrolment and Phase-L Term facts, only through §10.0's owner-implemented ports; no Phase-W class reads those tables directly |
 | Existing owning-module seams inspected | `CanonicalLessonScheduleReadService` requires `dzn_manage_canonical_lesson_schedules`; `CanonicalLessonDeliveryReadService` requires `dzn_manage_canonical_lesson_delivery`; `CanonicalAttendanceReadService` requires `dzn_view_canonical_attendance_review`; and `TeacherAssignmentReadService` requires `dzn_manage_teacher_assignments`. Those administrator/reviewer seams are **not callable by a Student or Teacher portal** and are not widened by Phase W. `CanonicalAttendanceIntakeService::submitClaim()` also requires a session-backed claimant today; §10.1 records its separately bounded public-capability extension. |
 | Narrow owning-module seams Phase W requires | The four read-only, owner-implemented ports of §10.0 — `TeacherAssignmentPortalReadPort`, `CanonicalLessonSchedulePortalReadPort`, `CanonicalLessonDeliveryPortalReadPort` and `CanonicalAttendancePortalReadPort` — plus §10.1's Phase-P capability-attributed absence intake. No port grants a WordPress capability or permits a portal to read an owning table directly. |
@@ -201,11 +227,25 @@ Phase W is additive and must not weaken a single existing invariant. In particul
 
 ## 5. Module layout and locked vocabulary
 
+### 5.0 Current implementation layout
+
+The table in §5.1 is the original proposed layout, preserved as contract provenance. Current source does
+not materialise that exact layout: the W classes are directly under `src/Portals/`; the public controller
+is `src/Portals/PortalPublicActionController.php`; the public best-effort abuse control ships as the
+existing `src/Portals/PortalRateLimiter.php`, which that controller invokes on every public request before
+the option gate, and not at the §5.1 `src/Public/PortalPublicRateLimiter.php` path; the owner-read
+implementations are consolidated in `src/Core/Application/PortalOwnerReadPorts.php`; and no
+`src/Portals/Application/`, `src/Portals/Integrity/` or
+`src/Core/Infrastructure/Repository/Portal*Repository.php` directory exists.
+Current source also has no authenticated portal REST controller. Its only W REST registrations are the
+three public capability routes. This is an implementation-state correction, not a decision to expand or
+approve a surface; [the registry](PORTAL-AUTHORIZATION-REGISTRY.md) is authoritative for the current
+inventory.
+
 ### 5.1 Layout
 
-New surfaces. Phase W introduces **one new module directory** (`src/Portals/`) and **three public route
-registrations** inside the existing `src/Public/` module; it introduces no new provider surface, no new
-Integration and no Theme surface:
+**Historical proposed layout (not a current-path assertion).** The contract proposed one new module
+directory and three public route registrations. It introduced no provider or Theme surface:
 
 | Path | Contents |
 | --- | --- |
@@ -216,7 +256,7 @@ Integration and no Theme surface:
 | `src/Portals/Integrity/` | `PortalCapabilityIntegrity`, `PortalActionIntegrity`, `PortalReadModelIntegrity` — pure, non-mutating, repository-hydrated validators |
 | `src/Core/Infrastructure/Repository/Portal*Repository.php` | `PortalCapabilityRootRepository`, `PortalCapabilityRepository`, `PortalActionRepository`, `PortalAccessDenialRepository` — each with the established `begin()` / `commit()` / `rollback()` wrapper, named-index duplicate arbitration and insert-only methods for append-only tables |
 | `src/Public/PortalPublicActionController.php` | The three registered public routes (§9.6, §9.7) — verification, safe responses, and nothing else |
-| `src/Public/PortalPublicRateLimiter.php` | Best-effort abuse control mirroring `BookingRequestRateLimiter`'s declared fail-open cache contract |
+| `src/Portals/PortalRateLimiter.php` | Best-effort abuse control using only an owner-supplied budget; the cache contract is fail-open and Phase W declares no threshold or keying decision |
 | `src/Admin/Controller/PortalCapabilityController.php` | The capability administration and diagnostics screen under the existing Platform menu, registered like `FinancePolicyController` (§11) |
 
 There is deliberately **no** `src/Portals/Theme/`, **no** `src/Portals/templates/`, **no**
@@ -230,7 +270,7 @@ slice; portals have no provider and no transport.
 | Capability purpose (`PortalRule::PURPOSES`) | `lesson_join`, `lesson_absence` — the only two members in this phase |
 | Capability state (`PortalRule::CAPABILITY_STATES`) | `active`, `consumed`, `revoked`, `superseded` — the member records which row is the *live, usable* row of `(lesson, purpose)` (`active_slot = 1`); it never substitutes for the `expires_at` check |
 | Capability lifecycle event (`PortalRule::CAPABILITY_EVENT_TYPES`) | `minted`, `rotated`, `revoked`, `consumed` |
-| Public action state (`PortalRule::ACTION_STATES`) | `confirmation_rendered`, `confirmed_submitting`, `submitted`, `redirected`, `refused` |
+| Public action state (`PortalRule::ACTION_STATES`) | `confirmed_submitting`, `delegating`, `submitted`, `redirected`, `refused` — `delegating` is the durable single-delegator lease of §15.3 |
 | Handoff target (`PortalRule::HANDOFF_TARGETS`) | `canonical_attendance_evidence` — the only member in this phase; a Join redemption has `handoff_target = NULL` |
 | Portal surface (`PortalRule::SURFACES`) | `portal_public_join`, `portal_public_absence`, `portal_student_lesson`, `portal_student_enrolment`, `portal_teacher_lesson`, `portal_teacher_assignment`, `portal_principal`, `portal_capability_admin` |
 | Principal kind (`PortalRule::PRINCIPAL_KINDS`) | `administrator`, `teacher`, `student`, `guardian` |
@@ -248,7 +288,7 @@ refused command result, a `portal_access_denials.reason_code`, a
 event and command row. Two sets are declared; every write uses a member of the set that owns its row,
 and no code outside `REASON_CODES` is ever written anywhere.
 
-**Durable refusal and blocker reasons — `PortalRule::EXCEPTION_REASON_CODES`** (35 members):
+**Durable refusal and blocker reasons — `PortalRule::EXCEPTION_REASON_CODES`** (36 members):
 `portal_vocabulary_member_not_allowed`, `portal_parent_not_declared`, `portal_parent_not_live`,
 `portal_principal_required`, `portal_principal_unresolved`, `portal_principal_ambiguous`,
 `portal_principal_kind_not_permitted`, `portal_object_not_found`, `portal_object_not_owned`,
@@ -260,7 +300,8 @@ and no code outside `REASON_CODES` is ever written anywhere.
 `portal_capability_ttl_not_allowed`, `portal_capability_binding_mismatch`,
 `portal_capability_generation_conflict`, `portal_join_target_not_allowlisted`,
 `portal_join_target_unavailable`, `portal_join_target_not_declared`, `portal_absence_window_closed`,
-`portal_absence_outcome_final`, `portal_absence_late_evidence`, `portal_confirmation_required`,
+`portal_absence_outcome_final`, `portal_absence_late_evidence`, `portal_absence_submission_pending`,
+`portal_confirmation_required`,
 `portal_confirmation_invalid`, `command_replay_conflict`, `portal_rate_limited`,
 `portal_route_disabled`.
 
@@ -289,6 +330,11 @@ Rules that bind the allowlist:
 - **A refusal is never a business fact.** No reason code in this allowlist is written to any
   `lessons`, `canonical_*`, `commercial_*`, `recurring_*`, `payment_*`, `finance_*` or `provider_*`
   row, and no refusal changes any of them.
+- **An in-flight delegation is not a verdict.** `portal_absence_submission_pending` means the exact
+  confirmation found its own durable delegation lease still live, so this request delegated nothing,
+  recorded nothing terminal and reports no outcome; it is the only reason a public absence request
+  refuses while another delegator holds the lease, and it never claims that the owning authority
+  recorded, accepted or refused the absence.
 
 ## 6. Session-to-Core-principal resolution
 
@@ -312,9 +358,9 @@ succeed.
 | Kind | Established by (read-only) | Notes |
 | --- | --- | --- |
 | `administrator` | the WordPress session holds the surface's own capability **and** `dzn_manage_platform` | Administrator reads are capability-gated; an administrator **write on behalf of** a Student or Teacher is recorded with attribution `administrator_on_behalf` by the owning module, never silently as the principal |
-| `teacher` | exactly one active `dzn_teacher_principal_links` row for that user (`status = 'active'`, `revoked_at IS NULL`, `active_slot = 1`) | Zero rows refuses `portal_principal_unresolved`; more than one live row refuses `portal_principal_ambiguous` |
-| `student` | exactly one active `dzn_student_principal_links` row for that user with the same conditions | Same zero and ambiguous rule; the Student principal is the only Student identity a Student portal surface may name |
-| `guardian` | an active, in-force `dzn_student_acceptance_authority_grants` row for that user and the exact Student, evaluated through the Phase-F authority read service | A guardian is never a Student principal: a guardian surface must name the grant it acts under, and the owning module retains every acceptance decision |
+| `teacher` | exactly one active `dzn_teacher_principal_links` row for that user (`status = 'active'`, `revoked_at IS NULL`); the legacy singleton keys provide the one-row invariant because this table has no `active_slot` | Zero rows refuses `portal_principal_unresolved`; more than one live row refuses `portal_principal_ambiguous` |
+| `student` | exactly one active `dzn_student_principal_links` row for that user with the same conditions and `active_slot = 1` | Same zero and ambiguous rule; the Student principal is the only Student identity a Student portal surface may name |
+| `guardian` | an active, in-force `dzn_student_acceptance_authority_grants` row in exact `service_acceptance` scope for that user and the exact Student, evaluated through the Phase-F authority read service | A guardian is never a Student principal: the typed read subject carries the exact grant id and scope, and the owning module re-proves that same in-force grant against the Lesson's Student |
 
 ### 6.3 Per-surface requirements
 
@@ -544,9 +590,10 @@ attendance, participation, calendar, provider or notification fact, and it makes
 
 `GET /wp-json/delnavazan-platform/v1/portal/absence/{handle}` — verify (§9.5), then render the
 confirmation page: purpose, Lesson reference, occurrence start in the recorded zone, the Student's own
-display reference, the consequence wording, and a one-time confirmation token. It appends one
-`portal_public_action_events` row (`action_state = 'confirmation_rendered'`) whose
-`redemption_key_digest` is the confirmation token's digest, and **changes no business state**.
+display reference, the consequence wording, and a one-time confirmation token. The GET is
+non-mutating: it appends no action row. It renders a random nonce with a keyed proof bound
+to the verified capability, and the POST proves that one-time token before appending
+`confirmed_submitting` evidence; it never fabricates prior `confirmation_rendered` evidence.
 
 `POST /wp-json/delnavazan-platform/v1/portal/absence/{handle}` — requires the one-time confirmation
 token from that page (otherwise `portal_confirmation_required` or `portal_confirmation_invalid`),
@@ -558,18 +605,27 @@ then:
 2. open one Phase-W transaction under the Lesson root, append one `portal_public_action_events` row
    (`action_state = 'confirmed_submitting'`) keyed by the confirmation token digest, stamp the
    capability `consumed` with its `consumed_at` and `consumed_action_event_id` exactly once, append a
-   `consumed` capability event and the digest-only command row, and commit;
+   `consumed` capability event, the digest-only command row **and the durable
+   `action_state = 'delegating'` lease row keyed to that confirmation** (§15.3), and commit;
 3. delegate to the owning attendance authority (§10.1) with the capability proof, **after** that
    commit and outside it (W-D19);
 4. open a second Phase-W transaction, append the outcome row (`submitted`, with
    `handoff_target = 'canonical_attendance_evidence'` and its typed `handoff_reference_id`, or
-   `refused` with the owner's reason), and commit;
+   `refused` with the owner's reason), and commit. That second transaction takes the Lesson root
+   first and re-reads the capability under it like every other capability write (§15.1), and it is
+   idempotent: if the confirmation's terminal outcome is already recorded it returns that recorded
+   outcome instead of appending a second one;
 5. render the bounded result page — recorded, or not recorded with the declared reason. It never
    states an attendance verdict, never shows a Teacher note and never claims a completion.
 
 The exact replay of the same confirmation token converges on the recorded outcome and performs no
-second delegation. A distinct confirmation for an already-consumed capability refuses
-`portal_capability_consumed`.
+second delegation: it re-reads the recorded terminal outcome under the Lesson root before it
+delegates anything, and the durable lease of §15.3 decides whether this request may delegate at all.
+A replay that arrives while another delegator still holds a live lease delegates nothing, records
+nothing terminal and refuses `portal_absence_submission_pending`; a replay after a crash — a claim
+whose lease has passed the declared bound with no recorded outcome — takes that lease over, re-proves
+the capability state and binding, completes the delegation and records the outcome. A distinct
+confirmation for an already-consumed capability refuses `portal_capability_consumed`.
 
 ### 9.8 Revocation, rotation and suspected leak
 
@@ -747,7 +803,9 @@ datum:
 - capabilities by purpose and state, live generations per Lesson, and capabilities expired but not yet
   rotated;
 - redemptions by purpose and outcome, with confirmed-but-unresolved claims (`confirmed_submitting`
-  older than a declared bound) as a first-class count;
+  past the declared delegation lease bound with no recorded terminal outcome) as a first-class count,
+  alongside in-flight (`delegating` inside the bound) and abandoned (`delegating` past the bound with
+  no recorded terminal outcome) delegation leases;
 - refusals by surface and reason code, denial counts by principal kind and reason code, and the
   enabled or disabled state of the public-action option;
 - read-model failures by version and surface (`portal_upstream_aggregate_invalid` counts);
@@ -766,8 +824,8 @@ Six additive tables, all new, none altering an existing table:
 | `dzn_portal_public_capabilities` | The capability registry: binding, sealed join target, state, generation, expiry and one-time consumption | mutable only in the declared state, consumption, revocation and supersession columns |
 | `dzn_portal_public_capability_events` | Append-only capability lifecycle: `minted`, `rotated`, `revoked`, `consumed` | append-only |
 | `dzn_portal_public_capability_commands` | Digest-only command evidence for every administrative capability command, with its typed result | append-only |
-| `dzn_portal_public_action_events` | Append-only redemption evidence: confirmation, claim, submission, redirect and refusal | append-only |
-| `dzn_portal_access_denials` | Append-only, digest-only principal and object-level denial evidence | append-only |
+| `dzn_portal_public_action_events` | Append-only redemption evidence: confirmation, claim, delegation lease, submission, redirect and refusal | append-only |
+| `dzn_portal_access_denials` | Append-only, digest-only principal, object-level and public-action refusal evidence | append-only |
 
 ### 13.2 Declared columns
 
@@ -804,8 +862,14 @@ Unique keys: `uid`, `handle_digest`, `token_digest`, `lesson_purpose_generation`
 `result_capability_id bigint unsigned NULL`, `result_state varchar(24)`, `created_at datetime`,
 `created_by bigint unsigned`. Unique keys: `uid` and `command_key_digest`. Indexes:
 `lesson_operation` (`lesson_id`, `operation`) and `result_capability` (`result_capability_id`).
+`result_state` is one of `active`, `revoked`, `superseded`, `consumed` or `refused`. A refused
+administrator command stores its exact exception reason and a `NULL` typed result. If validation
+fails before a capability purpose can be accepted, the command evidence uses the command-only
+member `unknown`; it is never a capability purpose. The same stable command key may replay that
+same refusal, but changed operation, payload, Lesson or purpose facts refuse
+`command_replay_conflict` and create no second command row.
 
-`portal_public_action_events`: `id`, `uid char(26)`, `capability_id`, `lesson_id`,
+`portal_public_action_events`: `id`, `uid char(26)`, `capability_id NULL`, `lesson_id NULL`,
 `purpose varchar(24)`, `action_sequence int unsigned`, `action_state varchar(24)`,
 `resolved_student_id bigint NULL`, `confirmation_digest char(64) NULL`,
 `redemption_key_digest char(64)`, `handoff_target varchar(32) NULL`,
@@ -815,13 +879,29 @@ Unique keys: `uid`, `handle_digest`, `token_digest`, `lesson_purpose_generation`
 (`capability_id`, `action_sequence`). Indexes: `lesson_action` (`lesson_id`, `action_state`) and
 `capability_action` (`capability_id`).
 
+`capability_id` and `lesson_id` are NULL only for a refusal whose malformed or never-issued handle
+has no capability parent; its route-declared purpose, reason code and request digest remain durable.
+A non-NULL action capability id must name an existing capability.
+
+`action_state` is one of `confirmed_submitting`, `delegating`, `submitted`, `redirected` or `refused`.
+A `delegating` row is the append-only delegation lease of §15.3: it carries the same `capability_id`,
+`lesson_id`, `confirmation_digest` and `resolved_student_id` as the claim it belongs to, its
+`redemption_key_digest` is that confirmation's own delegation key for its lease epoch, and its
+`occurred_at` is the instant the lease began. It is the confirmation's single-delegator key: at most
+one live lease exists per confirmation, and a further lease row exists only for the epoch that took
+over an abandoned one under the declared bound. No column is ever updated, so the table stays
+append-only.
+
 `portal_access_denials`: `id`, `uid char(26)`, `surface varchar(32)`,
 `principal_kind varchar(16) NULL`, `principal_id bigint unsigned NULL`,
 `capability_id bigint unsigned NULL`, `lesson_id bigint unsigned NULL`,
 `target_kind varchar(32) NULL`, `target_id bigint unsigned NULL`, `reason_code varchar(64)`,
 `request_fingerprint_digest char(64)`, `occurred_at datetime`, `created_at datetime`. Unique key:
 `uid`. Indexes: `surface_reason` (`surface`, `reason_code`, `occurred_at`) and
-`principal_time` (`principal_id`, `occurred_at`).
+`principal_time` (`principal_id`, `occurred_at`). Every row is appended inside the transaction of the
+refusal it evidences (§7.3, §15.6): a public-action refusal carries its route-declared `surface`, its
+resolved `capability_id` and `lesson_id` when the handle resolves to a capability, and never a handle,
+token, secret or raw request value.
 
 `portal_lesson_capability_roots`: `id`, `lesson_id`, `created_at datetime`,
 `created_by bigint unsigned`. Unique key: `lesson` (`lesson_id`). It holds no authority state of any
@@ -867,8 +947,8 @@ stale-version path — and it rejects:
 - a capability row whose `active_slot = 1` disagrees with `state = 'active'`;
 - two live capabilities for one `(lesson_id, purpose)`, or a duplicated `(lesson_id, purpose,
   generation)`;
-- a `consumed_at` without its `consumed_action_event_id`, or an action event whose capability does not
-  exist;
+- a `consumed_at` without its `consumed_action_event_id`, or an action event with a non-NULL
+  capability that does not exist;
 - a reason code outside `REASON_CODES`;
 - a Lesson that has a capability but no `portal_lesson_capability_roots` row;
 - a `join_target_ciphertext` without its `nonce`, `key_version` and `cipher_version`, or the reverse;
@@ -962,15 +1042,38 @@ Phase W takes **no** Phase-L, M, M0, N, O, P, Q, R1, R2, T, U or V lock, holds n
 holds no owning-module transaction open across a delegation. The order is never inverted and no portal
 code path upgrades a shared lock.
 
-### 15.3 Two-phase redemption
+### 15.3 Two-phase redemption and the durable single-delegator lease
 
 Verified public actions use the declared two-phase shape of W-D19: claim in Phase W, delegate to the
-owning module in the owner's own transaction, then record the outcome in Phase W. A crash between the
-phases leaves a durable `confirmed_submitting` claim, and the exact replay of the same
-`redemption_key_digest` converges — it re-reads the recorded claim, re-proves the capability state and
-binding, and either completes the delegation idempotently or records the owner's refusal. Phase W never
-reports success before the owning module's own durable fact exists, and never permanently strands a
-claim (W-D19, §12).
+owning module in the owner's own transaction, then record the outcome in Phase W. Every one of those
+Phase-W writes is a capability write: it begins its transaction by taking the Lesson root `FOR UPDATE`,
+re-reads the capability under that lock, and only then appends (§15.1, §15.2). The rejection evidence
+of a refusal whose handle resolves to a capability, the `confirmed_submitting` claim, the `delegating`
+lease and the terminal outcome therefore all append inside the one declared serialisation root, and a
+redemption, a refusal and a rotation for one Lesson are totally ordered.
+
+A crash between the phases leaves a durable `confirmed_submitting` claim, and the exact replay of the
+same confirmation converges. The declared mechanism is the **durable, root-serialized, append-only
+`delegating` lease keyed to the confirmation**:
+
+1. inside the claim transaction, and therefore under the Lesson root, Phase W first re-reads the
+   confirmation's recorded terminal outcome; if one exists it commits and returns it without
+   delegating anything (idempotent terminal recording);
+2. with no terminal outcome it reads the confirmation's latest `delegating` lease. A lease younger
+   than `PortalRule::DELEGATION_LEASE_SECONDS` belongs to a live delegator, so this request appends
+   nothing, delegates nothing and refuses `portal_absence_submission_pending`;
+3. otherwise — no lease, or a lease past the declared bound — this request appends its own lease row
+   (the next epoch, with its own `redemption_key_digest`), commits, and is then the one delegator;
+4. after delegating, the outcome transaction takes the Lesson root first and re-reads the
+   confirmation's terminal evidence; a terminal outcome already recorded by another delegator is
+   returned instead of appended, so a converging replay can never fail the unique redemption key or
+   report a persistence failure for an outcome that already exists.
+
+The lease is append-only evidence rather than a mutable flag, so a delegator never renews or releases
+it; the bound is what makes a crashed delegation recoverable, and the owning module's own idempotency
+on the capability proof is the backstop for a delegation that outlives the bound. Phase W never reports
+success before the owning module's own durable fact exists, never permanently strands a claim, and
+never delegates twice for one confirmation (W-D13, W-D19, §12).
 
 ### 15.4 Declared outcome table — which commits first
 
@@ -978,6 +1081,7 @@ claim (W-D19, §12).
 | --- | --- |
 | a `rotate` or `revoke` | a later redemption of the predecessor refuses `portal_capability_revoked` or `portal_capability_superseded`; an in-flight claim that already recorded `confirmed_submitting` before the rotation completes its delegation against the generation it recorded, because it was valid at claim time |
 | a redemption claim | the rotation's predecessor move still succeeds; the recorded claim is not retroactively cancelled, and the successor generation is a new handle |
+| two exact replays of one confirmation | the durable lease admits one delegator; the second either converges on the recorded terminal outcome or refuses `portal_absence_submission_pending`, and neither outcome can produce a second delegation, a second terminal row or a persistence failure |
 | a reschedule (Phase N) | the old capability refuses `portal_capability_stale_schedule` at verification; the operator's rotation additionally records `operator_reschedule_rotation` |
 | a cancellation or archive (Phase M) | the capability refuses `portal_object_not_portal_visible` at verification; the operator's rotation additionally records the matching reason |
 | the owning attendance authority | Phase W reports exactly what the owner returned — `submitted` with the owner's typed reference, or `refused` with the owner's reason — and never substitutes its own verdict |
@@ -987,7 +1091,10 @@ claim (W-D19, §12).
 - `UNIQUE handle_digest` and `UNIQUE token_digest` make a mint collision impossible and a duplicated
   administrative command converge on the replay rule of §15.6.
 - `UNIQUE redemption_key_digest` makes a replayed absence confirmation converge instead of
-  double-submitting.
+  double-submitting, and keys the claim, each `delegating` lease epoch and the terminal outcome apart,
+  so one confirmation can never append a second claim, a second lease for the same epoch or a second
+  terminal outcome; the lease epoch is allocated under the Lesson root, so two delegators cannot
+  allocate the same one.
 - `UNIQUE (lesson_id, purpose, generation)` and `UNIQUE (lesson_id, purpose, active_slot)` make a
   rotation race arithmetically impossible rather than merely unlikely.
 - Every administrative command records `command_key_digest` (unique) and `command_payload_digest`, and
@@ -1005,6 +1112,17 @@ A **persistence or corruption failure** rolls the whole command back: no capabil
 row, no action row, no denial and no audit row, failing closed and visibly rather than repairing,
 defaulting or retrying into a different answer.
 
+Refusal evidence is never split across two transactions. A public-action refusal whose handle resolves
+to a capability is a capability write (§15.3), so its refused `portal_public_action_events` row **and**
+its `portal_access_denials` row append together inside the one Lesson-root transaction, in the §15.2
+order, and both fail closed: a failure of either evidence insert — or of the commit — rolls both back.
+The public controller therefore appends no denial of its own, and the refusal the post-delegation
+outcome transaction records commits its outcome row and its denial row in that same transaction. A
+converging replay re-reads that committed evidence under the root and appends neither a second refusal
+row nor a second denial (§15.5); the route-declared surface of each public purpose (`portal_public_join`
+or `portal_public_absence`) is carried on the denial row, with the resolved `capability_id` and
+`lesson_id` when the handle resolves to a capability (§7.3, §13.2).
+
 ### 15.7 Declared write allowlist
 
 The only tables a Phase-W code path may write are the six declared portal tables plus **insert-only,
@@ -1016,10 +1134,13 @@ evidences and carrying identifiers and digests only. Phase W writes **no** `plat
 
 ### 15.8 Abandoned-claim bound
 
-A `confirmed_submitting` claim older than a declared bound is reported by the §12 diagnostics with its
-capability, Lesson and age, and the exact replay of its redemption key converges it. Phase W adds no
-scheduled task, no cron event and no background worker in this phase; convergence is driven by the
-replay, by the administrator surface, or by a later, explicitly authorised worker.
+The declared bound is `PortalRule::DELEGATION_LEASE_SECONDS`, and it is the age of the confirmation's
+`delegating` lease, not merely of its claim. A `confirmed_submitting` claim whose lease has passed that
+bound with no recorded terminal outcome is reported by the §12 diagnostics with its capability, Lesson
+and age, and the exact replay of its redemption key converges it by taking the lease over. A lease
+inside the bound is a live delegation and is reported as in flight instead. Phase W adds no scheduled
+task, no cron event and no background worker in this phase; convergence is driven by the replay, by the
+administrator surface, or by a later, explicitly authorised worker.
 
 ## 16. Upstream fact extension map and legacy compatibility
 
@@ -1086,25 +1207,45 @@ notifications) are untouched, and no portal state is ever hydrated into one.
 
 ## 18. Test matrix
 
-Every suite runs on the disposable WordPress and MariaDB runtime from a fresh clone, with no network
-access and no real credential, and every existing adjacent suite (L, M, M0, N, O, P, Q, R1, R2, T, U,
-V and `schema-contract.php`) must stay green.
+Every suite that needs the disposable WordPress and MariaDB runtime runs on it from a fresh clone, with
+no network access and no real credential; the static source guards need only a PHP interpreter; and every
+existing adjacent suite (L, M, M0, N, O, P, Q, R1, R2, T, U, V and `schema-contract.php`) must stay
+green.
+
+The matrix separates the two classes of evidence, because they have different prerequisites and only the
+first is available in this environment.
+
+- **Executed here — the PHP-only source guard and behavioural proofs.** A PHP interpreter is the only
+  prerequisite. `tests/phase-2a2w-contract.php`, together with the behavioural proof it embeds from
+  `tests/phase-2a2w-public-rate-limit-unit.php`, passes under a local PHP 8.3/8.5 CLI WebAssembly runtime
+  with no WordPress and no database; the embedded behavioural suite and
+  `tests/phase-2a2w-replay-runtime.php` also pass standalone under both versions; and 274 of
+  274 `src/**/*.php` files parse clean under `token_get_all(..., TOKEN_PARSE)` under both versions. This is
+  source-guard and PHP-level behavioural evidence only: it is not runtime, migration, concurrency, browser
+  or WordPress evidence.
+- **Not executed here — every suite that needs the disposable WordPress/MariaDB runtime.** A row's status
+  is **not present, not executed** when this contract requires that suite, the file is absent from this
+  candidate's tree, and no execution evidence exists for it; each such row is an acceptance gate this
+  candidate has not met.
 
 | Suite | Proves | Status in this environment |
 | --- | --- | --- |
-| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, all four §10.0 owner ports, no portal call to the four administrator-only read services, no portal repository read of their tables, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written, **not executed** (no PHP) |
+| `tests/phase-2a2w-contract.php` | source contract: the six tables, the migration identifier and its three call sites, the retained-031 verification, the single reason-code allowlist, the declared read-model versions, all four §10.0 owner ports, no portal call to the four administrator-only read services, no portal repository read of their tables, the fixed lock order's call sites, the declared capabilities and their Teacher-role absence, and the `PROVIDER_CALLS = 0`, `PLATFORM_OUTBOX_WRITES = 0`, `THEME_WRITES = 0` scans | written and **executed** — passes under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no database, including the behavioural proof it embeds from `tests/phase-2a2w-public-rate-limit-unit.php`; a static source guard, so this is not runtime, migration, concurrency or browser evidence |
+| `tests/phase-2a2w-replay-runtime.php` | consumed-confirmation replay after principal revocation: the suite renders a one-time Student absence confirmation through the real `PortalPublicActionService::renderAbsenceConfirmation()`, consumes it through the real `::confirmAbsence()` (which appends the `confirmed_submitting` claim, the `consumed` capability event, the `consume` command and the `submitted` outcome), revokes the Student's principal link so a fresh `PortalCapabilityOwnerPort::binding()` with `requirePrincipal=true` refuses `portal_principal_required`, and then replays the exact same handle/token/confirmation through `::confirmAbsence()`/`verifyConsumed()`: the replay converges on the recorded `submitted` outcome with `replayed=true` because `verifyConsumed()` re-resolves the immutable Lesson/schedule/student proof with `requirePrincipal=false` instead of re-proving mutable owner state, and it appends no second confirmed-submitting claim, consumed event or consume command. The suite drives the real service classes against an in-memory stub of the portal evidence tables and the two owner ports it reads; the contract guard asserts its `renderAbsenceConfirmation(`, `confirmAbsence(`, `verifyConsumed(`, `requirePrincipal`, `portal_principal_required`, `replayed` and `consumed_action_event_id` seams | written and **executed** — the suite prints `Phase-W revoked-principal replay coverage passed` and exits 0 standalone under a local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress and no database; a PHP-level behavioural proof against a stubbed store, so this is not runtime, migration, concurrency or browser evidence |
 | `tests/phase-2a2w-migration-runtime.php` | Schema 30 to 31 additive and repeat-safe, no existing row or column changed, no option seeded but the marker, and `dzn_platform_portal_actions` absent | written, **not executed** |
 | `tests/phase-2a2w-principal-runtime.php` | resolution for each principal kind; zero, ambiguous and kind-mismatch refusals; a multi-role user resolving per surface; and that no parameter, cookie, header, email or meta changes the answer | written, **not executed** |
 | `tests/phase-2a2w-authorization-runtime.php` | every §10.0 port re-proves the typed subject and object relationship for Student, guardian, Teacher and verified capability reads; another Student's Lesson, another Teacher's Assignment, a forged/mismatched subject, a capability-only or role-only attempt, an archived Lesson and a corrupt upstream aggregate all fail closed, with the Phase-W caller recording the durable denial | written, **not executed** |
 | `tests/phase-2a2w-capability-runtime.php` | mint for both purposes and every refusal, binding, expiry, generation, rotation, revocation, suspected leak, one-way storage (no plaintext handle or token retrievable), sealed join target decrypted once, and the replayed-command convergence | written, **not executed** |
-| `tests/phase-2a2w-public-action-runtime.php` | the three routes, the disabled-route refusal, the identical non-enumerating answer for every failure mode, the join redirect and its allowlist, and the absence two-step flow with the one-time confirmation, the `consumed` transition, the delegated claim carrying `public_capability_on_behalf`, and the outcome recorded after the owner's decision | written, **not executed** |
-| `tests/phase-2a2w-concurrency-runner.sh` (plus setup, worker and verify) | `mint_vs_mint` (one winner per pair), `rotate_vs_redeem`, `revoke_vs_redeem`, `two_redemptions_one_confirmation`, `replay_during_delegation`, `stale_schedule_vs_rotate`, and `two_lessons_disjoint` (no contention) | written, **not executed** |
+| `tests/phase-2a2w-public-action-runtime.php` | the three routes, the disabled-route refusal, the identical non-enumerating answer for every failure mode, the join redirect and its allowlist, and the absence two-step flow with the one-time confirmation, the `consumed` transition, the durable `delegating` lease, the delegated claim carrying `public_capability_on_behalf`, the outcome recorded after the owner's decision, the `portal_absence_submission_pending` refusal of a replay that arrives while another delegator holds the lease, and the refusal evidence — the refused action row **and** its `portal_access_denials` row — committing together in the one Lesson-root transaction | written, **not executed** |
+| `tests/phase-2a2w-concurrency-runner.sh` (plus `-concurrency-setup.php`, `-concurrency-worker.php`, `-concurrency-wait.php` and `-concurrency-verify.php`) | `mint_vs_mint` (one winner per pair), `rotate_vs_redeem`, `revoke_vs_redeem`, `two_redemptions_one_confirmation`, `replay_during_delegation` (one delegation, one terminal outcome, no second delegation), `replay_after_crash` (an abandoned lease past the bound is taken over and converges), `refusal_vs_redeem` (the refused action row and its durable denial row commit together under the Lesson root), `outcome_vs_rotation`, `stale_schedule_vs_rotate` and `two_lessons_disjoint` (no contention); every contending mode additionally attributes the waiting worker to the Lesson's `portal_lesson_capability_roots` row — its `PRIMARY` row lock, or the declared `UNIQUE lesson_id` key where the insert-or-resolve creates it — through Performance Schema | written, **not executed** |
 | `tests/phase-2a2w-corruption-runtime.php` | fail-closed behaviour for a truncated handle, a substituted token digest, a forged signature, a moved `expires_at`, a deleted action row, a corrupted sealed target and a substituted replay result | written, **not executed** |
-| `tests/phase-2a2w-failure-runtime.php` | a persistence failure rolls the whole command back; a crash between the two redemption phases leaves a resolvable claim; a delegation refusal records the owner's reason and changes nothing | written, **not executed** |
+| `tests/phase-2a2w-failure-runtime.php` | a persistence failure rolls the whole command back; a failed public refusal-evidence write rolls the refused action row and its denial row back together; a crash between the two redemption phases leaves a resolvable claim that the exact replay converges after the declared lease bound; a delegation refusal records the owner's reason and changes nothing; and an outcome recorded by a taken-over lease is returned rather than appended a second time | written, **not executed** |
 | `tests/phase-2a2w-theme-isolation-contract.php` | source scan: no file written under any Theme path, no template, asset, block or shortcode registration, no `platform_outbox` write, no `wp_remote_*` or `curl_*`, no `wp_set_current_user`, and no Amelia table reference | written, **not executed** |
 
-Until the disposable runtime exists every row above is **written but not executed**, and no candidate
-may claim runtime evidence it does not have.
+The executed suites above are source-guard and PHP-level behavioural evidence and settle nothing about the
+disposable runtime: the WordPress/MariaDB suites above must be written and run on that runtime before
+merge, and no candidate may claim the runtime, migration, concurrency or browser evidence it does not
+have.
 
 ## 19. Recommended implementation task identity
 
@@ -1115,7 +1256,7 @@ may claim runtime evidence it does not have.
 | Base | `main` with the Phase 2A.2-U candidate merged and closed (Schema 30), or an explicitly recorded base that contains Schema 30 |
 | Dependency | `PLATFORM-LOCAL-TEST-RUNTIME` green (fresh install, migration, runtime, corruption, failure and concurrency) |
 | Schema | 031 / `031_portal_facing_services_principal_authorization` |
-| Build | `phase2a2w-portal-facing-services-20260926.1` |
+| Build | `phase2a2w-portal-facing-services-20260927.2` |
 | Review posture | single coherent candidate, independent review, additive-only descendant corrections |
 
 ## 20. Pre-implementation prerequisites
@@ -1238,7 +1379,11 @@ It schedules no event, creates no background worker, and decides none of the ope
   calendar, provider or notification fact and makes no provider call.
 - The Absence action is two-step and single-submission, changes nothing on `GET`, records its claim
   before delegating, delegates only through the owning attendance authority, records only the owner's
-  outcome, converges on an exact replay, and never states an attendance verdict of its own.
+  outcome, converges on an exact replay, and never states an attendance verdict of its own. The
+  confirmation's own durable lease makes it exactly one delegation: a replay during a live delegation
+  delegates nothing and refuses `portal_absence_submission_pending`, a replay after a crash takes the
+  abandoned lease over past the declared bound, and an already-recorded terminal outcome is returned
+  idempotently instead of appended again.
 - A refused public request is outwardly identical for a malformed, unknown, forged, expired, revoked,
   superseded, stale-schedule, disabled-route and non-visible case, while the exact reason is durably
   recorded and visible to `dzn_view_portal_capabilities`.
@@ -1249,6 +1394,9 @@ It schedules no event, creates no background worker, and decides none of the ope
   command row; the only tables a portal code path writes outside the six portal tables are insert-only
   digest-only `platform_audit_events` evidence; and `platform_outbox` writes, provider calls, Theme
   writes and Amelia references are each proved zero by the §18 source scans.
+- Every public refusal whose handle resolves to a capability, and every post-delegation outcome, takes
+  the Lesson root `FOR UPDATE` and re-reads the capability under that lock before it appends; no
+  portal path appends a capability-bearing evidence row outside the declared serialisation root.
 - Every reason written anywhere in this phase is a member of `PortalRule::REASON_CODES`, and every
   refusal is durable — a refused command row, a refusal action row or a denial row — never silent.
 - Every §18 suite passes on the disposable runtime from a fresh clone with no network access and no

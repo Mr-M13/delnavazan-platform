@@ -355,18 +355,28 @@ if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-concurrency-verify.p
 
 // 16. The §6.3 datetime domain is the stored `1000-01-01 00:00:00`…`9999-12-31 23:59:59` range, not the
 //     Unix epoch: a pre-epoch (negative) second count inside the domain is a valid instant,
-//     `instant()`/`addSeconds()` refuse only a result outside the domain, and the step-7 coalesce bucket
+//     `instant()`/`addSeconds()` refuse only a result outside the domain, the parse side is bound by the
+//     same domain (`seconds()` refuses an out-of-domain value, so no observation, subject instant or
+//     `addSeconds()` base can be admitted or laundered through arithmetic), and the step-7 coalesce bucket
 //     stays the contract's `floor(anchor_at / width)` below the epoch instead of truncating toward zero.
 if(!str_contains($support,"public const DATETIME_MIN='1000-01-01 00:00:00';")||!str_contains($support,"public const DATETIME_MAX='9999-12-31 23:59:59';"))throw new RuntimeException('The derivation domain must be the stored 1000-01-01 to 9999-12-31 range');
 if(str_contains($support,'if($seconds<0)return null;'))throw new RuntimeException('instant() must not refuse a negative second count: the domain begins at 1000-01-01, not at the Unix epoch');
 if(!str_contains($support,'if($formatted<self::DATETIME_MIN||$formatted>self::DATETIME_MAX)return null;'))throw new RuntimeException('instant() must refuse exactly the results outside the declared datetime domain');
+if(!str_contains($support,'if($datetime<self::DATETIME_MIN||$datetime>self::DATETIME_MAX)return null;'))throw new RuntimeException('seconds() must refuse a parsed value outside the declared datetime domain, so no caller can accept or launder one');
 if(!str_contains($support,'return self::instant($base+$seconds);'))throw new RuntimeException('addSeconds() must judge its 64-bit integer-second result by the same full-domain rule');
+if(!str_contains($schedule,'if($subjectInstant!==null&&NotificationSupport::seconds($subjectInstant)===null)throw new \InvalidArgumentException(\'schedule_derivation_divergence\');'))throw new RuntimeException('A non-null subject instant must be judged by the declared datetime domain before it is consumed');
 if(!str_contains($support,'if($seconds<0&&$seconds%$width!==0)$bucket--;'))throw new RuntimeException('The step-7 coalesce bucket must floor a pre-epoch anchor rather than truncate it toward zero');
 foreach(array(
     "NotificationSupport::instant(-600)==='1969-12-31 23:50:00'",
     "NotificationSupport::coalesceBucket('1969-12-31 23:50:00',60)==='-1'",
     "NotificationSupport::instant(NotificationSupport::seconds('1000-01-01 00:00:00')-1)===null",
     "NotificationSupport::instant(NotificationSupport::seconds('9999-12-31 23:59:59')+1)===null",
+    "NotificationSupport::seconds('0999-12-31 23:59:59')===null",
+    "NotificationSupport::addSeconds('0999-12-31 23:59:59',10)===null",
+    "'observed_at'=>'0999-12-31 23:59:59'",
+    "'subject_instant'=>'0999-12-31 23:59:59'",
+    "'derivation_base_at'=>'0999-12-31 23:59:59'",
+    "'an out-of-domain observation instant on the production path'",
     "\$preEpochDerived['coalesce_bucket']==='-3'",
 ) as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The schedule suite must prove the full datetime domain and the pre-epoch bucket: '.$needle);
 echo "Phase 2A.2-S contract static test passed\n";

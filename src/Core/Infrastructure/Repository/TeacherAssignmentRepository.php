@@ -56,6 +56,16 @@ final class TeacherAssignmentRepository {
         return $id ? $this->row('teacher_assignments', (int) $id, $lock) : null;
     }
 
+    /** Bounded current-assignment page for the owner-gated portal read seam. */
+    public function currentForTeacher(int $teacherId, int $afterId, int $limit): array {
+        global $wpdb;
+        $limit = max(1, min(50, $limit));
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM {$this->prefix}teacher_assignments WHERE teacher_id=%d AND applicable_slot=1 AND id>%d ORDER BY id ASC LIMIT %d",
+            $teacherId, max(0, $afterId), $limit
+        )) ?: array();
+    }
+
     public function assignment(int $id): ?object { return $this->row('teacher_assignments', $id, false); }
 
     public function events(int $assignmentId): array {

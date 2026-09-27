@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+bin="$(cd "$(dirname "$BASH_SOURCE")" && pwd)"
+"$bin/check-cache.sh"
+"$bin/run-fresh-install.sh"
+"$bin/run-retained-migration.sh"
+"$bin/run-schema30-to-31-rehearsal.sh"
+"$bin/run-pure-tests.sh"
+echo 'Schema-31 bounded acceptance: PASS'
+echo 'Historical regression/concurrency hooks are opt-in: run-regressions.sh / run-concurrency.sh'

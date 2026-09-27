@@ -139,10 +139,20 @@ final class NotificationSupport {
         return ((int)substr($value,0,2))*3600+((int)substr($value,3,2))*60;
     }
 
-    /** Parse a stored `datetime` into integer UTC seconds, or null when it is not a valid instant. */
+    /**
+     * Parse a stored `datetime` into integer UTC seconds, or null when it is not a stored instant.
+     *
+     * The parse judges a value by the schema's own `datetime` domain (§6.3, `DATETIME_MIN`…`DATETIME_MAX`)
+     * and not by the calendar alone: `0999-12-31 23:59:59` and a year above `9999` are shapes the stored
+     * column can never hold, so they are refused here and every caller — the evidence envelope, the
+     * schedule derivation and `addSeconds()`'s own base — inherits one refusal rather than deriving from an
+     * instant the column could not contain. The declared shape fixes a four-digit, zero-padded year, so the
+     * domain comparison is exact on the canonical text.
+     */
     public static function seconds(string $datetime):?int{
         $datetime=trim($datetime);
         if($datetime===''||preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/',$datetime)!==1)return null;
+        if($datetime<self::DATETIME_MIN||$datetime>self::DATETIME_MAX)return null;
         $parts=array_map('intval',array(substr($datetime,0,4),substr($datetime,5,2),substr($datetime,8,2),substr($datetime,11,2),substr($datetime,14,2),substr($datetime,17,2)));
         if(!checkdate($parts[1],$parts[2],$parts[0])||$parts[3]>23||$parts[4]>59||$parts[5]>59)return null;
         try{$instant=new \DateTimeImmutable($datetime,new \DateTimeZone('UTC'));}catch(\Throwable $error){return null;}
@@ -162,10 +172,13 @@ final class NotificationSupport {
         return $formatted;
     }
     /**
-     * Add integer seconds to a stored instant, refusing an out-of-domain intermediate or result. The sum
-     * is a 64-bit integer second count judged by the same full-domain rule as `instant()`, so a
-     * pre-epoch base and an offset that lands before the epoch derive normally rather than failing
-     * closed as a divergence.
+     * Add integer seconds to a stored instant, refusing an out-of-domain base, intermediate or result.
+     *
+     * The base is parsed by `seconds()`, so a base outside the declared domain is refused here even when
+     * the sum would happen to land back inside it: the arithmetic can never launder an instant the stored
+     * column could not contain. The sum itself is a 64-bit integer second count judged by the same
+     * full-domain rule as `instant()`, so a pre-epoch base and an offset that lands before the epoch
+     * derive normally rather than failing closed as a divergence.
      */
     public static function addSeconds(string $datetime,int $seconds):?string{
         $base=self::seconds($datetime);

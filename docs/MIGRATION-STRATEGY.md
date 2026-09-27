@@ -1,5 +1,22 @@
 # Delnavazan Platform Migration Strategy
 
+## 031_portal_facing_services_principal_authorization (Phase 2A.2-W, current source candidate)
+
+Current `main` declares Schema 31 and includes this additive migration. It creates exactly six portal
+access-artefact tables: `portal_lesson_capability_roots`, `portal_public_capabilities`,
+`portal_public_capability_events`, `portal_public_capability_commands`, `portal_public_action_events` and
+`portal_access_denials`. It creates no portal business-authority table and changes no existing table.
+The verifier requires the declared columns/indexes/digest shapes, InnoDB identity columns, append-only
+evidence tables, valid capability state/consumption relationships and no legacy `portal_actions` table.
+Capability repair adds the Phase-W grants and marker; it does **not** set
+`dzn_platform_portal_actions`, so route registration does not enable public actions. This documents
+implementation presence only: review, deployment and cutover remain outside scope. See the
+[Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md) for source-level operations and gates.
+Schema 30 → 31 is repeat-safe: the migration is additive, leaves every Schema-30 row unchanged, is
+skipped when it is already recorded in `dzn_platform_completed_migrations`, and re-runs its verifier on
+current-schema verification and unconditionally before the schema option may advance, including the
+retained-031/stale-schema-version recovery path.
+
 ## 030_finance_payability_rate_statement_authority (Phase 2A.2-U, candidate, unmerged)
 
 Additive on top of the Phase-T candidate tree at Schema 29. It creates exactly the twenty-one declared
@@ -132,7 +149,13 @@ observable, and module-by-module.
 9. New Platform Core work must not introduce fresh Amelia data-model coupling.
 10. Hamnavaz Phase 4 remains separate and paused until explicitly resumed.
 
-## Current authoritative migration — Schema 25 (authoritative on `main`)
+## Current authoritative migration horizon — Schema 31 (authoritative on `main`)
+
+The current horizon is **001–031**; the sections below are retained as historical phase records. The
+latest entry, `031_portal_facing_services_principal_authorization`, is documented at the top of this
+file. The most recent *merged* commercial slice is still Schema 25 / Phase 2A.2-R1; Schemas 26, 27, 29,
+30 and 31 are present as additive candidate trees with their recorded review/activation posture, and
+none is deployed or activated.
 
 ### Schema 26 — renewal, next-Term, recurring collection, recovery, lapse & refund review authority (Phase 2A.2-R2 **candidate**)
 

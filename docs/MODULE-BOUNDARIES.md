@@ -1,7 +1,27 @@
 # Delnavazan Platform Module Boundaries
 
-> **Phase 2A.2-U candidate boundary (Schema 030, not authoritative until independently reviewed and
-> merged).** Finance owns payability, effective-dated teacher rates, per-Lesson rate/currency snapshots,
+> **Current-source reconciliation (2026-09-27):** Schema-31 Phase-W source is present on current
+> `main`. It owns portal access artefacts and delegates absence evidence to the attendance owner; it
+> does not confer business authority. The currently registered W HTTP surface is three option-gated
+> public capability routes, not an authenticated Student/Teacher REST portal. See
+> [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). This does not authorise public
+> enablement, provider work, Theme work, deployment or cutover.
+
+> **Phase 2A.2-W boundary (Schema 031, present on current `main`; implementation/topology record).** Portals owns only portal
+> access artefacts. Its dependency direction is one-way: the registered public capability controller →
+> `PortalCapabilityService` → `PortalOwnerPorts` and the owner read ports / Phase-P absence intake.
+> Canonical business reads are delegated to owner read ports; no class under `src/Portals/` reads a
+> canonical Lesson, schedule, delivery or attendance table directly. The only direct table access inside
+> `src/Portals/` is portal-access storage plus the session-principal resolution reads in
+> `PortalPrincipalResolver` (the Phase-F `teacher_principal_links`, `student_principal_links` and
+> `student_acceptance_authority_grants` identity surfaces). Portals performs no provider call, no
+> `platform_outbox` write and no Theme write. The only registered W HTTP surface is the three
+> exact-option-gated public capability routes; the authenticated read ports and diagnostics are
+> internal-only, there is no admin mutation UI, and no authenticated Teacher/Student portal route
+> exists. See the [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). This is an
+> implementation/topology record, not authorisation for review, deployment, public enablement or cutover.
+
+> **Phase 2A.2-U historical implementation/review record (Schema 030; present on current `main` as an additive candidate tree, independent-review posture unchanged, not deployed or activated).** Finance owns payability, effective-dated teacher rates, per-Lesson rate/currency snapshots,
 > teacher compensation statements, reconciliation read models and audited corrections — and nothing
 > else. It adds no column to any existing table; it reads canonical Lessons, schedule versions, delivery
 > outcomes, academy obligations, Terms, Enrolments, Teacher Assignments and the R1/R2/T
@@ -14,8 +34,7 @@
 > Five administrator-only capabilities exist, are repaired per capability, and no Teacher or Student
 > role holds one.
 
-> **Phase 2A.2-T candidate boundary (Schema 029, not authoritative until independently reviewed and
-> merged):** Core gains the provider-neutral payment-execution seam — the port, the request/outcome
+> **Phase 2A.2-T historical implementation/review record (Schema 029; present on current `main` as an additive candidate tree, independent-review posture unchanged, not deployed or activated):** Core gains the provider-neutral payment-execution seam — the port, the request/outcome
 > vocabulary, the provider registry, the execution command/attempt/result authority with its single
 > mutable dispatch claim, the provider account and mapping registry, the provider-event intake and the
 > authenticated-encryption secret vault. Integrations gains exactly one provider client surface
@@ -25,8 +44,7 @@
 > may create, mutate or delete a Term, Enrolment, Lesson, schedule, attendance outcome, academy
 > obligation, funded allowance, protected claim, provider recurring model or notification record.
 
-> **Phase 2A.2-V candidate boundary (Schema 27, not authoritative until independently reviewed and
-> merged):** the Integrations module owns exactly one provider integration surface — one Teacher
+> **Phase 2A.2-V historical implementation/review record (Schema 27; present on current `main` as an additive candidate tree, independent-review posture unchanged, not deployed or activated):** the Integrations module owns exactly one provider integration surface — one Teacher
 > consent lifecycle per provider code, one sealed credential per connection, provider reference
 > mappings, a bounded Calendar/Meet projection seam, and provider-event ingestion into the Phase-P
 > evidence seam — plus its append-only receipts and digest-only command evidence. A projection that
@@ -49,8 +67,7 @@
 > attendance or provider storage: Term creation stays with Phase L, Lesson issuance with Phase M,
 > scheduling with Phase N, and payment providers remain evidence sources only.
 
-> **Phase 2A.2-R2 candidate boundary (Schema 26, not authoritative until independently reviewed and
-> merged):** the recurring layer owns exactly the cross-Term orchestration aggregates — recurring
+> **Phase 2A.2-R2 historical implementation/review record (Schema 26; present on current `main` as an additive candidate tree, independent-review posture unchanged, not deployed or activated):** the recurring layer owns exactly the cross-Term orchestration aggregates — recurring
 > enrolment, renewal cycle, collection intent, recovery case, refund/reversal review case and
 > continuous cross-Term protection — plus their append-only events and digest-only command evidence
 > and capability-protected reads. It owns no price, offer, obligation, settlement, entitlement,

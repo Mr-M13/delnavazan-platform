@@ -2581,6 +2581,23 @@ execution evidence and deferred product decisions but do not block this contract
 
 ## 19. Correction record
 
+Implementation correction round 11 (host review `CORRECTION ROUND 3`; failed candidate `6673e7b`, tree
+`1b2cad8a`) — the independent review refused the candidate with one blocking finding: `seconds()` accepted
+a parsed value the stored `datetime` column can never hold (a valid calendar date such as
+`0999-12-31 23:59:59`, below the declared `DATETIME_MIN`), so `derive()` could accept an out-of-domain
+`observed_at` and derive and persist it as `schedule_anchor_at`/`scheduled_for`, and `addSeconds()`
+accepted an out-of-domain base whenever the resulting timestamp happened to re-enter the domain. This
+entry records the **product-code** correction only: no migration identity, table count, migration name,
+build identity or contract rule change is involved — the correction makes the runtime match the stored
+`datetime` domain §6.3 already declares — no schema object is added, and no merge, deploy, provider
+activation, external send, Amelia or Theme change is involved. The host ledger numbers this review
+`CORRECTION ROUND 3` of the current implementation attempt; this document's record sequence continues at
+11.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| `NotificationSupport::seconds()` validated the shape and the calendar but never the declared domain, so it accepted a storable-looking value outside `1000-01-01`…`9999-12-31` (`0999-12-31 23:59:59`); consequently `NotificationSchedule::derive()` accepted an out-of-domain `observed_at` and persisted it as `schedule_anchor_at`/`scheduled_for`, violating §6.3's requirement that every derived instant be inside the stored `datetime` domain, and `addSeconds()` accepted an out-of-domain base whenever its 64-bit sum happened to land back inside the domain, laundering an unusable instant into a usable one. | The parse side is now bound by the same declared domain as the format side: `seconds()` refuses a value below `DATETIME_MIN` or above `DATETIME_MAX` before it constructs anything (the declared `YYYY-MM-DD HH:MM:SS` shape fixes a four-digit zero-padded year, so the domain comparison is exact on the canonical text), so every caller inherits one refusal — the evidence envelope of §8.1 (`notification_evidence_at_invalid`), `derive()`'s observation instant and newly-guarded non-null subject instant (`schedule_derivation_divergence`), `dayDifference()`, `coalesceBucket()`, `utcToLocal()` and `addSeconds()`'s own base — and `addSeconds()` therefore refuses an out-of-domain base even when the sum would re-enter the domain. `defer()` and `NotificationEligibility::evaluate()` additionally parse both sides of their instant comparisons explicitly, so a refused instant can never be compared as a zero second count, and a derived result that leaves the domain still fails closed exactly as before. Coverage: `tests/phase-2a2s-contract.php` §16 asserts the new `seconds()` domain rule, the subject-instant domain guard and every new runtime case label; `tests/phase-2a2s-schedule-derivation-runtime.php` §10 probes `seconds()`/`addSeconds()`/`dayDifference()`/`coalesceBucket()`/`utcToLocal()`/`evidence()` with `0999-12-31 23:59:59` beside the accepted declared boundaries, refuses an out-of-domain observation instant, an out-of-domain subject instant, an `addSeconds()` base and a derivation whose expiry leaves the domain, and proves the production observation path raises `schedule_derivation_divergence` while persisting no notification and leaving the intent row unclaimed. | §6.3, §6.3(f), §8.1, §9, §15 |
+
 Implementation correction round 10 (host review `CORRECTION ROUND 2`; failed candidate `63f6b5b`, tree
 `abd60da`) — the independent review refused the candidate with one blocking finding: `instant()` refused
 every negative Unix second count (`$seconds < 0`), although §6.3 declares every derived instant over the
