@@ -79,4 +79,30 @@ rg -q 'no subsequent refusal record' "$unit"
 rg -q 'rolls the whole refusal evidence back' "$unit"
 rg -Fq '$refusal=PortalRule::refusalReason($e);if($refusal===null)throw $e;' "$action" || { echo "the post-delegation owner handoff must re-raise a non-refusal owner failure" >&2; exit 1; }
 rg -q 'an owner persistence failure propagates unchanged out of the absence handoff' "$unit"
+
+# Correction round 3 — §15.6 capability transaction boundaries.  Every `START TRANSACTION`/`COMMIT` result
+# is checked, a failed boundary is the declared persistence failure (never a returned capability, never the
+# Join `302`), and a `ROLLBACK` is issued only for a transaction the call actually opened.
+capability="$root/src/Portals/PortalCapabilityService.php"
+rg -Fq "private function begin():void { global \$wpdb; if(\$wpdb->query('START TRANSACTION')===false)throw new \RuntimeException('portal_capability_persistence_failed'); }" "$capability" || { echo 'the capability transaction begin is not checked' >&2; exit 1; }
+rg -Fq "private function commit():void { global \$wpdb; if(\$wpdb->query('COMMIT')===false)throw new \RuntimeException('portal_capability_persistence_failed'); }" "$capability" || { echo 'the capability transaction commit is not checked' >&2; exit 1; }
+rg -Fq "private function rollback():void { global \$wpdb; \$wpdb->query('ROLLBACK'); }" "$capability" || { echo 'the capability rollback helper is missing' >&2; exit 1; }
+test 1 = "$(rg -c -F "\$wpdb->query('START TRANSACTION')" "$capability")" || { echo 'START TRANSACTION must be issued only by the checked begin helper' >&2; exit 1; }
+test 1 = "$(rg -c -F "\$wpdb->query('COMMIT')" "$capability")" || { echo 'COMMIT must be issued only by the checked commit helper' >&2; exit 1; }
+test 1 = "$(rg -c -F "\$wpdb->query('ROLLBACK')" "$capability")" || { echo 'ROLLBACK must be issued only by the rollback helper' >&2; exit 1; }
+test 4 = "$(grep -o -F '$opened=false;$this->begin();$opened=true;' "$capability" | wc -l | tr -d ' ')" || { echo 'every unconditional capability transaction must open through the checked begin helper' >&2; exit 1; }
+rg -Fq '$opened=false;if($transaction){$this->begin();$opened=true;}' "$capability" || { echo 'the optional capability transaction must open through the checked begin helper' >&2; exit 1; }
+test 5 = "$(grep -o -F 'if($opened)$this->rollback();' "$capability" | wc -l | tr -d ' ')" || { echo 'a rollback must be issued only for a transaction that was opened' >&2; exit 1; }
+for proof in \
+  'a failed begin is the declared persistence failure, never a business refusal' \
+  'a failed begin produces no Join response at all' \
+  'a failed begin opens no transaction and appends no evidence' \
+  'a failed commit is the declared persistence failure, never a 302 redirect' \
+  'a failed commit returns no success response and no Location header' \
+  'a failed commit commits no redirect evidence' \
+  'a failed commit rolls back the transaction it opened and never re-commits' \
+  'mint never returns a minted capability after a failed commit' \
+  'revoke re-raises the declared persistence failure when its begin fails'; do
+  rg -Fq "$proof" "$unit" || { echo "missing capability transaction failure-path proof: $proof" >&2; exit 1; }
+done
 printf 'Phase-W blocking findings source contract passed\n'

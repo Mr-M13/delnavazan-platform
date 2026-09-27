@@ -3,6 +3,57 @@
 All notable changes to the Delnavazan Platform repository are documented here.
 Platform phase numbers are independent of Hamnavaz phase numbers.
 
+## Operational-readiness integration — correction round 3 — candidate, unmerged — 2026-09-27
+
+- Closes both blocking findings of the host review of `ba47412e9b05dff53e83fa1b88f99c1dc015966e` / tree
+  `7d1ad0199aa8c8ce9adf5c40e0443df6edb25bf8` (the review's `CORRECTION ROUND 3`, verdict
+  `FAIL - CORRECTION REQUIRED`). The candidate stays local: nothing is pushed, no authoritative `main` is
+  moved, nothing is merged or deployed, no provider, credential or external send is used, and public
+  actions stay disabled by default.
+- **Finding 1 — `PortalCapabilityService` ignored transaction-boundary results.** `join()` discarded the
+  result of both `START TRANSACTION` and `COMMIT`, so it could run outside the required transaction or
+  return the Join `302` after a failed commit; `mint()` and `transition()` had the same unchecked
+  commit/begin paths, and `rotate()` / `recordRefusal()` issued an unconditional `ROLLBACK`. That
+  bypassed the §15.6 all-or-nothing, fail-closed persistence invariant and the controllers' new failure
+  classification.
+  - Correction: every capability transaction now opens through the checked `begin()`, commits through the
+    checked `commit()` and rolls back through `rollback()`. A failed `START TRANSACTION` or `COMMIT`
+    throws the declared `portal_capability_persistence_failed` instead of continuing, and the rollback is
+    issued only for a transaction the call actually opened
+    (`$opened=false;$this->begin();$opened=true;` … `if($opened)$this->rollback();`). A failed commit on
+    any path therefore returns no capability and no `302`.
+  - Coverage: §10 of `tests/phase-2a2w-persistence-failure-unit.php` drives the real public Join callback
+    with a failed begin and with a failed commit — the call re-raises the declared persistence failure,
+    produces no response object, and appends/commits no action, capability or denial evidence — and drives
+    `mint()`/`revoke()` the same way (no minted capability, no durable row). The unit's own skip guard is
+    corrected too: it keyed on `WP_REST_Response`, a class the embedded
+    `tests/phase-2a2w-public-rate-limit-unit.php` declares first, so the embedded §15.6 run inside
+    `tests/phase-2a2w-contract.php` was silently skipped; the guard now keys on the core `wpdb` class /
+    `register_rest_route()` and the embedded proof executes.
+  - Source guard: `tests/phase-2a2w-blocking-findings-contract.sh` now asserts the three helpers, that the
+    raw `START TRANSACTION` / `COMMIT` / `ROLLBACK` statements each have exactly one call site (inside
+    those helpers), that all five transaction-bearing methods open through the checked begin helper and
+    roll back only when a transaction was opened, and that the new failure-path proofs are present.
+- **Finding 2 — the portal authorization registry declared two schemas/builds at once.**
+  `docs/PORTAL-AUTHORIZATION-REGISTRY.md` stated Schema 31 / build
+  `phase2a2w-portal-facing-services-20260926.1` in its opening and Schema 32 for the same candidate two
+  paragraphs later, although source declares Schema 32 and the S build.
+  - Correction: the opening now records `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` (tree
+    `4f1b7273f823149688ca3b75f9ed8b268a01d802`) only as the **historical Schema-31 portal base** and
+    provenance, and states exactly one current package identity for this candidate: Schema 32 and build
+    `phase2a2s-notification-communications-authority-20260924.1`, with the W slice's own stamp
+    `phase2a2w-portal-facing-services-20260927.2`. Its stored-table heading is now
+    `Migration-031 storage contract`, so no heading re-asserts a package schema, and the same W stamp is
+    aligned in `docs/ARCHITECTURE.md` and `docs/DELNAVAZAN-CORE-CONTINUITY.md`.
+- Executed evidence for this round, under the local PHP 8.3/8.5 CLI WebAssembly runtime with no WordPress
+  and no database: `tests/phase-2a2w-contract.php` (with both embedded behavioural proofs now executing),
+  `tests/phase-2a2w-persistence-failure-unit.php`, `tests/phase-2a2w-replay-runtime.php`,
+  `tests/phase-2a2w-remediation-contract.php` and `tests/phase-2a2w-theme-isolation-contract.php` all exit
+  0, and the PHP-free `tests/phase-2a2w-blocking-findings-contract.sh` and `tests/runtime-path-guards.sh`
+  pass. No runtime, migration, concurrency or browser evidence is claimed.
+- Unchanged: no portal table, route, capability, purpose or reason code changes; public actions remain
+  disabled by default; deployment, production access, provider traffic and cutover remain unauthorised.
+
 ## Operational-readiness integration — correction round 2 — candidate, unmerged — 2026-09-27
 
 - Closes both blocking findings of the host review of `8867999f77b42b3b458592eb48ea22eaac82a1ba` / tree

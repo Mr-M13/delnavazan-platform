@@ -15,7 +15,8 @@ change options, register routes, or claim evidence when the runtime is unavailab
 | `phase-2a2w-corruption-runtime.php` | digest, signature, sealed-target and substituted-result failures | runtime not available in this workspace |
 | `phase-2a2w-failure-runtime.php` | rollback, abandoned claim and durable refusal evidence, the declared delegation-lease bound, and the idempotent return of an outcome that another delegator already recorded | runtime not available in this workspace |
 | `phase-2a2w-theme-isolation-contract.php` | no Theme/provider/session/outbox coupling | source-only artifact; run when PHP is available |
-| `phase-2a2w-blocking-findings-contract.sh` | source-only guard for the corrected legacy Teacher schema predicate, exact guardian grant-scoped read re-proof, refused public-action event evidence, the Lesson-root lock on every capability-bearing append, the declared delegation lease, the one-transaction public refusal evidence (action row plus denial row), and the locked §5.2 action-state vocabulary | executed locally; no WordPress/MariaDB claim |
+| `phase-2a2w-persistence-failure-unit.php` | behavioural §15.6 split — refusal-versus-failure classification, the one-transaction refusal evidence, and the checked capability transaction boundaries (a failed begin/commit is the declared persistence failure and no Join `302`, minted capability or evidence survives it) | executed locally under the PHP 8.3/8.5 CLI WebAssembly runtime; embedded and executed by `phase-2a2w-contract.php` |
+| `phase-2a2w-blocking-findings-contract.sh` | source-only guard for the corrected legacy Teacher schema predicate, exact guardian grant-scoped read re-proof, refused public-action event evidence, the Lesson-root lock on every capability-bearing append, the declared delegation lease, the one-transaction public refusal evidence (action row plus denial row), the locked §5.2 action-state vocabulary, and the checked §15.6 capability transaction boundaries | executed locally; no WordPress/MariaDB claim |
 
 The source-only remediation contract is executable without a database once PHP is available:
 `phase-2a2w-remediation-contract.php`. No runtime artifact is represented as executed by this
@@ -51,3 +52,26 @@ one-transaction refusal-evidence rule. `phase-2a2w-blocking-findings-contract.sh
 transaction and the controller holds no denial writer), and `phase-2a2w-concurrency-verify.php`
 asserts in `refusal_vs_redeem` that the refusal's durable denial exists — written by the service when
 the worker calls `recordRefusal()` directly, so that proof does not depend on the controller at all.
+
+Correction round 3 closes the review of `ba47412e9b05dff53e83fa1b88f99c1dc015966e` / tree
+`7d1ad0199aa8c8ce9adf5c40e0443df6edb25bf8`, which returned two blocking findings. First, the
+`PortalCapabilityService` transaction boundaries were unchecked: `join()` ignored the results of both
+`START TRANSACTION` and `COMMIT` (and `mint()`, `transition()`, `rotate()` and `recordRefusal()` had the
+same unchecked commit/begin paths), so a failed boundary could continue outside the required transaction
+or hand the public route a `302` after a failed commit, bypassing the controllers' failure
+classification. Every begin/commit now goes through the checked `begin()`/`commit()` helpers, a failure
+re-raises the declared `portal_capability_persistence_failed`, and `rollback()` is issued only for a
+transaction the call actually opened. The same candidate adds the failure-path coverage: §10 of
+`phase-2a2w-persistence-failure-unit.php` drives a failed begin and a failed commit through the real
+public Join callback (no response object and no evidence survive either) and through `mint()`/`revoke()`
+(no minted capability and no durable row survive), and
+`phase-2a2w-blocking-findings-contract.sh` guards the helpers, the single-call-site rule for the raw
+`START TRANSACTION`/`COMMIT`/`ROLLBACK` statements, the opened-transaction rollback and the new proofs.
+The unit's own skip guard was also corrected: it keyed on `WP_REST_Response`, which
+`phase-2a2w-public-rate-limit-unit.php` declares first when `phase-2a2w-contract.php` embeds both proofs,
+so the embedded §15.6 run was silently skipped; it now keys on the core `wpdb` class /
+`register_rest_route()`, and the embedded proof executes. Second, `docs/PORTAL-AUTHORIZATION-REGISTRY.md`
+simultaneously claimed Schema 31 / the W build and Schema 32 for the same candidate; its opening now
+identifies `2ab0c71` only as the historical Schema-31 portal base and states one unambiguous current
+package identity — Schema 32 and build `phase2a2s-notification-communications-authority-20260924.1`,
+with `phase2a2w-portal-facing-services-20260927.2` as the W slice's own stamp.

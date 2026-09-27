@@ -3,20 +3,26 @@
 ## Scope, status and authority order
 
 This is the canonical, implementation-derived registry for the Phase 2A.2-W portal-facing services
-(`src/Portals/`, Schema 31 / migration `031_portal_facing_services_principal_authorization`) on current
-authoritative source `main` / `origin/main` at `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` (tree
-`4f1b7273f823149688ca3b75f9ed8b268a01d802`, inspected 2026-09-27), together with the additive
-correction that materialises the public rate-limit admission in `PortalPublicActionController` on each
-registered route's own fixed surface and with the declared fail-open scope (the only source change since
-that revision). It records what this checkout registers and calls. It approves no
-provider activation, public enablement, Theme work, deployment, production access or cutover. Schema 31
-and build `phase2a2w-portal-facing-services-20260926.1` are package constants.
+(`src/Portals/`, migration `031_portal_facing_services_principal_authorization`). It records what this
+checkout registers and calls. It approves no provider activation, public enablement, Theme work,
+deployment, production access or cutover.
 
-This registry is written against the portal slice's own base: on the integrated operational-readiness
-candidate the package declares **Schema 32**, because the additive
-`032_notification_communications_authority` notification slice is merged on top of Schema 031. That slice
-adds notification storage and extends `platform_outbox`; it changes no portal table, portal rule or portal
-reason code described below, and the portal rules here are the rules of the integrated tree.
+The portal slice's own historical base is `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997`
+(tree `4f1b7273f823149688ca3b75f9ed8b268a01d802`, inspected 2026-09-27) — the **historical Schema-31
+portal base**, which carried the portal-facing services together with the additive correction that
+materialises the public rate-limit admission in `PortalPublicActionController` on each registered route's
+own fixed surface and with its declared fail-open scope. That revision is provenance for the portal rules
+recorded below; it is not the identity of this candidate.
+
+**This candidate declares one package schema and build.** `delnavazan-platform.php` declares
+`DZN_PLATFORM_SCHEMA_VERSION` = **32** and build
+`phase2a2s-notification-communications-authority-20260924.1`, and the W slice's own stamp is
+`phase2a2w-portal-facing-services-20260927.2`. Schema 32 is the additive
+`032_notification_communications_authority` notification slice merged on top of Schema 031: it adds
+notification storage and extends `platform_outbox`, and it changes no portal table, portal rule or portal
+reason code described below. Schema 32 / `phase2a2s-notification-communications-authority-20260924.1` is
+the single current package schema/build of this registry, and the portal rules here are the rules of that
+integrated tree.
 
 **Authority order (highest first).** A conflict is resolved in this order and never by older prose:
 
@@ -31,8 +37,12 @@ reason code that current source does not contain.
 
 **Execution evidence in this environment (2026-09-27).** The only executed validation this registry
 cites for the current candidate is its PHP-only suite set, run under a local PHP 8.3/8.5 CLI WebAssembly
-runtime with no WordPress and no database: the static source guard `tests/phase-2a2w-contract.php`, the
-behavioural proof it embeds from `tests/phase-2a2w-public-rate-limit-unit.php`, and the revocation-replay
+runtime with no WordPress and no database: the static source guard `tests/phase-2a2w-contract.php` with
+both embedded behavioural proofs (`tests/phase-2a2w-public-rate-limit-unit.php` and
+`tests/phase-2a2w-persistence-failure-unit.php`, whose §15.6 coverage now includes the checked capability
+transaction boundaries), the source guards `tests/phase-2a2w-remediation-contract.php` and
+`tests/phase-2a2w-theme-isolation-contract.php`, the PHP-free
+`tests/phase-2a2w-blocking-findings-contract.sh`, and the revocation-replay
 behavioural proof `tests/phase-2a2w-replay-runtime.php`, which renders and consumes a one-time Student
 absence confirmation through the real `PortalPublicActionService::confirmAbsence()`, revokes the Student's
 principal link, then replays the same confirmation through `verifyConsumed()` and asserts one converged
@@ -382,7 +392,7 @@ named source seam, not by this document.
 `phase_w_declared_default` is the recorded reason for a mint and consume that reflects no other owner
 decision; it is a member of the operator reason set above.
 
-## Schema-31 storage contract (exactly six tables)
+## Migration-031 storage contract (exactly six tables)
 
 Migration `031_portal_facing_services_principal_authorization` creates exactly these six additive
 access-artefact tables and no other. Logical names below are the audit names; the physical InnoDB table

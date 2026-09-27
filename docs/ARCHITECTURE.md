@@ -48,7 +48,7 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 > after the Phase 2A.2-R2, V, T, U and W candidate trees and the additive Schema-032 Notifications S
 > re-land were materialised on top of the merged R1 (Schema 25) baseline; `main` / `origin/main` is at
 > `6673e7b` and the package declares build `phase2a2s-notification-communications-authority-20260924.1`
-> (the W slice's own stamp is `phase2a2w-portal-facing-services-20260926.1`). Phases 2A.2-A through Q are complete, independently
+> (the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2`). Phases 2A.2-A through Q are complete, independently
 > reviewed where consequential, merged and closed; R1 is merged and closed; R2/V/T/U/W and the S
 > re-land are present in
 > the current tree with their recorded review/activation posture (none deployed or activated). The
