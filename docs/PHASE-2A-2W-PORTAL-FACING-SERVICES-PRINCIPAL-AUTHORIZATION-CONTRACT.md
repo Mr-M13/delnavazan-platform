@@ -5,11 +5,12 @@ boundary and a capability-attributed Phase-P absence seam are present in current
 integration, external publication, deployment, production access and public cutover are not thereby
 authorised or evidenced.
 **Schema:** 031 (`031_portal_facing_services_principal_authorization`).
-**Build:** this integration tree declares `DZN_PLATFORM_SCHEMA_VERSION` = `32` and build
-`phase2a2s-notification-communications-authority-20260924.1`: the W slice is stamped
-`phase2a2w-portal-facing-services-20260927.2` (corrected candidate) and the additive Schema-32
-Notifications S re-land is merged on top of its Schema 031.
-**Current source:** `main` / `origin/main` at `6673e7bb6b0dc267d455b61220c3da77eb1b4356`, with the
+**Current package:** local `main` declares `DZN_PLATFORM_SCHEMA_VERSION` = `33` and build
+`phase2a2s-notification-communications-authority-20260924.1`. The W slice remains the historical
+Schema-031 candidate stamped `phase2a2w-portal-facing-services-20260927.2`; Schema 32 is historical
+Notifications S storage, and Schema 33 adds bounded readiness storage only.
+**Current source:** local `main` at `4ccd43c62d1fd8311cce75bac55681b81b85eda9`, atop
+`origin/main` `6673e7bb6b0dc267d455b61220c3da77eb1b4356`, with the
 reviewed W correction, the finalized operational-readiness runtime correction, this docs/portal
 correction and the additive Schema-32 Notifications S re-land merged as explicit non-fast-forward
 merges. The historical base statement in §0.1 is retained as provenance; it is not the current
@@ -28,8 +29,8 @@ implementation presence into an approval, deployment or product decision.
 
 | Current source fact | Evidence |
 | --- | --- |
-| Schema and build | `delnavazan-platform.php` declares `DZN_PLATFORM_SCHEMA_VERSION = '32'` and build `phase2a2s-notification-communications-authority-20260924.1` in this integration tree; the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2` and the additive Schema-32 Notifications S re-land is merged on top of Schema 031. |
-| Migration and capability marker | `Migrator` installs and verifies `031_portal_facing_services_principal_authorization` and repairs marker `dzn_platform_capability_version_2a2w = 2a2w`; the additive Schema-32 Notifications S re-land adds `032_notification_communications_authority` and marker `dzn_platform_capability_version_2a2s` without changing 031. |
+| Schema and build | `delnavazan-platform.php` declares `DZN_PLATFORM_SCHEMA_VERSION = '33'` and build `phase2a2s-notification-communications-authority-20260924.1`. Schema 31 is the W slice's historical identity (`phase2a2w-portal-facing-services-20260927.2`); Schema 32 is historical Notifications S storage. |
+| Migration and capability marker | `Migrator` installs and verifies historical `031_portal_facing_services_principal_authorization` and `032_notification_communications_authority`, then current `033_core_dataset_technical_prerequisites`. Migration 033 verifies its five readiness tables before recording its ledger entry and before advancing the schema option; it does not change 031 portal capability markers. |
 | Portal surface | `src/Portals/` exists, the owner ports are configured during `plugins_loaded`, and `PortalPublicActionController` is registered on `rest_api_init`. |
 | Public routes | Current source registers the three routes listed in [the implementation-derived registry](PORTAL-AUTHORIZATION-REGISTRY.md). Each is separately gated by an exact option-value check. |
 | Absence handoff | `PortalPublicActionService` calls the configured attendance port, whose Core implementation calls `CanonicalAttendanceIntakeService::submitCapabilityClaim()`. It is not deferred in current source. |

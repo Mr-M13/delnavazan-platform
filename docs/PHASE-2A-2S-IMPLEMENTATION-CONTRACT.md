@@ -3,6 +3,14 @@
 **Status:** implementation contract (preflight). Planning/audit only.
 **Schema:** 032 (`032_notification_communications_authority`)
 **Build:** `phase2a2s-notification-communications-authority-20260924.1` (proposed)
+**Current-source addendum (2026-09-27):** This Schema-032 contract and its build stamp are historical
+slice provenance. The checked-in package now declares Schema 33. Migration
+`033_core_dataset_technical_prerequisites` is additive after Schema 32 and installs only
+`core_dataset_provenance`, `core_dataset_reconciliation_runs`,
+`core_dataset_reconciliation_findings`, `core_dataset_operator_commands` and
+`core_dataset_corrections`. It is verified before it is recorded in the migration ledger and before the
+schema option advances; it creates no domain rows, performs no backfill and authorises no notification
+delivery, provider contact or deployment.
 **Base (inspection):** `origin/main` @ `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` (Schema 31 / W candidate,
 host-materialised) for this Schema-32 re-land. The re-land carries the §6.2.4 R2 amendment itself — the
 durable, immutable tier-F authoritative instant and the single authoritative publication site of
@@ -1613,6 +1621,9 @@ class only ever closes the notification as terminal `failed`, the status is part
 `UNIQUE KEY notification_id(notification_id)`; no `updated_at`)
 
 ### 7.3 Migration rules
+
+The following rules describe the historical Schema-032 S slice. They do not identify the current package,
+which is Schema 33 with the separate readiness migration described in the current-source addendum.
 
 - `032_notification_communications_authority` runs `install_notification_communications_authority()`.
 - `verify_notification_communications_schema()` runs after migration 032, on current-schema

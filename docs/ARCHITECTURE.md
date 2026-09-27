@@ -1,9 +1,11 @@
 # Delnavazan Platform Architecture
 
-> **Current-source reconciliation (2026-09-27):** the integrated operational-readiness candidate is
-> built on `main` / `origin/main` at `6673e7b`, declares **Schema 32** — the Phase-W portal slice
-> (Schema 031) plus the additive Schema-032 Notifications S re-land — and contains the Phase-W portal
-> implementation. This is an implementation/topology fact,
+> **Current-source reconciliation (2026-09-27):** local `main` at `4ccd43c` declares **Schema 33**
+> with the unchanged build `phase2a2s-notification-communications-authority-20260924.1`. Migration
+> `033_core_dataset_technical_prerequisites` is additive on the historical Schema-32 W/S integration
+> and provides five bounded Core-dataset readiness-evidence tables; it is verified before its ledger
+> entry and schema-version advance. The Phase-W portal implementation remains present. This is a
+> checked-in source fact,
 > not a claim that W or S is deployed, publicly enabled or cut over. The three
 > registered W public routes remain exact-option-gated; authenticated portal read ports are internal
 > seams, not current REST endpoints. See [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md).
@@ -42,12 +44,12 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 
 > **Historical current-state override (2026-09-24, retained as provenance; superseded by the 2026-09-27 override):** Platform 0.1.0 `main` was authoritative at Schema 25 after the Phase 2A.2-R1 commercial purchase, funding and current-Term capacity merge and closeout; Phase 2A.2-R2 (Schema 26) is the active, unmerged candidate. Phases 2A.2-A through Q are complete, independently reviewed where consequential, merged and closed; canonical authority therefore covers Lesson identity/lifecycle, canonical scheduling and Teacher capacity (Phase N), provider-neutral exceptional delivery/attendance outcomes with a distinct academy-obligation debt authority (Phase O), Phase-P intake/evidence/assessment/review authority, and the Phase-Q post-intro continuation decision, explicit administrator-authorised first regular slot record and bounded pre-payment hold, integrated into the single canonical Teacher-capacity arbitration seam. Phase 2A.2-R1 (Schema 25, merged and closed) adds only the provider-neutral commercial purchase, offer/pricing snapshot, ordered obligation, funding, Regular recurring pattern and current-Term protected-capacity authority, and still creates no Term, Lesson, schedule, notification or provider authority. Phase 2A.2-R2 (Schema 26, candidate) adds only the cross-Term recurring-enrolment, renewal-cycle, collection-intent, recovery, refund-review and continuous-protection authority above R1; it stops before charge execution, notification delivery, refund academic consequences and provider adapters. Production continuation and attendance cutover, Google/Meet and calendar evidence, OAuth/webhooks/credentials, Amelia, payment execution, notification delivery, payroll, Teacher Portal and Student Portal integration remain outside Platform authority. **No next slice is authorised.** Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) for the exact delivery state.
 
-> Historical note: this override previously recorded the Phase 2A.2-L / Schema 18, Phase 2A.2-M / Schema 20, Phase 2A.2-N / Schema 21, Phase 2A.2-O / Schema 22, Phase 2A.2-P / Schema 23 and Phase 2A.2-Q / Schema 24 states, and later the unmerged Schema-25 Phase-R1 candidate. Those states are historical provenance; the state recorded at that time was Schema 25 on `main` with Schema 26 the then-active Phase-R2 candidate (current `main` is Schema 32).
+> Historical note: this override previously recorded the Phase 2A.2-L / Schema 18, Phase 2A.2-M / Schema 20, Phase 2A.2-N / Schema 21, Phase 2A.2-O / Schema 22, Phase 2A.2-P / Schema 23 and Phase 2A.2-Q / Schema 24 states, and later the unmerged Schema-25 Phase-R1 candidate. Those states are historical provenance; the state recorded at that time was Schema 25 on `main` with Schema 26 the then-active Phase-R2 candidate (current source is Schema 33).
 
-> **Current-state override (2026-09-27):** Platform 0.1.0 `main` is authoritative at **Schema 32**
-> after the Phase 2A.2-R2, V, T, U and W candidate trees and the additive Schema-032 Notifications S
+> **Current-state override (2026-09-27):** Platform 0.1.0 local candidate is at **Schema 33**
+> after the Phase 2A.2-R2, V, T, U and W candidate trees, the historical additive Schema-032 Notifications S
 > re-land were materialised on top of the merged R1 (Schema 25) baseline; `main` / `origin/main` is at
-> `6673e7b` and the package declares build `phase2a2s-notification-communications-authority-20260924.1`
+> `4ccd43c` and the package declares build `phase2a2s-notification-communications-authority-20260924.1`
 > (the W slice's own stamp is `phase2a2w-portal-facing-services-20260927.2`). Phases 2A.2-A through Q are complete, independently
 > reviewed where consequential, merged and closed; R1 is merged and closed; R2/V/T/U/W and the S
 > re-land are present in
@@ -57,7 +59,9 @@ This document preserves the canonical Phase 0 architectural direction, ownership
 > capability routes, internal-only authenticated read seams, and no authenticated portal HTTP surface.
 > There is no Theme or provider authority and no portal outbox write; the additive Schema-032
 > notification slice adds notification storage and the `platform_outbox` extension but activates no
-> delivery or provider, and the Schema-24/25 statements above and below are
+> delivery or provider. Schema 33 additionally records bounded Core-dataset provenance, reconciliation
+> runs/findings, operator commands and append-only corrections; it creates no domain row and performs no
+> backfill. Schema-24/25 and Schema-32 statements above and below are
 > historical provenance. Read [DELNAVAZAN-CORE-CONTINUITY.md](DELNAVAZAN-CORE-CONTINUITY.md) §1.1 for
 > the exact inventory.
 

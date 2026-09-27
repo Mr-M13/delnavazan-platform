@@ -1,16 +1,21 @@
 # Delnavazan Platform Conceptual Data Model
 
-> **Current-source reconciliation (2026-09-27):** the integrated operational-readiness candidate is
-> built on `main` / `origin/main` at `6673e7b` and declares **Schema 32**: Schema 031
+> **Current-source reconciliation (2026-09-27):** local `main` at `4ccd43c` declares **Schema 33**.
+> Historical Schema 32 comprises Schema 031
 > `031_portal_facing_services_principal_authorization` (portal capability roots, capabilities,
 > capability events/commands, public action events and access denials) plus the additive Schema 032
 > `032_notification_communications_authority` (notification workflow/template/snapshot/notification/
 > event/command/attempt/delivery/suppression/tombstone storage and the `platform_outbox` extension).
 > The portal tables are access artefacts;
 > they do not become canonical Lesson, schedule, delivery or attendance truth, and the notification
-> storage is not delivery or provider authority. The precise fields,
+> storage is not delivery or provider authority. Schema 33 migration
+> `033_core_dataset_technical_prerequisites` adds five bounded readiness-evidence tables:
+> `core_dataset_provenance`, `core_dataset_reconciliation_runs`,
+> `core_dataset_reconciliation_findings`, `core_dataset_operator_commands` and
+> `core_dataset_corrections`. It creates no Core domain row or backfill; its migration verifier runs
+> before its ledger entry and schema-option advance. The precise fields,
 > route gates and prohibited data are recorded in the
-> [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). Historical Schema-25/26 state
+> [Portal authorization registry](PORTAL-AUTHORIZATION-REGISTRY.md). Schema-25/26 and Schema-32 state
 > statements below are retained as provenance.
 
 > **Phase 2A.2-U storage (Schema 030, candidate) — not authoritative until independently reviewed and

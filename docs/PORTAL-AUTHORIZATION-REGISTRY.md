@@ -14,15 +14,22 @@ materialises the public rate-limit admission in `PortalPublicActionController` o
 own fixed surface and with its declared fail-open scope. That revision is provenance for the portal rules
 recorded below; it is not the identity of this candidate.
 
-**This candidate declares one package schema and build.** `delnavazan-platform.php` declares
-`DZN_PLATFORM_SCHEMA_VERSION` = **32** and build
-`phase2a2s-notification-communications-authority-20260924.1`, and the W slice's own stamp is
-`phase2a2w-portal-facing-services-20260927.2`. Schema 32 is the additive
-`032_notification_communications_authority` notification slice merged on top of Schema 031: it adds
-notification storage and extends `platform_outbox`, and it changes no portal table, portal rule or portal
-reason code described below. Schema 32 / `phase2a2s-notification-communications-authority-20260924.1` is
-the single current package schema/build of this registry, and the portal rules here are the rules of that
-integrated tree.
+**Current package identity.** `delnavazan-platform.php` declares
+`DZN_PLATFORM_SCHEMA_VERSION` = **33** and build
+`phase2a2s-notification-communications-authority-20260924.1`. Schema 33 adds
+`033_core_dataset_technical_prerequisites`: five bounded readiness-evidence tables
+(`core_dataset_provenance`, `core_dataset_reconciliation_runs`,
+`core_dataset_reconciliation_findings`, `core_dataset_operator_commands` and
+`core_dataset_corrections`). The migration is verified before its completed-ledger record and before the
+schema option advances. It changes no portal table, portal rule or portal reason code described below,
+creates no domain rows and performs no backfill.
+
+**Historical Schema-32 integration identity.** Schema 32 / build
+`phase2a2s-notification-communications-authority-20260924.1` was the additive
+`032_notification_communications_authority` slice on Schema 031. It added notification storage and the
+`platform_outbox` extension, not portal authority. The W slice's own historical candidate stamp remains
+`phase2a2w-portal-facing-services-20260927.2`. These facts are provenance; Schema 32 is not the current
+package schema.
 
 **Authority order (highest first).** A conflict is resolved in this order and never by older prose:
 
