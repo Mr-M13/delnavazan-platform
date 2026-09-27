@@ -52,8 +52,11 @@ WordPress image supplies core to the disposable bind mount.
 
 Copy `.env.example` to `.env` only to choose a different disposable state
 directory, project name, or loopback port. It contains no real credentials.
-The fixed administrator values are local synthetic values and email delivery
-is skipped.
+`runtime/bin/common.sh` sources `.env` before it applies its defaults, so the
+example itself carries the Schema-33 isolation names: copying it unchanged
+keeps this candidate separate from any earlier Schema-32 disposable state
+directory and Compose project. The fixed administrator values are local
+synthetic values and email delivery is skipped.
 
 ## Evidence commands
 
@@ -67,7 +70,10 @@ sourcing still never reaches docker, and that genuinely disposable paths keep
 working. It also re-asserts the offline transport policy (`pull_policy: never`,
 `docker run --pull=never`, `dzn_compose up --pull never`) and that this harness
 targets the Schema 33 the package declares: the fresh-install, retained and diff
-checks all assert Schema 33, and both declared upgrade rehearsals exist.
+checks all assert Schema 33, both declared upgrade rehearsals exist, and no
+Schema-32 isolation name survives anywhere in `runtime/` — the guarded
+copy-to-`.env` workflow is exercised and resolves to the Schema-33 state
+directory, Compose project and network.
 
 For destructive scope the same test proves that `/`, `/tmp`, `/var`, `/var/tmp`,
 `/etc`, `/opt`, `/Users`, the home directory, a directory containing this

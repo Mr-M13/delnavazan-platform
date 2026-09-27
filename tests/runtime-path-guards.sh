@@ -416,6 +416,53 @@ grep -q 'verify-schema33.sh' "$root/runtime/bin/schema-upgrade-rehearsal.sh" || 
 }
 echo 'CHECKED   the harness validates the declared Schema 33 (stored state, retained ledger and both rehearsals)'
 
+# --- the documented `.env` copy workflow must keep the Schema-33 isolation -----
+# `common.sh` sources `.env` *before* it applies its Schema-33 defaults, so an
+# example still naming the Schema-32 state directory or Compose project silently
+# overrides both and points a documented run at a previous Schema-32 disposable
+# environment.  The example must therefore carry the Schema-33 names itself, no
+# Schema-32 isolation name may survive anywhere in the harness, and the
+# documented copy-to-`.env` workflow must still resolve to the Schema-33
+# isolation once it has been sourced.
+stale_env_example="$(grep -rn 'dzn-platform-schema32-local' "$root/runtime" || true)"
+if [ -n "$stale_env_example" ]; then
+  echo 'FAIL: the harness still names the Schema-32 isolation (state directory or Compose project)' >&2
+  echo "$stale_env_example" >&2
+  exit 1
+fi
+grep -q -E '^DZN_RUNTIME_STATE_DIR=/tmp/dzn-platform-schema33-local$' "$root/runtime/.env.example" || {
+  echo 'FAIL: runtime/.env.example does not declare the Schema-33 state directory' >&2
+  exit 1
+}
+grep -q -E '^DZN_COMPOSE_PROJECT=dzn-platform-schema33-local$' "$root/runtime/.env.example" || {
+  echo 'FAIL: runtime/.env.example does not declare the Schema-33 Compose project' >&2
+  exit 1
+}
+
+# The workflow is exercised as data: the example is copied into a private replica
+# of the runtime layout and sourced there, so this test still writes nothing into
+# the shared checkout.  `.env` is sourced ahead of the defaults, so the resolved
+# isolation can only be right when the example itself is right.
+env_replica="$tmp/env-replica"
+mkdir -p "$env_replica/runtime/bin"
+cp "$root/runtime/bin/common.sh" "$env_replica/runtime/bin/common.sh"
+cp "$root/runtime/.env.example" "$env_replica/runtime/.env"
+env_copied="$(env -u DZN_RUNTIME_STATE_DIR -u DZN_COMPOSE_PROJECT -u DZN_PLUGIN_SOURCE \
+  bash -c 'source "$1/runtime/bin/common.sh"; printf "%s\n%s\n%s\n" "$DZN_RUNTIME_STATE_DIR" "$DZN_COMPOSE_PROJECT" "$DZN_NETWORK"' \
+  _ "$env_replica")" || {
+  echo 'FAIL: the documented .env copy workflow does not source cleanly' >&2
+  exit 1
+}
+case "$env_copied" in
+  */dzn-platform-schema33-local$'\n'dzn-platform-schema33-local$'\n'dzn-platform-schema33-local_runtime) ;;
+  *)
+    echo 'FAIL: copying .env.example to .env does not keep the Schema-33 state directory, project and network' >&2
+    printf '%s\n' "$env_copied" >&2
+    exit 1
+    ;;
+esac
+echo 'CHECKED   the documented .env copy workflow keeps the Schema-33 isolation names'
+
 # --- the destructive invariant is also enforced statically --------------------
 outside="$(grep -rn -- 'rm -rf' "$root/runtime/bin" | grep -v '/common.sh:' | grep -v -E ':[0-9]+:[[:space:]]*#' || true)"
 if [ -n "$outside" ]; then
