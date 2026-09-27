@@ -183,6 +183,42 @@ Theme change is involved.
   closed, converging once the pointer is restored. The corruption suite also imports `NotificationRule`,
   which its §5 assertion referenced without the import (a latent fatal in the suite itself).
 
+### Implementation correction round 10 (host review `CORRECTION ROUND 2`, failed candidate `63f6b5b`, tree `abd60da`)
+
+The host review refused the candidate with one blocking finding: `NotificationSupport::instant()` rejected
+every negative Unix second count, although the declared `datetime` domain begins at `1000-01-01`, so a valid
+persisted pre-epoch date could not be derived and failed schedule derivation as
+`schedule_derivation_divergence`, violating the stated datetime-domain invariant. The schema identity, table
+count, migration name and build identity are unchanged, no schema object is added, and no merge, deploy,
+provider activation, external send, Amelia or Theme change is involved.
+
+- **`instant()` accepts the whole declared domain and refuses only what is outside it.**
+  `NotificationSupport::instant()` no longer treats `$seconds < 0` as invalid: it formats the 64-bit integer
+  second count and refuses a result only outside `DATETIME_MIN`…`DATETIME_MAX`
+  (`1000-01-01 00:00:00` … `9999-12-31 23:59:59` UTC), so `-30610224000` resolves to the domain minimum,
+  `-600` to `1969-12-31 23:50:00`, and only `0999-12-31 23:59:59` (one second below the minimum) or a year
+  above `9999` is refused. `addSeconds()` judges its own 64-bit integer-second result by the same
+  full-domain rule, so a pre-epoch base — or an offset that lands before the epoch — derives normally
+  instead of failing closed as a divergence.
+- **The §6.3 step-7 coalesce bucket keeps the contract's `floor(...)` below the epoch.** Opening the domain
+  below 1970 makes a pre-epoch anchor reachable, and `intdiv()` truncates toward zero rather than flooring,
+  so it placed `-600` in bucket `0` where step 7's `floor(anchor_at / (coalesce_window_minutes * 60))` puts
+  it in bucket `-1`. `coalesceBucket()` now returns the exact floor for a negative anchor (identical to
+  `intdiv()` for every anchor at or after the epoch), so the bucket index and the §9 identity stay the
+  declared function.
+- Coverage: `tests/phase-2a2s-contract.php` §16 asserts the domain constants, the absence of the negative
+  refusal, the domain-only refusal and the floor bucket; `tests/phase-2a2s-schedule-derivation-runtime.php`
+  §9 adds the pre-epoch derivation probe — a tier-F version whose frozen lead time places the anchor at
+  `1969-12-31 21:30:00` derives that anchor and its own `1969-12-31 23:00:00` expiry instead of diverging,
+  with the step-7 bucket at `-3` — beside the direct pre-epoch helper probes (`instant(-600)`,
+  `addSeconds('1970-01-01 00:00:00', -600)`, `coalesceBucket('1969-12-31 23:50:00', 60) === '-1'`, and the
+  unchanged `1` bucket at `1970-01-01 01:05:00`) and the domain-boundary probes one second below
+  `1000-01-01` and one second above `9999-12-31`.
+- Verification available here: this correction environment provides no PHP or WordPress runtime, so
+  `tests/phase-2a2s-contract.php` and the runtime suites are updated and reviewed by source but were **not
+  executed here**; the domain arithmetic is proved in 64-bit integer seconds against the contract's declared
+  bounds. No migration was re-run and no schema object, identity or build changed.
+
 ### Implementation correction round 9 (host review `CORRECTION ROUND 7`, failed candidate `465a708`, tree `766ef7b4`)
 
 The host review refused the candidate with one blocking finding: the notification-side retry-audit proof

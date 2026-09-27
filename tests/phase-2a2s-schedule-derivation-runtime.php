@@ -122,4 +122,25 @@ dzn_s_fix_assert($late['state']==='expired'&&$late['failure_reason_code']==='eli
 // 8. A rewritten schedule is a divergence, not a reschedule.
 $wpdb->update($p.'notifications',array('scheduled_for'=>NotificationSupport::addSeconds($now,9999)),array('id'=>(int)$deferred['notification_id']));
 dzn_s_fix_rejected(fn()=>(new NotificationReadService())->one((int)$deferred['notification_id']),'schedule_derivation_divergence','a persisted schedule that no longer reproduces');
+
+// 9. The §6.3 datetime domain is the stored `1000-01-01`…`9999-12-31` range, not the Unix epoch: a
+//    pre-epoch instant inside the domain derives (never refused as a divergence), the step-7 bucket floors
+//    a pre-epoch anchor, and only a result outside the domain is refused.
+dzn_s_fix_assert(NotificationSupport::instant(-600)==='1969-12-31 23:50:00','a pre-epoch second count inside the domain must format as its own instant');
+dzn_s_fix_assert(NotificationSupport::addSeconds('1970-01-01 00:00:00',-600)==='1969-12-31 23:50:00','addSeconds must accept a pre-epoch result inside the domain');
+dzn_s_fix_assert(NotificationSupport::instant(NotificationSupport::seconds('1000-01-01 00:00:00'))==='1000-01-01 00:00:00','the declared domain minimum must round-trip through integer seconds');
+dzn_s_fix_assert(NotificationSupport::instant(NotificationSupport::seconds('1000-01-01 00:00:00')-1)===null,'one second below the declared domain must be refused');
+dzn_s_fix_assert(NotificationSupport::instant(NotificationSupport::seconds('9999-12-31 23:59:59'))==='9999-12-31 23:59:59','the declared domain maximum must round-trip through integer seconds');
+dzn_s_fix_assert(NotificationSupport::instant(NotificationSupport::seconds('9999-12-31 23:59:59')+1)===null,'one second above the declared domain must be refused');
+dzn_s_fix_assert(NotificationSupport::coalesceBucket('1969-12-31 23:50:00',60)==='-1','the step-7 bucket must floor a pre-epoch anchor, never truncate it toward zero');
+dzn_s_fix_assert(NotificationSupport::coalesceBucket('1970-01-01 01:05:00',60)==='1','the step-7 bucket must be unchanged at and after the epoch');
+$preEpochLocal=NotificationSupport::utcToLocal('UTC','1969-12-31 23:50:00');
+dzn_s_fix_assert($preEpochLocal!==null&&$preEpochLocal['date']==='1969-12-31'&&$preEpochLocal['time']==='23:50','a pre-epoch instant must resolve to its own local wall clock');
+$preEpochDerived=NotificationSchedule::derive(NotificationSchedule::validateComposition(array(
+    array('rule_code'=>'lead_time','ordinal'=>1,'parameter_a'=>'90'),array('rule_code'=>'coalesce','ordinal'=>1,'parameter_a'=>'60'),array('rule_code'=>'expiry','ordinal'=>1,'parameter_a'=>'120'),
+),'F'),array('observed_at'=>'1960-01-01 00:00:00','subject_instant'=>'1969-12-31 23:00:00','timezone'=>'','deferral_count'=>0));
+dzn_s_fix_assert($preEpochDerived['schedule_anchor_at']==='1969-12-31 21:30:00','a pre-epoch anchor inside the declared domain must derive its own anchor');
+dzn_s_fix_assert($preEpochDerived['scheduled_for']==='1969-12-31 21:30:00','a pre-epoch anchor must schedule at its own instant instead of diverging');
+dzn_s_fix_assert($preEpochDerived['expires_at']==='1969-12-31 23:00:00','the tier-F expiry must stay the earlier of the announced instant and the frozen window');
+dzn_s_fix_assert($preEpochDerived['coalesce_bucket']==='-3','the coalesce bucket must be floor(anchor_at / width) for a pre-epoch anchor');
 echo "Phase 2A.2-S schedule derivation runtime passed\n";

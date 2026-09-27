@@ -149,14 +149,24 @@ final class NotificationSupport {
         if($instant->format('Y-m-d H:i:s')!==$datetime)return null;
         return $instant->getTimestamp();
     }
-    /** Format integer UTC seconds as a stored instant, refusing the out-of-domain result (§6.3). */
+    /**
+     * Format integer UTC seconds as a stored instant, refusing only a result outside the declared
+     * `datetime` domain (§6.3). That domain begins at `1000-01-01`, not at the Unix epoch, so a
+     * pre-epoch (negative) second count is a valid instant whenever it lands inside the domain; the
+     * only refusals are a result below `DATETIME_MIN` and one above `DATETIME_MAX`.
+     */
     public static function instant(int $seconds):?string{
-        if($seconds<0)return null;
         $formatted=gmdate('Y-m-d H:i:s',$seconds);
+        if($formatted===false||strlen($formatted)!==19)return null;
         if($formatted<self::DATETIME_MIN||$formatted>self::DATETIME_MAX)return null;
         return $formatted;
     }
-    /** Add integer seconds to a stored instant, refusing an out-of-domain intermediate or result. */
+    /**
+     * Add integer seconds to a stored instant, refusing an out-of-domain intermediate or result. The sum
+     * is a 64-bit integer second count judged by the same full-domain rule as `instant()`, so a
+     * pre-epoch base and an offset that lands before the epoch derive normally rather than failing
+     * closed as a divergence.
+     */
     public static function addSeconds(string $datetime,int $seconds):?string{
         $base=self::seconds($datetime);
         if($base===null)return null;
@@ -194,12 +204,20 @@ final class NotificationSupport {
         $local=(new \DateTimeImmutable('@'.$seconds))->setTimezone($zone);
         return array('date'=>$local->format('Y-m-d'),'time'=>$local->format('H:i'),'weekday'=>(int)$local->format('N'));
     }
-    /** §6.3 step 7: the anchor-derived coalesce bucket, or the empty string when no rule is registered. */
+    /**
+     * §6.3 step 7: the anchor-derived coalesce bucket, or the empty string when no rule is registered.
+     * The bucket is `floor(anchor_at / (coalesce_window_minutes * 60))` over the epoch, so a pre-epoch
+     * anchor floors to the bucket below zero; `intdiv()` truncates toward zero, so a negative
+     * non-multiple is corrected by one step. For every anchor at or after the epoch the two agree.
+     */
     public static function coalesceBucket(string $anchorAt,?int $windowMinutes):string{
         if($windowMinutes===null||$windowMinutes<1)return '';
         $seconds=self::seconds($anchorAt);
         if($seconds===null)return '';
-        return (string)intdiv($seconds,$windowMinutes*60);
+        $width=$windowMinutes*60;
+        $bucket=intdiv($seconds,$width);
+        if($seconds<0&&$seconds%$width!==0)$bucket--;
+        return (string)$bucket;
     }
     /** A monotone next sequence number for one append-only history. */
     public static function nextSequence(string $table,string $column,int $id):int{

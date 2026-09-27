@@ -2581,6 +2581,21 @@ execution evidence and deferred product decisions but do not block this contract
 
 ## 19. Correction record
 
+Implementation correction round 10 (host review `CORRECTION ROUND 2`; failed candidate `63f6b5b`, tree
+`abd60da`) — the independent review refused the candidate with one blocking finding: `instant()` refused
+every negative Unix second count (`$seconds < 0`), although §6.3 declares every derived instant over the
+stored `datetime` domain (`1000-01-01 00:00:00` … `9999-12-31 23:59:59` UTC), which begins below the epoch, so
+a valid persisted pre-epoch date failed schedule derivation as `schedule_derivation_divergence`. This entry
+records the **product-code** correction only: no migration identity, table count, migration name, build
+identity or contract rule change is involved — the correction makes the runtime match the datetime domain
+§6.3 already declares — no schema object is added, and no merge, deploy, provider activation, external send,
+Amelia or Theme change is involved. The host ledger numbers this review `CORRECTION ROUND 2` of the current
+implementation attempt; this document's record sequence continues at 10.
+
+| Blocking finding | Fix applied | Sections |
+| --- | --- | --- |
+| `NotificationSupport::instant()` refused every negative Unix second count (`if($seconds<0)return null;`) before it formatted the instant, so a persisted date between `1000-01-01` and `1969-12-31` — inside the domain §6.3 declares and the schema stores — could not be derived: `addSeconds()` returned `null` for it and every schedule path raised `schedule_derivation_divergence`, so the declared and the implemented domain disagreed across the whole pre-epoch range. | The refusal is now the declared domain alone: `instant()` formats the 64-bit integer second count and refuses only a result below `DATETIME_MIN` or above `DATETIME_MAX` (with the declared `YYYY-MM-DD HH:MM:SS` shape required), so `-30610224000` resolves to `1000-01-01 00:00:00` and `-600` to `1969-12-31 23:50:00`, while `0999-12-31 23:59:59` and a year above `9999` are refused; `addSeconds()` applies the same rule to its own 64-bit integer-second sum. The step-7 coalesce bucket was aligned with its own declared formula at the same time, because opening the domain below 1970 makes a pre-epoch anchor reachable: `coalesceBucket()` floors a negative anchor (`intdiv()` truncates toward zero), so `1969-12-31 23:50:00` lands in bucket `-1` where step 7's `floor(anchor_at / (coalesce_window_minutes × 60))` names it — the bucket the §9 identity and the verifier's re-derivation consume — while every anchor at or after the epoch keeps exactly the value it had. Coverage: `tests/phase-2a2s-contract.php` §16 asserts the domain constants, the absence of the negative refusal, the domain-only refusal and the floor bucket; `tests/phase-2a2s-schedule-derivation-runtime.php` §9 derives a tier-F composition whose frozen lead time places the anchor at `1969-12-31 21:30:00` (that anchor, its own `1969-12-31 23:00:00` tier-F expiry and the `-3` floor bucket) beside direct pre-epoch helper probes, the unchanged post-epoch bucket and the boundary probes one second below `1000-01-01` and one second above `9999-12-31`. | §6.3, §6.3(f), §9, §15 |
+
 Implementation correction round 9 (host review `CORRECTION ROUND 7`; failed candidate `465a708`, tree
 `766ef7b4`) — the independent review refused the candidate with one blocking finding: the notification-side
 retry-audit proof required only that the `retry_scheduled` row's predecessor **in the ordered result set**

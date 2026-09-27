@@ -352,4 +352,21 @@ foreach(array(
 if(!str_contains($runtimeSuites,"'a re-arm audit row separated from its queued row by a sequence gap must fail the S verifier'"))throw new RuntimeException('The corruption suite must prove the sequence-gap re-arm pair fails the schema verifier');
 foreach(array('above the frozen retry ceiling','two open attempts','without a failure class') as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The ceiling and class-less coverage must be explicit: '.$needle);
 if(!str_contains(file_get_contents($root.'/tests/phase-2a2s-concurrency-verify.php'),'NotificationIntegrity::retryEvidenceIntegrity('))throw new RuntimeException('The concurrency verifier must prove the retry evidence on both append-only histories');
+
+// 16. The §6.3 datetime domain is the stored `1000-01-01 00:00:00`…`9999-12-31 23:59:59` range, not the
+//     Unix epoch: a pre-epoch (negative) second count inside the domain is a valid instant,
+//     `instant()`/`addSeconds()` refuse only a result outside the domain, and the step-7 coalesce bucket
+//     stays the contract's `floor(anchor_at / width)` below the epoch instead of truncating toward zero.
+if(!str_contains($support,"public const DATETIME_MIN='1000-01-01 00:00:00';")||!str_contains($support,"public const DATETIME_MAX='9999-12-31 23:59:59';"))throw new RuntimeException('The derivation domain must be the stored 1000-01-01 to 9999-12-31 range');
+if(str_contains($support,'if($seconds<0)return null;'))throw new RuntimeException('instant() must not refuse a negative second count: the domain begins at 1000-01-01, not at the Unix epoch');
+if(!str_contains($support,'if($formatted<self::DATETIME_MIN||$formatted>self::DATETIME_MAX)return null;'))throw new RuntimeException('instant() must refuse exactly the results outside the declared datetime domain');
+if(!str_contains($support,'return self::instant($base+$seconds);'))throw new RuntimeException('addSeconds() must judge its 64-bit integer-second result by the same full-domain rule');
+if(!str_contains($support,'if($seconds<0&&$seconds%$width!==0)$bucket--;'))throw new RuntimeException('The step-7 coalesce bucket must floor a pre-epoch anchor rather than truncate it toward zero');
+foreach(array(
+    "NotificationSupport::instant(-600)==='1969-12-31 23:50:00'",
+    "NotificationSupport::coalesceBucket('1969-12-31 23:50:00',60)==='-1'",
+    "NotificationSupport::instant(NotificationSupport::seconds('1000-01-01 00:00:00')-1)===null",
+    "NotificationSupport::instant(NotificationSupport::seconds('9999-12-31 23:59:59')+1)===null",
+    "\$preEpochDerived['coalesce_bucket']==='-3'",
+) as $needle)if(!str_contains($runtimeSuites,$needle))throw new RuntimeException('The schedule suite must prove the full datetime domain and the pre-epoch bucket: '.$needle);
 echo "Phase 2A.2-S contract static test passed\n";
