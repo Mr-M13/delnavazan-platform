@@ -9,8 +9,10 @@
 # guards that describe the current tree: the parse/lint sweep, the Phase-2A.2-W contract guard (which now
 # embeds the §15.6 refusal-versus-failure proof).
 # `tests/phase-opreadiness-core-dataset-contract.php` is the WordPress-free guard for the Schema-033
-# readiness slice: the locked Schema-033 migration, the persisted reconciliation run and the
-# convergent operator replay. It reads the tree only, so it runs in the same cached CLI image.
+# readiness slice: the locked Schema-033 migration, the persisted reconciliation run, the convergent
+# operator replay and the fail-closed projection read. It reads the tree and embeds the
+# projection-read failure-injection proof, which stubs `$wpdb` rather than using one, so it runs in
+# the same cached CLI image without WordPress or a database.
 set -euo pipefail
 source "$(dirname "$BASH_SOURCE")/common.sh"
 dzn_require_cached_images; dzn_candidate; dzn_assert_runtime_paths

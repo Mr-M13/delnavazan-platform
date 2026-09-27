@@ -5,8 +5,11 @@
  * WordPress-free: it reads the tree and proves the three reviewed corrections — the Schema-033
  * migration is locked, a reconciliation run is persisted, and an exact operator replay converges —
  * plus the two round-3 corrections — the operator payload binds the evidence-reference digest it
- * stores, and a reconciliation run and its required findings commit in one transaction — so a later
- * edit cannot silently reopen any of them.
+ * stores, and a reconciliation run and its required findings commit in one transaction — and the
+ * round-5 correction, that a failed projection read fails closed without recording evidence — so a
+ * later edit cannot silently reopen any of them. The failure-injection proof of §6
+ * (`phase-opreadiness-core-dataset-projection-failure-unit.php`) is embedded below, so this guard
+ * executes that behaviour as well as the static seams.
  */
 $root=dirname(__DIR__);
 $migrator=file_get_contents($root.'/src/Core/Infrastructure/Migration/Migrator.php');
@@ -61,4 +64,15 @@ dzn_readiness_assert($opened!==false&&$insertRun!==false&&$findings!==false&&$co
 dzn_readiness_assert($opened<$insertRun&&$insertRun<$findings&&$findings<$committed,'The run row and all of its required findings must be written before COMMIT');
 dzn_readiness_assert(str_contains($service,'}catch(\Throwable $e){$wpdb->query(')&&str_contains($service,');throw $e;}'),'A failed run or finding insert must roll the transaction back and rethrow');
 
+// §6 A failed projection read fails closed before the digest is computed and before the transaction opens.
+dzn_readiness_assert(!str_contains($service,'?: array()'),'No projection read may be reconciled with a null-coalescing fallback');
+dzn_readiness_assert(!str_contains($service,'ORDER BY id ASC",ARRAY_A) ?: array()'),'A failed projection read must not be masked as an empty dataset');
+dzn_readiness_assert(str_contains($service,'(string)$wpdb->last_error')&&str_contains($service,'Core reconciliation projection read failed'),'The projection read must preserve and check the query failure state');
+$readFailure=strpos($service,'Core reconciliation projection read failed');
+$digest=strpos($service,"\$actualDigest=hash('sha256'");
+$transaction=strpos($service,'START TRANSACTION');
+dzn_readiness_assert($readFailure!==false&&$digest!==false&&$transaction!==false&&$readFailure<$digest&&$readFailure<$transaction,'A projection-read failure must be thrown before the digest is hashed and before the evidence transaction opens');
+
+if(!defined('DZN_OPREADINESS_PROJECTION_UNIT_EMBEDDED'))define('DZN_OPREADINESS_PROJECTION_UNIT_EMBEDDED',true);
+require __DIR__.'/phase-opreadiness-core-dataset-projection-failure-unit.php';
 echo "Core-dataset readiness contract passed\n";

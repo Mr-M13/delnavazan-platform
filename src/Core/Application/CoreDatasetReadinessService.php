@@ -15,12 +15,18 @@ final class CoreDatasetReadinessService {
      * mismatch evidence survive the request that produced them. Those writes are one transaction — opened
      * before the run row is inserted and held until every required finding is persisted — so a mismatched
      * run never becomes durable without its findings: any failed insert rolls the whole run back.
+     *
+     * The projection read is itself fail-closed: WordPress returns an empty array from `get_results()` for a
+     * failed query while `$wpdb->last_error` carries the failure, so the failure state is preserved and
+     * checked before the digest is computed and before the evidence transaction opens. A read failure is
+     * therefore thrown, never projected: no zero-count digest is hashed and no run or finding row is written.
      */
     public function reconcile(string $scope, int $expectedCount, string $expectedDigest): array {
         if (!in_array($scope,self::SCOPES,true) || $expectedCount < 0 || !preg_match('/^[a-f0-9]{64}$/D',$expectedDigest)) throw new \InvalidArgumentException('Bounded Core reconciliation input required');
         $actor=get_current_user_id(); if($actor<1) throw new \RuntimeException('Core reconciliation actor unavailable');
         global $wpdb; $table=$wpdb->prefix.'dzn_'.self::TABLES[$scope]; $where=$scope==='canonical_lessons' ? " WHERE record_model='canonical_term_lesson_v1'" : ($scope==='teacher_assignments' ? " WHERE state IN ('assigned','replaced')" : '');
-        $startedAt=gmdate('Y-m-d H:i:s'); $rows=$wpdb->get_results("SELECT id,uid,created_by,created_at FROM {$table}{$where} ORDER BY id ASC",ARRAY_A) ?: array();
+        $startedAt=gmdate('Y-m-d H:i:s'); $rows=$wpdb->get_results("SELECT id,uid,created_by,created_at FROM {$table}{$where} ORDER BY id ASC",ARRAY_A); $readFailure=(string)$wpdb->last_error;
+        if(!is_array($rows)||$readFailure!=='')throw new \RuntimeException('Core reconciliation projection read failed'.($readFailure!==''?': '.$readFailure:''));
         $actualCount=count($rows); $actualDigest=hash('sha256',wp_json_encode($rows,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE));
         $match=$expectedCount===$actualCount && hash_equals($expectedDigest,$actualDigest); $completedAt=gmdate('Y-m-d H:i:s');
         $runs=$wpdb->prefix.'dzn_core_dataset_reconciliation_runs';
