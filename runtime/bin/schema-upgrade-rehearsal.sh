@@ -48,4 +48,4 @@ CODE
 compare="${compare/EXPECTED_ARRAY/$expected}"
 dzn_php -r "$compare"
 "$(dirname "$BASH_SOURCE")/verify-schema32.sh"
-echo "Schema $base_schema ($base_ref) -> 32 rehearsal: PASS"
+echo "Schema $base_schema ($base_ref) -> 33 rehearsal: PASS"

@@ -1,11 +1,12 @@
-# Offline Schema-32 disposable runtime
+# Offline Schema-33 disposable runtime
 
-This is the bounded WordPress/MariaDB evidence harness for the Schema-32 integrated
-candidate — Schema 031 (`031_portal_facing_services_principal_authorization`, the
-Phase-2A.2-W portal slice) plus the additive Schema 032
-(`032_notification_communications_authority`, the Phase-2A.2-S notification slice)
-this package declares. It is not a deployment tool and it never reads from, checks
-out, or symlinks the shared checkout into a running WordPress instance.
+This is the bounded WordPress/MariaDB evidence harness for the Schema-33 candidate —
+Schema 031 (`031_portal_facing_services_principal_authorization`, the Phase-2A.2-W
+portal slice), the additive Schema 032 (`032_notification_communications_authority`,
+the Phase-2A.2-S notification slice) and the additive Schema 033
+(`033_core_dataset_technical_prerequisites`, the bounded Core-dataset readiness
+slice) this package declares. It is not a deployment tool and it never reads from,
+checks out, or symlinks the shared checkout into a running WordPress instance.
 
 Every run creates detached Git worktrees beneath `DZN_RUNTIME_STATE_DIR`
 (default: `/tmp/dzn-platform-schema32-local`). Path boundaries are enforced
@@ -65,8 +66,8 @@ escaping the state directory are refused, that a retarget introduced after
 sourcing still never reaches docker, and that genuinely disposable paths keep
 working. It also re-asserts the offline transport policy (`pull_policy: never`,
 `docker run --pull=never`, `dzn_compose up --pull never`) and that this harness
-targets the Schema 32 the package declares: the fresh-install, retained and diff
-checks all assert Schema 32, and both declared upgrade rehearsals exist.
+targets the Schema 33 the package declares: the fresh-install, retained and diff
+checks all assert Schema 33, and both declared upgrade rehearsals exist.
 
 For destructive scope the same test proves that `/`, `/tmp`, `/var`, `/var/tmp`,
 `/etc`, `/opt`, `/Users`, the home directory, a directory containing this
@@ -86,18 +87,21 @@ bin/run-schema31-to-32-rehearsal.sh
 bin/run-pure-tests.sh
 ```
 
-`bin/verify-schema32.sh` is the stored-state check every one of those targets
-ends with. It requires the schema option *and* `DZN_PLATFORM_SCHEMA_VERSION` to
-be `32`, the ledger to carry `031_portal_facing_services_principal_authorization`
-and `032_notification_communications_authority`, the six Schema-031 portal
-tables and the eighteen Schema-032 notification tables to be present, the eleven
-`platform_outbox` columns the Schema-032 slice adds to be present, nullable and
-without a default, the pre-existing `platform_outbox` `status`/`attempt_count`
-contract to be intact, and `dzn_platform_portal_actions` to remain unseeded.
+`bin/verify-schema32.sh` (the file name is historical) is the stored-state check
+every one of those targets ends with. It requires the schema option *and*
+`DZN_PLATFORM_SCHEMA_VERSION` to be `33`, the ledger to carry
+`031_portal_facing_services_principal_authorization`,
+`032_notification_communications_authority` and
+`033_core_dataset_technical_prerequisites`, the six Schema-031 portal tables, the
+eighteen Schema-032 notification tables and the five Schema-033 readiness tables
+to be present, the eleven `platform_outbox` columns the Schema-032 slice adds to
+be present, nullable and without a default, the pre-existing `platform_outbox`
+`status`/`attempt_count` contract to be intact, and
+`dzn_platform_portal_actions` to remain unseeded.
 
 `bin/run-retained-migration.sh` runs the fresh install, repeats
 `Migrator::maybe_upgrade()` against the same database, and requires the ledger
-to be unchanged and complete: `32` recorded migrations at Schema 32.
+to be unchanged and complete: `33` recorded migrations at Schema 33.
 
 `bin/run-pure-tests.sh` runs the guard that needs no WordPress database inside
 the cached CLI image: the parse/lint sweep (`tests/static.php`) and the

@@ -2,7 +2,7 @@ SHELL := /usr/bin/env bash
 BIN := bin
 .PHONY: help check-cache up fresh-install retained migration-30-to-32 migration-31-to-32 pure path-guards regressions concurrency all destroy
 help:
-	@echo "Schema-32 offline disposable runtime"
+	@echo "Schema-33 offline disposable runtime"
 	@echo "State is outside this checkout; images must already be cached."
 check-cache: ; @$(BIN)/check-cache.sh
 up: ; @$(BIN)/up.sh

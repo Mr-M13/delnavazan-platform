@@ -334,19 +334,28 @@ fi
 echo 'CHECKED   every docker run keeps --pull=never and every compose start keeps --pull never'
 
 # --- the harness must validate the schema this package declares -----------------
-# The integrated candidate declares Schema 32, so the stored-state check, the fresh
-# install, the retained migration and both upgrade rehearsals must all target 32, the
-# Schema-032 storage must be asserted, and no check may still demand Schema 31.
+# The package declares Schema 33, so the stored-state check, the fresh install, the
+# retained migration and both upgrade rehearsals must all target 33, the Schema-032
+# notification and Schema-033 readiness storage must be asserted, and no check may
+# still demand Schema 31 or 32 as the current identity.
 grep -q 'dzn-platform-schema32-local' "$root/runtime/bin/common.sh" || {
   echo 'FAIL: the default state directory is not the Schema-32 one' >&2
   exit 1
 }
-grep -q 'expected Schema 32' "$root/runtime/bin/verify-schema32.sh" || {
-  echo 'FAIL: the stored-state check does not require Schema 32' >&2
+grep -q 'expected Schema 33' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not require Schema 33' >&2
   exit 1
 }
 grep -q '032_notification_communications_authority' "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not require the Schema-032 migration' >&2
+  exit 1
+}
+grep -q '033_core_dataset_technical_prerequisites' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not require the Schema-033 migration' >&2
+  exit 1
+}
+grep -q 'core_dataset_reconciliation_runs' "$root/runtime/bin/verify-schema32.sh" || {
+  echo 'FAIL: the stored-state check does not assert the Schema-033 readiness storage' >&2
   exit 1
 }
 grep -q 'failure_reason_code' "$root/runtime/bin/verify-schema32.sh" || {
@@ -361,8 +370,8 @@ grep -q 'verify-schema32.sh' "$root/runtime/bin/run-retained-migration.sh" || {
   echo 'FAIL: the retained migration does not verify Schema 32' >&2
   exit 1
 }
-grep -q "'32|32'" "$root/runtime/bin/run-retained-migration.sh" || {
-  echo 'FAIL: the retained migration does not pin the complete Schema-32 ledger' >&2
+grep -q "'33|33'" "$root/runtime/bin/run-retained-migration.sh" || {
+  echo 'FAIL: the retained migration does not pin the complete Schema-33 ledger' >&2
   exit 1
 }
 for rehearsal in run-schema30-to-32-rehearsal.sh run-schema31-to-32-rehearsal.sh; do
@@ -380,6 +389,14 @@ grep -q 'wp_dzn_notification_privacy_tombstones' "$root/runtime/bin/run-schema31
   echo 'FAIL: the 31->32 rehearsal does not declare the Schema-032 notification tables' >&2
   exit 1
 }
+grep -q 'wp_dzn_core_dataset_reconciliation_runs' "$root/runtime/bin/run-schema30-to-32-rehearsal.sh" || {
+  echo 'FAIL: the 30->32 rehearsal does not declare the Schema-033 readiness tables' >&2
+  exit 1
+}
+grep -q 'wp_dzn_core_dataset_reconciliation_runs' "$root/runtime/bin/run-schema31-to-32-rehearsal.sh" || {
+  echo 'FAIL: the 31->32 rehearsal does not declare the Schema-033 readiness tables' >&2
+  exit 1
+}
 if grep -rn -E 'verify-schema31|run-schema30-to-31|expected Schema 31' "$root/runtime/bin" "$root/runtime/Makefile"; then
   echo 'FAIL: the harness still targets a Schema-31 check' >&2
   exit 1
@@ -393,7 +410,7 @@ case "$pure_list" in *tests/schema-contract.php*) {
   echo 'FAIL: the stale Phase-1 schema guard would abort the acceptance sequence' >&2
   exit 1
 };; esac
-echo 'CHECKED   the harness validates the declared Schema 32 (stored state, retained ledger and both rehearsals)'
+echo 'CHECKED   the harness validates the declared Schema 33 (stored state, retained ledger and both rehearsals)'
 
 # --- the destructive invariant is also enforced statically --------------------
 outside="$(grep -rn -- 'rm -rf' "$root/runtime/bin" | grep -v '/common.sh:' | grep -v -E ':[0-9]+:[[:space:]]*#' || true)"
