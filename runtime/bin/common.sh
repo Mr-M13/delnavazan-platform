@@ -28,8 +28,8 @@ dzn_canonicalize_path(){
   # it once more so an alias introduced after a missing component is also physical.
   realpath -q "$resolved" 2>/dev/null || printf '%s\n' "$resolved"
 }
-DZN_RUNTIME_STATE_DIR="$(dzn_canonicalize_path "${DZN_RUNTIME_STATE_DIR:-/tmp/dzn-platform-schema32-local}")"
-DZN_COMPOSE_PROJECT="${DZN_COMPOSE_PROJECT:-dzn-platform-schema32-local}"
+DZN_RUNTIME_STATE_DIR="$(dzn_canonicalize_path "${DZN_RUNTIME_STATE_DIR:-/tmp/dzn-platform-schema33-local}")"
+DZN_COMPOSE_PROJECT="${DZN_COMPOSE_PROJECT:-dzn-platform-schema33-local}"
 DZN_DB_DIR="$DZN_RUNTIME_STATE_DIR/mariadb"; DZN_WP_DIR="$DZN_RUNTIME_STATE_DIR/wordpress"
 DZN_PLUGIN_WORKTREE="$DZN_RUNTIME_STATE_DIR/candidate"; DZN_BASE30_WORKTREE="$DZN_RUNTIME_STATE_DIR/schema30"; DZN_BASE31_WORKTREE="$DZN_RUNTIME_STATE_DIR/schema31"
 DZN_PLUGIN_SOURCE="$(dzn_canonicalize_path "${DZN_PLUGIN_SOURCE:-$DZN_PLUGIN_WORKTREE}")"

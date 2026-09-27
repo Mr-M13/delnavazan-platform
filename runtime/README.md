@@ -9,7 +9,7 @@ slice) this package declares. It is not a deployment tool and it never reads fro
 checks out, or symlinks the shared checkout into a running WordPress instance.
 
 Every run creates detached Git worktrees beneath `DZN_RUNTIME_STATE_DIR`
-(default: `/tmp/dzn-platform-schema32-local`). Path boundaries are enforced
+(default: `/tmp/dzn-platform-schema33-local`). Path boundaries are enforced
 physically, never lexically. The state directory, the worktree paths
 (`candidate`, `schema30`, `schema31`), the database and WordPress bind mounts and
 `DZN_PLUGIN_SOURCE` are each resolved with `realpath` and refused unless they
@@ -87,7 +87,8 @@ bin/run-schema31-to-32-rehearsal.sh
 bin/run-pure-tests.sh
 ```
 
-`bin/verify-schema32.sh` (the file name is historical) is the stored-state check
+`bin/verify-schema33.sh` is the current stored-state check. `bin/verify-schema32.sh`
+is retained as historical source evidence and is not a current acceptance route.
 every one of those targets ends with. It requires the schema option *and*
 `DZN_PLATFORM_SCHEMA_VERSION` to be `33`, the ledger to carry
 `031_portal_facing_services_principal_authorization`,
@@ -126,26 +127,34 @@ again, and requires:
 
 The `platform_outbox` identity and rows are compared with the eleven added
 Schema-032 columns projected out, because that slice only *adds* nullable
-columns to that one existing table; `verify-schema32.sh` then re-asserts those
+columns to that one existing table; `verify-schema33.sh` then re-asserts those
 columns positively.
 
-Two rehearsals are declared, and each ends by re-running `verify-schema32.sh`:
+Two rehearsals are declared, and each ends by re-running `verify-schema33.sh`:
 
 - `bin/run-schema30-to-32-rehearsal.sh` — Schema 30 from immutable commit
   `86d57606cabcddba15d076edfe14fb4e7257e60f`, upgraded in place by the candidate.
-  The only additions must be the six Schema-031 portal tables and the eighteen
-  Schema-032 notification tables.
+  The only additions must be the six Schema-031 portal tables, the eighteen
+  Schema-032 notification tables, and all five Schema-033 readiness tables:
+  `core_dataset_provenance`, `core_dataset_reconciliation_runs`,
+  `core_dataset_reconciliation_findings`, `core_dataset_operator_commands`, and
+  `core_dataset_corrections`.
 - `bin/run-schema31-to-32-rehearsal.sh` — the integrated Schema 31 base from
   immutable commit `2ab0c71f5cc53ca8aa4241db0b2f7d100de65997` (the portal slice's
   tip the Schema-032 re-land was built on), upgraded in place by the candidate.
-  The only additions must be the eighteen Schema-032 notification tables, and
-  the six Schema-031 portal tables must be untouched.
+  The only additions must be the eighteen Schema-032 notification tables and
+  those same five Schema-033 readiness tables; the six Schema-031 portal tables
+  must be untouched.
 
 The Phase-2A.2-S suites under `tests/` (for example
 `tests/phase-2a2s-migration-runtime.php`) remain that phase's own acceptance
 gates: this harness proves the Schema-032 migration's stored result and its
 upgrade behaviour directly instead of re-driving another phase's runtime suite
-from here.
+from here. The Schema-032 S migration runtime remains a historical regression:
+`run-regressions.sh s` uses immutable commit
+`63f6b5b2eeaeebc194b07103d4a622d3fecf52ca` in its own disposable worktree and
+database, and is never run against or used to verify the current Schema-033
+candidate.
 
 `bin/run-regressions.sh` and `bin/run-concurrency.sh` are opt-in hooks for
 the pre-existing R2, V, T, and U suites. Their immutable refs and historical

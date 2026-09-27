@@ -215,7 +215,7 @@ expect_rejected_match 'state directory that is an ancestor of the home directory
   'must not be a user data directory' \
   guarded HOME="$tmp/fake-home/deeper" DZN_RUNTIME_STATE_DIR="$tmp/fake-home" -- ': sourced'
 expect_accepted 'the documented default state directory' \
-  guarded DZN_RUNTIME_STATE_DIR=/tmp/dzn-platform-schema32-local -- ': sourced'
+  guarded DZN_RUNTIME_STATE_DIR=/tmp/dzn-platform-schema33-local -- ': sourced'
 
 # `docker`, `git`, `rm` and `rmdir` are recorded (and never destructive), so the
 # cleanup command stream itself is the evidence.
@@ -338,36 +338,36 @@ echo 'CHECKED   every docker run keeps --pull=never and every compose start keep
 # retained migration and both upgrade rehearsals must all target 33, the Schema-032
 # notification and Schema-033 readiness storage must be asserted, and no check may
 # still demand Schema 31 or 32 as the current identity.
-grep -q 'dzn-platform-schema32-local' "$root/runtime/bin/common.sh" || {
-  echo 'FAIL: the default state directory is not the Schema-32 one' >&2
+grep -q 'dzn-platform-schema33-local' "$root/runtime/bin/common.sh" || {
+  echo 'FAIL: the default state directory is not the Schema-33 one' >&2
   exit 1
 }
-grep -q 'expected Schema 33' "$root/runtime/bin/verify-schema32.sh" || {
+grep -q 'expected Schema 33' "$root/runtime/bin/verify-schema33.sh" "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not require Schema 33' >&2
   exit 1
 }
-grep -q '032_notification_communications_authority' "$root/runtime/bin/verify-schema32.sh" || {
+grep -q '032_notification_communications_authority' "$root/runtime/bin/verify-schema33.sh" "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not require the Schema-032 migration' >&2
   exit 1
 }
-grep -q '033_core_dataset_technical_prerequisites' "$root/runtime/bin/verify-schema32.sh" || {
+grep -q '033_core_dataset_technical_prerequisites' "$root/runtime/bin/verify-schema33.sh" "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not require the Schema-033 migration' >&2
   exit 1
 }
-grep -q 'core_dataset_reconciliation_runs' "$root/runtime/bin/verify-schema32.sh" || {
+grep -q 'core_dataset_reconciliation_runs' "$root/runtime/bin/verify-schema33.sh" "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not assert the Schema-033 readiness storage' >&2
   exit 1
 }
-grep -q 'failure_reason_code' "$root/runtime/bin/verify-schema32.sh" || {
+grep -q 'failure_reason_code' "$root/runtime/bin/verify-schema33.sh" "$root/runtime/bin/verify-schema32.sh" || {
   echo 'FAIL: the stored-state check does not assert the added outbox columns' >&2
   exit 1
 }
-grep -q 'verify-schema32.sh' "$root/runtime/bin/run-fresh-install.sh" || {
-  echo 'FAIL: the fresh install does not verify Schema 32' >&2
+grep -q 'verify-schema33.sh' "$root/runtime/bin/run-fresh-install.sh" || {
+  echo 'FAIL: the fresh install does not verify current Schema 33' >&2
   exit 1
 }
-grep -q 'verify-schema32.sh' "$root/runtime/bin/run-retained-migration.sh" || {
-  echo 'FAIL: the retained migration does not verify Schema 32' >&2
+grep -q 'verify-schema33.sh' "$root/runtime/bin/run-retained-migration.sh" || {
+  echo 'FAIL: the retained migration does not verify current Schema 33' >&2
   exit 1
 }
 grep -q "'33|33'" "$root/runtime/bin/run-retained-migration.sh" || {
@@ -410,6 +410,10 @@ case "$pure_list" in *tests/schema-contract.php*) {
   echo 'FAIL: the stale Phase-1 schema guard would abort the acceptance sequence' >&2
   exit 1
 };; esac
+grep -q 'verify-schema33.sh' "$root/runtime/bin/schema-upgrade-rehearsal.sh" || {
+  echo 'FAIL: the upgrade rehearsal does not route to current Schema 33 verification' >&2
+  exit 1
+}
 echo 'CHECKED   the harness validates the declared Schema 33 (stored state, retained ledger and both rehearsals)'
 
 # --- the destructive invariant is also enforced statically --------------------

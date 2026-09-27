@@ -2,8 +2,9 @@
 # Prepare one historical suite on its own immutable source tree and empty database.
 set -euo pipefail
 source "$(dirname "$BASH_SOURCE")/common.sh"
-phase="${1:?usage: prepare-historical-suite.sh r2|v|t|u}"
+phase="${1:?usage: prepare-historical-suite.sh s|r2|v|t|u}"
 case "$phase" in
+  s) ref=63f6b5b2eeaeebc194b07103d4a622d3fecf52ca;;
   r2) ref=559b1736621c9ed32e41dd2b785dd0f040dcb647;;
   v) ref=1cb9d16b0beb5bec293b41a065b63ffa5f1318f6;;
   t) ref=b36561dc6bb6e87fd142a28ae67fbc4f2fdc9279;;
