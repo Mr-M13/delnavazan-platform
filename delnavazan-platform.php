@@ -8,7 +8,7 @@
  */
 defined( 'ABSPATH' ) || exit;
 define( 'DZN_PLATFORM_VERSION', '0.1.0' );
-define( 'DZN_PLATFORM_SCHEMA_VERSION', '32' );
+define( 'DZN_PLATFORM_SCHEMA_VERSION', '33' );
 // Package-stamped runtime-validation identity. This is deliberately explicit
 // because production packages do not include Git metadata.
 define( 'DZN_PLATFORM_BUILD_ID', 'phase2a2s-notification-communications-authority-20260924.1' );
@@ -29,6 +29,7 @@ Delnavazan\Platform\Admin\Diagnostic\NonceLifecycleDiagnostic::register();
 register_activation_hook( __FILE__, array( 'Delnavazan\\Platform\\Core\\Infrastructure\\Migration\\Migrator', 'on_activation' ) );
 add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::maybe_upgrade();
+	Delnavazan\Platform\Core\Infrastructure\Migration\Migrator::ensure_core_dataset_technical_prerequisites();
 	Delnavazan\Platform\Admin\Controller\Menu::register();
 	Delnavazan\Platform\Admin\Controller\PaymentExecutionController::register();
 	Delnavazan\Platform\Admin\Controller\FinancePolicyController::register();
@@ -36,6 +37,7 @@ add_action( 'plugins_loaded', static function () {
 	Delnavazan\Platform\Admin\Controller\FinancePayabilityController::register();
 	Delnavazan\Platform\Admin\Controller\FinanceStatementController::register();
 	Delnavazan\Platform\Admin\Controller\FinanceReconciliationController::register();
+	Delnavazan\Platform\Admin\Controller\CoreDatasetReadinessController::register();
 	Delnavazan\Platform\Admin\Controller\PortalCapabilityController::register();
 	Delnavazan\Platform\Portals\PortalOwnerPorts::configureCapability(new Delnavazan\Platform\Core\Application\CanonicalLessonPortalCapabilityOwner());
 	require_once DZN_PLATFORM_DIR . 'src/Core/Application/PortalOwnerReadPorts.php';
