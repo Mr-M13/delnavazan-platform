@@ -12,6 +12,27 @@ The readiness service provides a read-only-over-domain, deterministic expected-v
 
 Durable actor/provenance is recorded only for future evidence. Existing rows remain untouched, including nullable historical actor fields. No value is inferred for a missing actor or source.
 
+## Authenticated Core operator entrypoint
+
+The **Core dataset readiness** submenu is the intended authenticated admin/operator entrypoint. Its
+pre-render `load-$hook` handler accepts only the following nonce-bound POST commands, each behind the
+authority's existing narrow capability:
+
+| Command | Existing authority | Required capability | Readiness receipt |
+| --- | --- | --- | --- |
+| Convert accepted Service Arrangement | `EnrolmentConversionService::convert()` | `dzn_convert_service_arrangements_to_enrolments` | `enrolment_conversion` |
+| Assign initial Teacher | `TeacherAssignmentService::assignInitial()` | `dzn_manage_teacher_assignments` | `initial_teacher_assignment` |
+| Issue standard canonical Lesson | `CanonicalLessonAuthorityService::createStandard()` | `dzn_manage_canonical_lessons` | `canonical_lesson_issuance` |
+
+The handler rejects an actor without the operation's exact capability with HTTP 403 before nonce
+verification or a domain call. The action-bound admin nonce is then verified before dispatch. The same
+capability is checked again by the wrapper and by its owning authority. On success the wrapper records a
+`CoreDatasetReadinessService::recordOperation()` receipt with `operator_entrypoint`, the operator-supplied
+evidence-reference digest, command-key binding and the domain result id; the receipt id is returned in the
+post/redirect/get notice. The entrypoint adds no REST route, provider call, credential use, data seed,
+deployment or cutover path. It does not make `recordCorrection()` a domain command: corrections remain
+append-only evidence of a separately executed audited authority command.
+
 ## Rehearsal
 
 1. Use a disposable Schema-31/32 database snapshot and record its tree/SHA.
