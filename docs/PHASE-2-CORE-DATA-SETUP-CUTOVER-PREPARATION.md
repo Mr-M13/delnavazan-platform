@@ -100,6 +100,6 @@ Completion of Phase 2 does **not** itself authorise production cutover or Amelia
 ## Immediate next actions
 
 1. Freeze Navazan V1 as historical orchestration infrastructure; preserve state/evidence, do not delete it.
-2. Build the minimum seed-inventory template from current Platform entities and required fields.
+2. Build the minimum seed-inventory template from current Platform entities and required fields. **DONE — see `PHASE-2-SEED-INVENTORY-TEMPLATE.md`.**
 3. Produce a hosting/staging requirements matrix and compare self-managed VPS, managed VPS and managed WordPress hosting before purchase.
-4. Prepare the staging installation/runbook so provisioning can start immediately after Hamed selects hosting.
+4. Prepare the staging installation/runbook so provisioning can start immediately after Hamed selects hosting. **DONE — see `PHASE-2-STAGING-REQUIREMENTS-AND-RUNBOOK.md`.**
