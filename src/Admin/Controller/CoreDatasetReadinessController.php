@@ -224,7 +224,7 @@ final class CoreDatasetReadinessController {
         echo '<h2>' . esc_html( $title ) . '</h2><form method="post">';
         wp_nonce_field( 'dzn_core_dataset_' . $action );
         echo '<input type="hidden" name="dzn_action" value="' . esc_attr( $action ) . '">';
-        foreach ( $fields as array( $name, $label ) ) {
+        foreach ( $fields as [ $name, $label ] ) {
             echo '<p><label>' . esc_html( $label ) . '<br><input class="regular-text" name="' . esc_attr( $name ) . '" required></label></p>';
         }
         submit_button( 'Execute authorised command' );
