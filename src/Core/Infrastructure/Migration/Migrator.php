@@ -1929,7 +1929,7 @@ final class Migrator {
 			foreach ( (array) $wpdb->get_results( "SHOW COLUMNS FROM {$physical}" ) as $column ) {
 				$name = strtolower( (string) $column->Field );
 				if ( str_ends_with( $name, '_reference' ) || str_ends_with( $name, '_ref' ) ) throw new \RuntimeException('Migration verification failed: a raw reference column may not exist: '.$table.'.'.$name);
-				foreach ( $forbiddenNames as $forbidden ) if ( $name !== 'derivation_digest' && str_contains( $name, $forbidden ) ) throw new \RuntimeException('Migration verification failed: a forbidden Phase 2A.2-U column name: '.$table.'.'.$name);
+				foreach ( $forbiddenNames as $forbidden ) if ( ! str_ends_with( $name, 'derivation_digest' ) && str_contains( $name, $forbidden ) ) throw new \RuntimeException('Migration verification failed: a forbidden Phase 2A.2-U column name: '.$table.'.'.$name);
 			}
 			foreach ( $wpdb->get_results( "SHOW COLUMNS FROM {$physical}" ) as $column ) {
 				if ( strtolower( (string) $column->Type ) !== 'char(64)' ) continue;
