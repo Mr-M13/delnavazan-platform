@@ -1104,11 +1104,11 @@ final class Migrator {
 				created_by bigint unsigned NOT NULL,
 				updated_at datetime NOT NULL,
 				updated_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY teacher_sequence(provider_code,teacher_id,lifecycle_sequence),
-				UNIQUE KEY active_connection(provider_code,teacher_id,active_slot),
-				KEY teacher_connection(teacher_id,connection_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY teacher_sequence (provider_code,teacher_id,lifecycle_sequence),
+				UNIQUE KEY active_connection (provider_code,teacher_id,active_slot),
+				KEY teacher_connection (teacher_id,connection_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}integration_credentials (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1126,10 +1126,10 @@ final class Migrator {
 				revoked_at datetime NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY connection_sequence(connection_id,credential_sequence),
-				KEY connection_credential(connection_id,state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY connection_sequence (connection_id,credential_sequence),
+				KEY connection_credential (connection_id,state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}integration_oauth_authorizations (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1151,11 +1151,11 @@ final class Migrator {
 				failure_reason_code varchar(64) NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY state_digest(state_digest),
-				KEY connection_authorization(connection_id,authorization_state),
-				KEY teacher_authorization(provider_code,teacher_id,authorization_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY state_digest (state_digest),
+				KEY connection_authorization (connection_id,authorization_state),
+				KEY teacher_authorization (provider_code,teacher_id,authorization_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_identity_mappings (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1176,10 +1176,10 @@ final class Migrator {
 				recorded_by bigint unsigned NOT NULL,
 				updated_at datetime NOT NULL,
 				updated_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY provider_subject(provider_code,subject_digest,active_slot),
-				KEY teacher_identity(teacher_id,mapping_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY provider_subject (provider_code,subject_digest,active_slot),
+				KEY teacher_identity (teacher_id,mapping_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_calendar_event_mappings (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1205,11 +1205,11 @@ final class Migrator {
 				recorded_by bigint unsigned NOT NULL,
 				updated_at datetime NOT NULL,
 				updated_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY lesson_version(lesson_id,schedule_version_id,active_slot),
-				UNIQUE KEY provider_event(provider_code,event_digest,active_slot),
-				KEY calendar_lesson(lesson_id,projection_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY lesson_version (lesson_id,schedule_version_id,active_slot),
+				UNIQUE KEY provider_event (provider_code,event_digest,active_slot),
+				KEY calendar_lesson (lesson_id,projection_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_meeting_mappings (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1236,11 +1236,11 @@ final class Migrator {
 				recorded_by bigint unsigned NOT NULL,
 				updated_at datetime NOT NULL,
 				updated_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY lesson_version(lesson_id,schedule_version_id,active_slot),
-				UNIQUE KEY provider_conference(provider_code,conference_digest,active_slot),
-				KEY meeting_lesson(lesson_id,projection_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY lesson_version (lesson_id,schedule_version_id,active_slot),
+				UNIQUE KEY provider_conference (provider_code,conference_digest,active_slot),
+				KEY meeting_lesson (lesson_id,projection_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_ingest_events (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1265,11 +1265,11 @@ final class Migrator {
 				proof_reference_digest char(64) NOT NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY provider_event(provider_code,provider_event_key_digest),
-				UNIQUE KEY event_sequence(provider_code,event_sequence),
-				KEY lesson_event(lesson_id,processing_state)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY provider_event (provider_code,provider_event_key_digest),
+				UNIQUE KEY event_sequence (provider_code,event_sequence),
+				KEY lesson_event (lesson_id,processing_state)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_ingest_outcomes (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1285,10 +1285,10 @@ final class Migrator {
 				recorded_by bigint unsigned NOT NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY handoff_sequence(provider_ingest_event_id,handoff_attempt),
-				KEY event_outcome(provider_ingest_event_id,outcome)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY handoff_sequence (provider_ingest_event_id,handoff_attempt),
+				KEY event_outcome (provider_ingest_event_id,outcome)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_event_conflicts (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1305,10 +1305,10 @@ final class Migrator {
 				recorded_by bigint unsigned NOT NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY conflict_identity(provider_code,provider_event_key_digest,conflicting_fact_digest),
-				KEY lesson_conflict(lesson_id,conflict_kind)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY conflict_identity (provider_code,provider_event_key_digest,conflicting_fact_digest),
+				KEY lesson_conflict (lesson_id,conflict_kind)
 			) ENGINE=InnoDB $c",
 			"CREATE TABLE {$p}provider_integration_commands (
 				id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -1327,11 +1327,11 @@ final class Migrator {
 				result_id bigint unsigned NULL,
 				created_at datetime NOT NULL,
 				created_by bigint unsigned NOT NULL,
-				PRIMARY KEY(id),
-				UNIQUE KEY uid(uid),
-				UNIQUE KEY command_key_digest(command_key_digest),
-				KEY teacher_operation(teacher_id,operation),
-				KEY lesson_operation(lesson_id,operation)
+				PRIMARY KEY  (id),
+				UNIQUE KEY uid (uid),
+				UNIQUE KEY command_key_digest (command_key_digest),
+				KEY teacher_operation (teacher_id,operation),
+				KEY lesson_operation (lesson_id,operation)
 			) ENGINE=InnoDB $c",
 		);
 		foreach ( $tables as $sql ) { dbDelta( $sql ); if ( $wpdb->last_error !== '' ) throw new \RuntimeException('Migration operation failed: ' . $wpdb->last_error); }
