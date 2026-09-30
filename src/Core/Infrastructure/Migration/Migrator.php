@@ -1919,9 +1919,11 @@ final class Migrator {
 				if ( $name === 'reference_code' && $hasReference ) continue;
 				throw new \RuntimeException('Migration verification failed: undeclared Phase 2A.2-U column: '.$table.'.'.$name);
 			}
-			foreach ( array('updated_at','updated_by','active_slot','status','state','superseded_at','superseded_by_statement_id','superseded_by_correction_id','superseded_by_evaluation_id','issued_at','issued_by','resolved_at','resolved_by','resolution_note','effective_until','result_evaluation_id') as $mutableColumn ) {
-				if ( ! $wpdb->get_row( "SHOW COLUMNS FROM {$physical} LIKE '{$mutableColumn}'" ) ) continue;
-				if ( ! in_array( $mutableColumn, $mutable[$table] ?? array(), true ) ) throw new \RuntimeException('Migration verification failed: an undeclared mutable column: '.$table.'.'.$mutableColumn);
+			if ( ! in_array( $table, $appendOnly, true ) ) {
+				foreach ( array('updated_at','updated_by','active_slot','status','state','superseded_at','superseded_by_statement_id','superseded_by_correction_id','superseded_by_evaluation_id','issued_at','issued_by','resolved_at','resolved_by','resolution_note','effective_until','result_evaluation_id') as $mutableColumn ) {
+					if ( ! $wpdb->get_row( "SHOW COLUMNS FROM {$physical} LIKE '{$mutableColumn}'" ) ) continue;
+					if ( ! in_array( $mutableColumn, $mutable[$table] ?? array(), true ) ) throw new \RuntimeException('Migration verification failed: an undeclared mutable column: '.$table.'.'.$mutableColumn);
+				}
 			}
 			if ( in_array( $table, $appendOnly, true ) && ( $wpdb->get_row( "SHOW COLUMNS FROM {$physical} LIKE 'updated_at'" ) || $wpdb->get_row( "SHOW COLUMNS FROM {$physical} LIKE 'updated_by'" ) ) ) throw new \RuntimeException('Migration verification failed: Phase 2A.2-U evidence must be append-only: '.$table);
 			foreach ( (array) $wpdb->get_results( "SHOW COLUMNS FROM {$physical}" ) as $column ) {
