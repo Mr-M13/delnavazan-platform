@@ -1908,7 +1908,8 @@ sites every other phase verifier uses — and rejects:
 5. a column outside the declared set whose name ends in `_reference` or `_ref` (only the declared
    `reference_code` and `*_reference_digest` forms may exist), and any column matching `%card%`,
    `%iban%`, `%pan%`, `%cvc%`, `%bank%`, `%account_number%`, `%tax%`, `%vat%`, `%payout%`,
-   `%invoice%`, `%journal%`, `%ledger%` or `%plaintext%`;
+   `%invoice%`, `%journal%`, `%ledger%` or `%plaintext%`; the declared `derivation_digest` field is
+   explicitly exempt because the word `derivation` incidentally contains the substring `vat`;
 6. any smuggled table (`finance_lessons`, `finance_terms`, `finance_attendance`,
    `finance_notifications`, `finance_payments`, `finance_ledger`, `finance_invoices`,
    `finance_payouts`, `finance_prices`);
