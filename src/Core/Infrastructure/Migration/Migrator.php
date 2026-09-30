@@ -982,7 +982,7 @@ final class Migrator {
 		$status = $wpdb->get_row("SHOW COLUMNS FROM {$outbox} LIKE 'status'");
 		if ( ! $status || strtolower( $status->Type ) !== 'varchar(16)' || $status->Null !== 'NO' ) throw new \RuntimeException('Migration verification failed: platform_outbox status contract');
 		$attempts = $wpdb->get_row("SHOW COLUMNS FROM {$outbox} LIKE 'attempt_count'");
-		if ( ! $attempts || strtolower( $attempts->Type ) !== 'smallint unsigned' ) throw new \RuntimeException('Migration verification failed: platform_outbox attempt counter');
+		if ( ! $attempts || preg_match( '/^smallint(?:\\(\\d+\\))? unsigned$/', strtolower( (string) $attempts->Type ) ) !== 1 ) throw new \RuntimeException('Migration verification failed: platform_outbox attempt counter');
 		if ( $wpdb->get_row("SHOW COLUMNS FROM {$outbox} LIKE 'updated_at'") ) throw new \RuntimeException('Migration verification failed: platform_outbox must not gain updated_at');
 		foreach ( array('stripe','google','paypal','webhook','provider_template','raw_payload') as $forbidden ) if ( $wpdb->get_row( "SHOW COLUMNS FROM {$outbox} LIKE '%{$forbidden}%'" ) ) throw new \RuntimeException('Migration verification failed: platform_outbox must stay provider-neutral: '.$forbidden);
 		foreach ( array('notification_id','workflow_key','workflow_version','intent_key','audience','scheduled_for','expires_at','deferral_count','priority','lease_token_digest','failure_reason_code') as $column ) {
